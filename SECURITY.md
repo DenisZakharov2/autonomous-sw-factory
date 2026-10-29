@@ -40,15 +40,26 @@ Out of scope:
 - the unsiged hash chain being rewritable by a writer who recomputes it — this
   is a documented limitation, not a surprise.
 
-## Controls in `0.1.0`
+## Controls in `0.1.1`
 
 - strict run-id regex and resolved-path checks;
 - `fcntl.flock` around journal writes;
 - state anchor (`last_event_hash`, `event_count`);
 - semantic `PASS` check at append and verify time;
+- gate decisions accepted only from the declared approver, on approve and on reject;
+- task submits checked against the task owner, the task id and `allowed_files`;
+- stage submits checked against the declared artifact owner;
 - fail-closed SkillSpector gate and directory hash lock;
 - `.gitignore` excludes `runs/`, `.env`, keys and quarantine;
 - no secrets are read by the engine.
+
+### What the role checks are not
+
+`--role` and `--approver` are strings typed on the command line. Owner,
+approver and `allowed_files` checks enforce the protocol and catch mistakes;
+they are not authentication and not RBAC. A caller who can run `factory` can
+type any role name. Real isolation needs a trusted runner that resolves the
+role from its own context, plus a signed checkpoint outside `runs/`.
 
 ## Residual risk
 

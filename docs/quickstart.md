@@ -12,7 +12,7 @@ factory --version
 factory doctor
 ```
 
-Ожидаемо: `factory 0.1.0`, `DOCTOR OK`, 22 роли, 13 стадий, 38 шаблонов, 9 схем.
+Ожидаемо: `factory 0.1.1`, `DOCTOR OK`, 22 роли, 13 стадий, 38 шаблонов, 9 схем.
 
 ## 2. Новый прогон
 
@@ -57,6 +57,7 @@ factory verify --run-id nano-todo --stage s9_learn --require-gate
 
 FACTORY_RUNS_ROOT="$PWD/examples" factory trace --run-id nano-todo
 FACTORY_RUNS_ROOT="$PWD/examples" factory metrics --run-id nano-todo
+FACTORY_RUNS_ROOT="$PWD/examples" factory budget --run-id nano-todo
 python -m unittest discover -s examples/nano-todo/product/tests -v
 ```
 
@@ -72,7 +73,7 @@ python -m unittest discover -s examples/nano-todo/product/tests -v
 | `REQ parity failed` | `spec.md` и `spec-human.md` расходятся | Выровнять набор `REQ-###` |
 | `Producer != Verifier` | Продюсер пытается записать `PASS` | `PASS` ставит только `02` |
 | `BLOCK_INCOMPLETE` | Скан скилла неполный | Повторить с LLM/провайдером или не устанавливать |
-| `state.json ... mismatch` | Ручная правка или усечение | Не править вручную; `factory log verify` |
+| `state.json ... mismatch` | Ручная правка или усечение | Не править вручную; `factory log verify --run-id <id>` |
 
 ## 7. Что дальше
 

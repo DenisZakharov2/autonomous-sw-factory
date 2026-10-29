@@ -1,10 +1,21 @@
+import argparse
 import re
 from pathlib import Path
 
 from factory import __version__
+from factory.cli import build_parser
 from factory.config import load_artifacts
 
 ROOT = Path(__file__).resolve().parent.parent
+EXCLUDED_DIRS = {".git", ".venv", ".pytest_cache", ".ruff_cache", "build", "dist", "runs"}
+
+
+def markdown_files() -> list[Path]:
+    return sorted(
+        path
+        for path in ROOT.rglob("*.md")
+        if not EXCLUDED_DIRS & set(path.relative_to(ROOT).parts)
+    )
 
 
 def test_version_is_single_source():
@@ -36,17 +47,56 @@ def test_every_registered_artifact_has_a_template_or_is_a_directory():
 
 def test_markdown_links_are_not_broken():
     missing = []
-    for path in list(ROOT.glob("*.md")) + list((ROOT / "docs").rglob("*.md")):
+    for path in markdown_files():
         text = path.read_text(encoding="utf-8")
         for match in re.finditer(r"\[[^\]]+\]\(([^)]+)\)", text):
             target = match.group(1).split("#")[0]
             if not target or target.startswith(("http", "mailto:", "#")):
                 continue
             if not (path.parent / target).resolve().exists():
-                missing.append((path.name, target))
+                missing.append((path.relative_to(ROOT).as_posix(), target))
     assert missing == []
 
 
 def test_readme_does_not_claim_full_autonomy():
     text = (ROOT / "README.md").read_text(encoding="utf-8").lower()
     assert "не «полностью автономная фабрика" in text or "не полностью автономная" in text
+
+
+def _subcommands() -> set[str]:
+    parser = build_parser()
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return set(action.choices)
+    return set()
+
+
+def documented_commands() -> set[str]:
+    """`factory <subcommand>` lines inside fenced code blocks only."""
+    pattern = re.compile(r"^(?:\$ )?factory ([a-z][a-z-]*)\b")
+    found: set[str] = set()
+    for path in markdown_files():
+        in_fence = False
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.strip().startswith("```"):
+                in_fence = not in_fence
+                continue
+            if not in_fence:
+                continue
+            match = pattern.match(line.strip())
+            if match:
+                found.add(match.group(1))
+    return found
+
+
+def test_documented_factory_commands_exist():
+    known = _subcommands()
+    assert known, "the CLI parser exposes no subcommands"
+    unknown = sorted(documented_commands() - known)
+    assert unknown == [], f"documented commands missing from the CLI: {unknown}"
+
+
+def test_docs_cover_the_main_commands():
+    documented = documented_commands()
+    for command in ("doctor", "init", "submit", "verify", "gate", "task", "quarantine"):
+        assert command in documented, f"no code example for `factory {command}`"

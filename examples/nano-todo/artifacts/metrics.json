@@ -4,7 +4,7 @@
   "first_pass_rate": 1.0,
   "rework_rate": 0.0,
   "escaped_defect_rate": null,
-  "cycle_time_p50_minutes": 0.02,
+  "cycle_time_p50_minutes": 0.03,
   "cycle_time_p90_minutes": 0.03,
   "cost_per_artifact_usd": null,
   "top_reject_reasons": [],

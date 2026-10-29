@@ -197,7 +197,7 @@ stages:
       id: gate_s3
       approver: "02-independent-verifier"
       blocking: true
-      evidence: ["factory tasks import --from plan.md", "factory verify --stage s3_plan"]
+      evidence: ["factory task import --run-id <id>", "factory verify --stage s3_plan"]
     max_attempts: 3
     rework_to: s3_plan
 

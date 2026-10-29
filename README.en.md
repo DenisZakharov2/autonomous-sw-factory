@@ -2,6 +2,8 @@
 
 **Version 0.1.0-preview.** An executable, stage-gated software factory kit with an independent verifier and a hash-chained flight recorder. It is not a swarm of 22 thinking agents: the engine issues work orders and validates artifacts; a host runtime (Hermes, Claude Code, OpenCode, Cursor) or a human executes the roles.
 
+[![CI](https://github.com/DenisZakharov2/autonomous-sw-factory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/DenisZakharov2/autonomous-sw-factory/actions/workflows/ci.yml) · [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 [Русский README](README.md) · [License](LICENSE) · [Reference run](examples/nano-todo/)
 
 ## What you get

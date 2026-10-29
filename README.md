@@ -2,6 +2,8 @@
 
 **Версия 0.1.0-preview.** Это исполнимый kit для стадийной разработки ПО с независимой проверкой, а не «полностью автономная фабрика из 22 думающих агентов». Движок выдаёт work orders, проверяет артефакты и ведёт журнал; роли исполняет хост-рантайм (Hermes, Claude Code, OpenCode, Cursor) или человек.
 
+[![CI](https://github.com/DenisZakharov2/autonomous-sw-factory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/DenisZakharov2/autonomous-sw-factory/actions/workflows/ci.yml) · [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 [English README](README.en.md) · [Лицензия](LICENSE) · [Пример прогона](examples/nano-todo/) · [Аудит](AUDIT.md)
 
 ---

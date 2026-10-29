@@ -120,3 +120,19 @@ def test_brownfield_starts_at_s_in(tmp_path):
     status = json.loads(cli("status", "--run-id", "legacy", "--json", runs_root=tmp_path).stdout)
     assert status["current_stage"] == "s_in"
     assert status["restore_drill_passed"] is False
+
+
+def test_next_exits_one_when_the_stage_is_escalated(tmp_path):
+    assert cli("init", "--run-id", "demo", "--mode", "nano", runs_root=tmp_path).returncode == 0
+    for attempt in range(3):
+        rejected = cli(
+            "gate", "reject", "--run-id", "demo", "--gate", "gate_s00",
+            "--approver", "human:reviewer", "--evidence", f"reject {attempt}",
+            runs_root=tmp_path,
+        )
+        assert rejected.returncode == 0, rejected.stderr
+    result = cli("next", "--run-id", "demo", runs_root=tmp_path)
+    assert result.returncode == 1
+    order = json.loads(result.stdout)
+    assert order["action"] == "blocked"
+    assert order["stage"] == "s00_intake"

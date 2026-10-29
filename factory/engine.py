@@ -229,6 +229,70 @@ def _stage_work_order(
     }
 
 
+def _reset_rework_chain(
+    state: dict[str, Any],
+    pipeline: dict[str, Any],
+    target_id: str,
+    from_stage: dict[str, Any],
+) -> None:
+    """Reopen the rework target and every stage between it and the rejected one."""
+    target = next(stage for stage in pipeline["stages"] if stage["id"] == target_id)
+    for stage in pipeline["stages"]:
+        if stage["id"] == from_stage["id"]:
+            # Keep the rejected gate record as the audit trail of the decision;
+            # only the stage is reopened, and its attempts already counted.
+            state["stage_status"][stage["id"]] = "pending"
+            continue
+        if stage["id"] == target_id:
+            state["stage_status"][stage["id"]] = "in_progress"
+        elif target["order"] < stage["order"] < from_stage["order"]:
+            state["stage_status"][stage["id"]] = "pending"
+        else:
+            continue
+        gate = stage_gate(state, stage)
+        gate["status"] = "pending"
+        gate["decided_by"] = None
+        gate["decided_at"] = None
+        gate["evidence"] = []
+
+
+def _blocked_reason(state: dict[str, Any], stage: dict[str, Any]) -> tuple[str, str | None]:
+    status = state["stage_status"].get(stage["id"])
+    if status in {"escalated", "blocked"}:
+        return f"stage {stage['id']} is {status}", None
+    for task in state["tasks"].values():
+        if task.get("stage") == stage["id"] and task["status"] in {"escalated", "blocked"}:
+            return f"task {task['task_id']} is {task['status']}", str(task["task_id"])
+    return "", None
+
+
+def _blocked_work_order(
+    run_id: str,
+    stage: dict[str, Any],
+    reason: str,
+    task_id: str | None,
+    pipeline: dict[str, Any],
+    state: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "schema_version": "1.0.0",
+        "action": "blocked",
+        "run_id": run_id,
+        "stage": stage["id"],
+        "stage_title": stage["title"],
+        "roles": effective_roles(pipeline, state["mode"], stage),
+        "task_id": task_id,
+        "artifacts": [],
+        "instructions": (
+            f"Human decision required: {reason}. Review the journal with "
+            f"`factory log show --run-id {run_id}`, then accept the risk with an "
+            "explicit RISK_ACCEPTANCE event or reset the stage."
+        ),
+        "gate": stage["gate"],
+        "next_command": f"factory status --run-id {run_id} --json",
+    }
+
+
 def next_action(run_id: str, *, root: str | Path | None = None) -> dict[str, Any]:
     run_dir = safe_run_dir(run_id, root)
     state = load_state(run_dir)
@@ -249,6 +313,9 @@ def next_action(run_id: str, *, root: str | Path | None = None) -> dict[str, Any
             "gate": None,
             "next_command": f"factory metrics --run-id {run_id}",
         }
+    blocked, blocked_task = _blocked_reason(state, stage)
+    if blocked:
+        return _blocked_work_order(run_id, stage, blocked, blocked_task, pipeline, state)
     gate = stage_gate(state, stage)
     if gate.get("status") == "approved":
         state["stage_status"][stage["id"]] = "accepted"
@@ -396,6 +463,15 @@ def gate_reject(
     if gate["attempts"] >= stage["max_attempts"]:
         state["stage_status"][stage["id"]] = "escalated"
         state["veto_counters"][stage["id"]] = state["veto_counters"].get(stage["id"], 0) + 1
+        summary = (
+            f"Gate {gate_id} rejected by {approver}; "
+            f"{gate['attempts']}/{stage['max_attempts']} attempts exhausted, escalated to human"
+        )
+    else:
+        if stage["rework_to"] != stage["id"]:
+            _reset_rework_chain(state, pipeline, stage["rework_to"], stage)
+        summary = f"Gate {gate_id} rejected by {approver}; rework returned to {stage['rework_to']}"
+    current_stage(state, pipeline)
     save_state(run_dir, state)
     model = resolve_model("tier-2-balanced")
     role = "00-orchestrator" if approver.startswith("human:") else approver
@@ -406,8 +482,8 @@ def gate_reject(
         role=role,
         event_type="GATE_DECISION",
         why=f"Gate {gate_id} rejected",
-        for_what=f"Rework {stage['id']}",
-        action=f"Gate {gate_id} rejected by {approver}",
+        for_what=f"Rework {stage['rework_to']}",
+        action=summary,
         verdict_status="FAIL",
         verified_by=approver,
         evidence=evidence or ["gate rejected"],

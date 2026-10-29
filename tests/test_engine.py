@@ -6,6 +6,7 @@ import pytest
 from factory.engine import (
     gate_reject,
     import_plan,
+    next_action,
     submit_work,
     task_accept,
     task_claim,
@@ -13,7 +14,7 @@ from factory.engine import (
     task_submit,
 )
 from factory.errors import RunError
-from factory.state import get_task, load_state
+from factory.state import get_task, load_state, save_state
 
 PLAN = (
     "# Plan\n## 1. Задачи\n"
@@ -146,3 +147,97 @@ def test_task_reject_records_reason(nano_run):
     assert task["status"] == "pending"
     assert task["reject_reasons"] == ["test missing"]
     json.dumps(task)  # the state schema accepts the recorded reason list
+
+
+ACCEPTED_BEFORE_BUILD = [
+    "s00_intake", "s0_vision", "s1_spec", "s15_quarantine", "s2_architecture", "s3_plan",
+]
+
+
+def test_gate_reject_returns_to_rework_stage(nano_run):
+    run, _, _ = nano_run
+    state = load_state(run)
+    for stage_id in [*ACCEPTED_BEFORE_BUILD, "s4_build"]:
+        state["stage_status"][stage_id] = "accepted"
+    state["stage_status"]["s5_acceptance"] = "review"
+    state["gate_status"]["gate_s4"]["status"] = "approved"
+    save_state(run, state)
+
+    event = gate_reject("run-01", gate_id="gate_s5", approver="02-independent-verifier",
+                        evidence=["acceptance has a FAIL row"], root=run.parent)
+
+    state = load_state(run)
+    assert state["stage_status"]["s4_build"] == "in_progress"
+    assert state["stage_status"]["s5_acceptance"] == "pending"
+    assert state["gate_status"]["gate_s4"]["status"] == "pending"
+    assert state["gate_status"]["gate_s5"]["status"] == "rejected"
+    assert state["current_stage"] == "s4_build"
+    assert "rework returned to s4_build" in event["action"]
+
+
+def test_gate_reject_from_security_returns_to_build(nano_run):
+    run, _, _ = nano_run
+    state = load_state(run)
+    for stage_id in [*ACCEPTED_BEFORE_BUILD, "s4_build", "s5_acceptance"]:
+        state["stage_status"][stage_id] = "accepted"
+    state["stage_status"]["s6_security"] = "review"
+    save_state(run, state)
+
+    gate_reject("run-01", gate_id="gate_s6", approver="02-independent-verifier",
+                evidence=["path traversal found"], root=run.parent)
+
+    state = load_state(run)
+    assert state["stage_status"]["s4_build"] == "in_progress"
+    assert state["stage_status"]["s5_acceptance"] == "pending"
+    assert state["stage_status"]["s6_security"] == "pending"
+    assert state["current_stage"] == "s4_build"
+
+
+def test_gate_reject_escalates_after_max_attempts(nano_run):
+    run, _, _ = nano_run
+    for attempt in range(3):
+        gate_reject("run-01", gate_id="gate_s00", approver="human:reviewer",
+                    evidence=[f"reject {attempt}"], root=run.parent)
+
+    state = load_state(run)
+    assert state["stage_status"]["s00_intake"] == "escalated"
+    assert state["veto_counters"]["s00_intake"] == 1
+
+    order = next_action("run-01", root=run.parent)
+    assert order["action"] == "blocked"
+    assert order["stage"] == "s00_intake"
+    assert "escalated" in order["instructions"]
+    assert order["next_command"].startswith("factory status")
+
+
+def test_escalated_task_blocks_the_build_stage(nano_run):
+    run, _, _ = nano_run
+    _plan_run(run)
+    _file(run, "product/src/todo.py")
+    for attempt in range(3):
+        task_claim("run-01", "TASK-001", "12-fullstack-developer", root=run.parent)
+        task_submit("run-01", "TASK-001", "12-fullstack-developer", ["product/src/todo.py"],
+                    root=run.parent)
+        task_reject("run-01", "TASK-001", f"attempt {attempt}", root=run.parent)
+
+    state = load_state(run)
+    assert state["tasks"]["TASK-001"]["status"] == "escalated"
+    for stage_id in ACCEPTED_BEFORE_BUILD:
+        state["stage_status"][stage_id] = "accepted"
+    state["stage_status"]["s4_build"] = "in_progress"
+    save_state(run, state)
+
+    order = next_action("run-01", root=run.parent)
+    assert order["action"] == "blocked"
+    assert order["task_id"] == "TASK-001"
+    assert "escalated" in order["instructions"]
+
+
+def test_blocked_stage_does_not_report_produce(nano_run):
+    run, _, _ = nano_run
+    state = load_state(run)
+    state["stage_status"]["s00_intake"] = "blocked"
+    save_state(run, state)
+    order = next_action("run-01", root=run.parent)
+    assert order["action"] == "blocked"
+    assert order["artifacts"] == []

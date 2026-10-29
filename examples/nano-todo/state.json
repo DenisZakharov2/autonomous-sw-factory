@@ -23,9 +23,9 @@
       "status": "approved",
       "approver": "system",
       "decided_by": "system:greenfield",
-      "decided_at": "2026-10-29T06:45:32Z",
+      "decided_at": "2026-10-29T06:51:10Z",
       "evidence": [
-        "greenfield mode: S-In not applicable"
+        "greenfield mode: s_in not applicable"
       ],
       "attempts": 0
     },
@@ -33,7 +33,7 @@
       "status": "approved",
       "approver": "human",
       "decided_by": "human:example",
-      "decided_at": "2026-10-29T06:45:34Z",
+      "decided_at": "2026-10-29T06:51:11Z",
       "evidence": [
         "interview accepted"
       ],
@@ -43,7 +43,7 @@
       "status": "approved",
       "approver": "human",
       "decided_by": "human:example",
-      "decided_at": "2026-10-29T06:45:35Z",
+      "decided_at": "2026-10-29T06:51:12Z",
       "evidence": [
         "vision accepted"
       ],
@@ -53,7 +53,7 @@
       "status": "approved",
       "approver": "human",
       "decided_by": "human:example",
-      "decided_at": "2026-10-29T06:45:36Z",
+      "decided_at": "2026-10-29T06:51:13Z",
       "evidence": [
         "spec-human approved"
       ],
@@ -63,7 +63,7 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-29T06:45:37Z",
+      "decided_at": "2026-10-29T06:51:14Z",
       "evidence": [
         "no external skills"
       ],
@@ -73,7 +73,7 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-29T06:45:38Z",
+      "decided_at": "2026-10-29T06:51:15Z",
       "evidence": [
         "architecture frozen"
       ],
@@ -83,7 +83,7 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-29T06:45:39Z",
+      "decided_at": "2026-10-29T06:51:16Z",
       "evidence": [
         "plan imported"
       ],
@@ -93,7 +93,7 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-29T06:45:42Z",
+      "decided_at": "2026-10-29T06:51:18Z",
       "evidence": [
         "all tasks accepted"
       ],
@@ -103,7 +103,7 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-29T06:45:43Z",
+      "decided_at": "2026-10-29T06:51:20Z",
       "evidence": [
         "100% PASS"
       ],
@@ -113,7 +113,7 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-29T06:45:45Z",
+      "decided_at": "2026-10-29T06:51:22Z",
       "evidence": [
         "no Critical/High"
       ],
@@ -123,7 +123,7 @@
       "status": "approved",
       "approver": "human",
       "decided_by": "human:example",
-      "decided_at": "2026-10-29T06:45:47Z",
+      "decided_at": "2026-10-29T06:51:23Z",
       "evidence": [
         "rollback drill passed"
       ],
@@ -133,7 +133,7 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-29T06:45:48Z",
+      "decided_at": "2026-10-29T06:51:25Z",
       "evidence": [
         "commands verified"
       ],
@@ -143,7 +143,7 @@
       "status": "approved",
       "approver": "human",
       "decided_by": "human:example",
-      "decided_at": "2026-10-29T06:45:50Z",
+      "decided_at": "2026-10-29T06:51:27Z",
       "evidence": [
         "patch queued for human review"
       ],
@@ -198,8 +198,8 @@
   "veto_counters": {},
   "human_spec_approved": true,
   "restore_drill_passed": true,
-  "last_event_hash": "33394069c55546fb83ea9dc5346d76600108f9866899459c1a272018417713bb",
+  "last_event_hash": "bdf1729d58b132e55e59f49cb3d2ef099e1a73adc0913714166ebc48e900231d",
   "event_count": 33,
-  "created_at": "2026-10-29T06:45:32Z",
-  "updated_at": "2026-10-29T06:45:50Z"
+  "created_at": "2026-10-29T06:51:10Z",
+  "updated_at": "2026-10-29T06:51:27Z"
 }

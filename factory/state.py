@@ -30,7 +30,7 @@ def new_state(run_id: str, mode: str, pipeline: dict[str, Any]) -> dict[str, Any
         for stage in stages
     }
     if mode != "brownfield":
-        # A greenfield run never enters S-In. Mark it accepted so the stage
+        # A greenfield run never enters s_in. Mark it accepted so the stage
         # machine starts at intake instead of asking for a backup that does
         # not exist.
         stage_status["s_in"] = "accepted"
@@ -39,7 +39,7 @@ def new_state(run_id: str, mode: str, pipeline: dict[str, Any]) -> dict[str, Any
             "approver": "system",
             "decided_by": "system:greenfield",
             "decided_at": utc_now(),
-            "evidence": ["greenfield mode: S-In not applicable"],
+            "evidence": ["greenfield mode: s_in not applicable"],
             "attempts": 0,
         }
     start = "s_in" if mode == "brownfield" else "s00_intake"

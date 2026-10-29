@@ -1,0 +1,13 @@
+# План декомпозиции задач (`runs/<run_id>/artifacts/plan.md`)
+
+## 1. Задачи
+| `task_id` | Роль | `REQ` | `depends_on` | `Allowed Files` | Команда проверки |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `TASK-001` | `{{role_id}}` | `REQ-001` | `-` | `runs/{{run_id}}/product/src/{{file}}` | `{{check_command}}` |
+
+## 2. Покрытие REQ
+| REQ | Задачи |
+| :--- | :--- |
+| `REQ-001` | `TASK-001` |
+
+Все `REQ` покрыты: `{{all_covered}}`.

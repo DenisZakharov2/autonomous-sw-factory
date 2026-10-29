@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv*/
+venv/
+build/
+dist/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Runs contain client artifacts, journals and state. Never commit them.
+runs/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+id_rsa
+id_ed25519
+
+# Skill quarantine is local and untrusted
+skills/.quarantine/*
+!skills/.quarantine/.gitkeep
+skills/verified/*
+!skills/verified/.gitkeep
+
+# Runtime lock files
+blackbox.lock
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp

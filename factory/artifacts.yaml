@@ -1,0 +1,220 @@
+schema_version: "1.0.0"
+isolation_root: "runs/<run_id>/"
+
+# Registry of every artifact the pipeline can produce.
+# - path: relative to the run directory unless `root: true`
+# - template: human starting point (must exist)
+# - schema: JSON Schema for JSON artifacts
+# - required_sections: headings that a Markdown artifact must contain
+# - per_task / per_pattern: path contains a placeholder
+# - directory: a directory, not a single file
+artifacts:
+  onboarding_plan:
+    path: artifacts/onboarding-plan.md
+    template: templates/onboarding-plan.tmpl
+    owner: "01-smart-interviewer"
+    required_sections: ["## 1. Исходное состояние", "## 2. Бэкап", "## 3. Восстановление", "## 4. Untouchable Paths"]
+  restore_drill:
+    path: artifacts/restore-drill.md
+    template: templates/restore-drill.tmpl
+    owner: "01-smart-interviewer"
+    required_sections: ["## 1. Метод", "## 2. Команды", "## 3. Результат", "## 4. Вывод"]
+  brownfield_audit:
+    path: artifacts/brownfield-audit.md
+    template: templates/brownfield-audit.tmpl
+    owner: "08-software-architect"
+    required_sections: ["## 1. Границы скана", "## 2. Найденное", "## 3. Риски"]
+  interview_brief:
+    path: artifacts/interview-brief.md
+    template: templates/interview-brief.tmpl
+    owner: "01-smart-interviewer"
+    required_sections: ["## 1. Цель (JTBD)", "## 2. Out-of-Scope", "## 3. Требования", "## 4. Профиль"]
+  glossary:
+    path: artifacts/GLOSSARY.md
+    template: templates/GLOSSARY.tmpl
+    owner: "01-smart-interviewer"
+    required_sections: ["## Термины"]
+  vision:
+    path: artifacts/vision.md
+    template: templates/vision.tmpl
+    owner: "03-product-owner"
+    required_sections: ["## 1. Ценность", "## 2. Out-of-Scope", "## 3. Метрики"]
+  backlog:
+    path: artifacts/backlog.md
+    template: templates/backlog.tmpl
+    owner: "03-product-owner"
+    required_sections: ["## 1. Must-Have", "## 2. Out-of-Scope"]
+  competitors:
+    path: artifacts/competitors.md
+    template: templates/competitors.tmpl
+    owner: "03-product-owner"
+    required_sections: ["## 1. Альтернативы", "## 2. Вывод"]
+  product_metrics:
+    path: artifacts/metrics.md
+    template: templates/product-metrics.tmpl
+    owner: "03-product-owner"
+    required_sections: ["## 1. Целевые метрики", "## 2. Способ измерения"]
+  spec:
+    path: artifacts/spec.md
+    template: templates/spec.tmpl
+    owner: "05-business-analyst"
+    required_sections: ["## 1. Требования", "## 2. Приёмка"]
+  spec_human:
+    path: artifacts/spec-human.md
+    template: templates/spec-human.tmpl
+    owner: "05-business-analyst"
+    required_sections: ["## 1. Что делает система", "## 2. Как проверяем"]
+  traceability:
+    path: artifacts/traceability.json
+    template: templates/traceability.json.tmpl
+    schema: schemas/traceability.schema.json
+    owner: "05-business-analyst"
+  domain_model:
+    path: artifacts/domain-model.md
+    template: templates/domain-model.tmpl
+    owner: "06-system-analyst"
+    required_sections: ["## 1. Сущности", "## 2. Состояния", "## 3. Инварианты"]
+  access_matrix:
+    path: artifacts/access-matrix.md
+    template: templates/access-matrix.tmpl
+    owner: "06-system-analyst"
+    required_sections: ["## 1. Роли", "## 2. Матрица"]
+  security_review_skills:
+    path: artifacts/security-review-skills.md
+    template: templates/security-review-skills.tmpl
+    owner: "16-security-engineer"
+    required_sections: ["## 1. Сканирование", "## 2. Вердикты", "## 3. Лок"]
+  skills_lock:
+    path: skills-lock.json
+    root: true
+    template: templates/skills-lock.json.tmpl
+    schema: schemas/skills-lock.schema.json
+    owner: "16-security-engineer"
+  architecture:
+    path: artifacts/architecture.md
+    template: templates/architecture.tmpl
+    owner: "08-software-architect"
+    required_sections: ["## 1. Компоненты", "## 2. REQ mapping", "## 3. Решения"]
+  api_contract:
+    path: artifacts/api-contract.md
+    template: templates/api-contract.tmpl
+    owner: "08-software-architect"
+    required_sections: ["## 1. Эндпоинты", "## 2. Модели", "## 3. Ошибки"]
+  data_model:
+    path: artifacts/data-model.md
+    template: templates/data-model.tmpl
+    owner: "08-software-architect"
+    required_sections: ["## 1. Таблицы", "## 2. Индексы", "## 3. Миграции"]
+  threat_model:
+    path: artifacts/threat-model.md
+    template: templates/threat-model.tmpl
+    owner: "08-software-architect"
+    required_sections: ["## 1. Активы", "## 2. Векторы", "## 3. Контрмеры"]
+  adr:
+    path: artifacts/adr/ADR-{num}.md
+    template: templates/adr.tmpl
+    owner: "08-software-architect"
+    per_pattern: true
+    required_sections: ["## Контекст", "## Решение", "## Последствия"]
+  ux_flows:
+    path: artifacts/ux-flows.md
+    template: templates/ux-flows.tmpl
+    owner: "07-ux-ui-designer"
+    required_sections: ["## 1. Экраны", "## 2. Потоки", "## 3. Состояния"]
+  screens:
+    path: artifacts/screens/
+    template: templates/screen.tmpl
+    owner: "07-ux-ui-designer"
+    directory: true
+  ai_design:
+    path: artifacts/ai-design.md
+    template: templates/ai-design.tmpl
+    owner: "09-ai-engineer"
+    required_sections: ["## 1. Промпты", "## 2. Валидация", "## 3. Fallback", "## 4. Eval"]
+  plan:
+    path: artifacts/plan.md
+    template: templates/plan.tmpl
+    owner: "04-team-lead"
+    required_sections: ["## 1. Задачи", "## 2. Покрытие REQ"]
+  technical_debt:
+    path: artifacts/technical-debt.md
+    template: templates/technical-debt.tmpl
+    owner: "04-team-lead"
+    required_sections: ["## 1. Долг", "## 2. План"]
+  deliverable:
+    path: tasks/{task_id}/deliverable.md
+    template: templates/deliverable.tmpl
+    owner: "{task.owner}"
+    per_task: true
+    required_sections: ["## 1. Что сделано", "## 2. REQ", "## 3. Проверка", "## 4. Diff"]
+  product_src:
+    path: product/src/
+    owner: "12-fullstack-developer"
+    directory: true
+  product_tests:
+    path: product/tests/
+    owner: "15-qa-automation-engineer"
+    directory: true
+  test_report:
+    path: artifacts/test-report.md
+    template: templates/test-report.tmpl
+    owner: "14-qa-engineer"
+    required_sections: ["## 1. Прогоны", "## 2. Покрытие REQ", "## 3. Flaky"]
+  acceptance:
+    path: artifacts/acceptance.md
+    template: templates/acceptance.tmpl
+    owner: "14-qa-engineer"
+    required_sections: ["## 1. Матрица приёмки", "## 2. Дефекты"]
+  security_review_app:
+    path: artifacts/security-review-app.md
+    template: templates/security-review-app.tmpl
+    owner: "16-security-engineer"
+    required_sections: ["## 1. Секреты", "## 2. Инъекции", "## 3. Доступ", "## 4. Вердикт"]
+  db_report:
+    path: artifacts/db-report.md
+    template: templates/db-report.tmpl
+    owner: "17-dba"
+    required_sections: ["## 1. Миграции", "## 2. EXPLAIN", "## 3. Вердикт"]
+  data_pipeline:
+    path: artifacts/data-pipeline.md
+    template: templates/data-pipeline.tmpl
+    owner: "18-data-engineer"
+    required_sections: ["## 1. Поток", "## 2. Идемпотентность", "## 3. DLQ"]
+  runbook_deploy:
+    path: artifacts/runbook-deploy.md
+    template: templates/runbook.tmpl
+    owner: "19-devops-engineer"
+    required_sections: ["## 1. Деплой", "## 2. Rollback drill", "## 3. RTO"]
+  runbook_ops:
+    path: artifacts/runbook-ops.md
+    template: templates/runbook-ops.tmpl
+    owner: "20-system-administrator"
+    required_sections: ["## 1. Healthcheck", "## 2. Аварии", "## 3. Бэкапы"]
+  release_notes:
+    path: artifacts/release-notes.md
+    template: templates/release-notes.tmpl
+    owner: "19-devops-engineer"
+    required_sections: ["## 1. Изменения", "## 2. REQ"]
+  product_readme:
+    path: product/README.md
+    template: templates/product-readme.tmpl
+    owner: "21-technical-writer"
+    required_sections: ["## 1. Что это", "## 2. Запуск", "## 3. Проверка"]
+  user_guide:
+    path: product/docs/user-guide.md
+    template: templates/user-guide.tmpl
+    owner: "21-technical-writer"
+    required_sections: ["## 1. Начало", "## 2. Основные действия", "## 3. Ошибки"]
+  metrics:
+    path: artifacts/metrics.json
+    schema: schemas/metrics.schema.json
+    owner: "00-orchestrator"
+  lessons_learned:
+    path: artifacts/lessons-learned.md
+    template: templates/lessons-learned.tmpl
+    owner: "00-orchestrator"
+    required_sections: ["## 1. Что сработало", "## 2. Что улучшить"]
+  improvement_patch:
+    path: artifacts/patches/
+    owner: "00-orchestrator"
+    directory: true

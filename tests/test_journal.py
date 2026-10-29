@@ -1,0 +1,181 @@
+import json
+import multiprocessing
+from pathlib import Path
+
+import pytest
+
+from factory.errors import JournalError
+from factory.journal import (
+    GENESIS_PREV_HASH,
+    append_event,
+    canonical_json,
+    compute_event_hash,
+    verify_chain,
+)
+
+
+def _event(run_dir: Path, action: str = "did work", **overrides):
+    payload = {
+        "stage": "s1_spec",
+        "task_id": None,
+        "role": "01-smart-interviewer",
+        "event_type": "ARTIFACT_SUBMIT",
+        "why": "test",
+        "for_what": "test",
+        "action": action,
+        "verdict_status": "DRAFT",
+        "verified_by": "01-smart-interviewer",
+        "artifacts": [],
+    }
+    payload.update(overrides)
+    return append_event(run_dir, **payload)
+
+
+def test_chain_valid_and_state_anchor(nano_run):
+    run_dir, _, _ = nano_run
+    _event(run_dir, "second")
+    assert verify_chain(run_dir / "blackbox.jsonl", run_dir / "state.json") == []
+    state = json.loads((run_dir / "state.json").read_text())
+    assert state["event_count"] == 2
+    assert state["last_event_hash"] == json.loads((run_dir / "blackbox.jsonl").read_text().splitlines()[-1])["hash"]
+
+
+def test_tamper_detected(nano_run):
+    run_dir, _, _ = nano_run
+    _event(run_dir, "second")
+    lines = (run_dir / "blackbox.jsonl").read_text().splitlines()
+    lines[0] = lines[0].replace("Initialised", "Tampered")
+    (run_dir / "blackbox.jsonl").write_text("\n".join(lines) + "\n")
+    errors = verify_chain(run_dir / "blackbox.jsonl", run_dir / "state.json")
+    assert errors
+
+
+def test_tail_truncation_detected(nano_run):
+    run_dir, _, _ = nano_run
+    _event(run_dir, "second")
+    lines = (run_dir / "blackbox.jsonl").read_text().splitlines()
+    (run_dir / "blackbox.jsonl").write_text(lines[0] + "\n")
+    errors = verify_chain(run_dir / "blackbox.jsonl", run_dir / "state.json")
+    assert any("event_count" in error or "last_event_hash" in error for error in errors)
+
+
+def test_empty_journal_is_invalid(tmp_path):
+    log = tmp_path / "blackbox.jsonl"
+    log.write_text("")
+    errors = verify_chain(log)
+    assert errors and "empty" in errors[0]
+
+
+def test_producer_cannot_write_pass(nano_run):
+    run_dir, _, _ = nano_run
+    with pytest.raises(JournalError, match="Producer != Verifier"):
+        append_event(
+            run_dir,
+            stage="s4_build",
+            task_id=None,
+            role="12-fullstack-developer",
+            event_type="ARTIFACT_SUBMIT",
+            why="x",
+            for_what="y",
+            action="submitted",
+            verdict_status="PASS",
+            verified_by="12-fullstack-developer",
+            evidence=["looks good"],
+        )
+
+
+def test_verifier_name_cannot_be_spoofed(nano_run):
+    run_dir, _, _ = nano_run
+    with pytest.raises(JournalError, match="Producer != Verifier"):
+        append_event(
+            run_dir,
+            stage="s4_build",
+            task_id=None,
+            role="12-fullstack-developer",
+            event_type="ARTIFACT_SUBMIT",
+            why="x",
+            for_what="y",
+            action="submitted",
+            verdict_status="PASS",
+            verified_by="02-independent-verifier",
+            evidence=["spoof"],
+        )
+
+
+def test_verify_chain_rejects_forged_pass(nano_run):
+    run_dir, _, _ = nano_run
+    events = [json.loads(line) for line in (run_dir / "blackbox.jsonl").read_text().splitlines()]
+    forged = {
+        "event_id": "EVT-000002",
+        "run_id": run_dir.name,
+        "seq": 2,
+        "timestamp_utc": "2026-01-01T00:00:00Z",
+        "stage": "s4_build",
+        "task_id": None,
+        "role": "12-fullstack-developer",
+        "event_type": "ARTIFACT_SUBMIT",
+        "model": {"tier": "tier-2-balanced", "model_id": "x", "effort": "medium"},
+        "why": "x",
+        "for_what": "y",
+        "action": "forged",
+        "artifacts": [],
+        "verdict": {"status": "PASS", "verified_by": "12-fullstack-developer", "evidence": ["x"]},
+        "parent_event_id": None,
+        "prev_hash": events[0]["hash"],
+    }
+    forged["hash"] = compute_event_hash(events[0]["hash"], forged)
+    (run_dir / "blackbox.jsonl").write_text("\n".join([json.dumps(events[0]), canonical_json(forged)]) + "\n")
+    errors = verify_chain(run_dir / "blackbox.jsonl")
+    assert any("semantic error" in error for error in errors)
+
+
+def test_artifacts_are_hashed(nano_run):
+    run_dir, _, _ = nano_run
+    artifact = run_dir / "artifacts" / "note.md"
+    artifact.write_text("hello", encoding="utf-8")
+    event = _event(run_dir, "wrote note", artifacts=[str(artifact)])
+    assert event["artifacts"][0]["bytes"] == 5
+    assert len(event["artifacts"][0]["sha256"]) == 64
+
+
+def test_audit_trail_escapes_table_cells(nano_run):
+    run_dir, _, _ = nano_run
+    _event(run_dir, "line1 | col | newline\nBROKEN")
+    text = (run_dir / "AUDIT_TRAIL.md").read_text()
+    assert "line1 \\| col \\| newline BROKEN" in text
+
+
+def test_concurrent_appends_keep_chain(nano_run):
+    run_dir, _, _ = nano_run
+    ctx = multiprocessing.get_context("fork")
+    processes = [ctx.Process(target=_concurrent_writer, args=(str(run_dir), i)) for i in range(12)]
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(timeout=30)
+        assert process.exitcode == 0
+    errors = verify_chain(run_dir / "blackbox.jsonl", run_dir / "state.json")
+    assert errors == []
+    events = [json.loads(line) for line in (run_dir / "blackbox.jsonl").read_text().splitlines()]
+    assert len(events) == 13
+    assert len({event["event_id"] for event in events}) == 13
+
+
+def _concurrent_writer(run_dir: str, index: int) -> None:
+    append_event(
+        Path(run_dir),
+        stage="s4_build",
+        task_id=None,
+        role="12-fullstack-developer",
+        event_type="ARTIFACT_SUBMIT",
+        why="race",
+        for_what="race",
+        action=f"writer {index}",
+        verdict_status="DRAFT",
+        verified_by="12-fullstack-developer",
+        artifacts=[],
+    )
+
+
+def test_genesis_hash_is_zeroes():
+    assert GENESIS_PREV_HASH == "0" * 64

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/DenisZakharov2/autonomous-sw-factory/schemas/metrics.schema.json",
+  "title": "FactoryMetrics",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "run_id", "first_pass_rate", "rework_rate", "escaped_defect_rate", "cycle_time_p50_minutes", "cycle_time_p90_minutes", "cost_per_artifact_usd", "top_reject_reasons", "verification_coverage", "traceability_coverage"],
+  "properties": {
+    "schema_version": {"type": "string", "const": "1.0.0"},
+    "run_id": {"type": "string", "minLength": 1},
+    "first_pass_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+    "rework_rate": {"type": ["number", "null"], "minimum": 0},
+    "escaped_defect_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+    "cycle_time_p50_minutes": {"type": ["number", "null"], "minimum": 0},
+    "cycle_time_p90_minutes": {"type": ["number", "null"], "minimum": 0},
+    "cost_per_artifact_usd": {"type": ["number", "null"], "minimum": 0},
+    "top_reject_reasons": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["reason_code", "count"], "properties": {"reason_code": {"type": "string"}, "count": {"type": "integer", "minimum": 1}}}},
+    "verification_coverage": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+    "traceability_coverage": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
+  }
+}

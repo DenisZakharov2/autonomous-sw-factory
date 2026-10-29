@@ -1,0 +1,293 @@
+schema_version: "1.0.0"
+name: "autonomous-sw-factory"
+description: "Stage-gated software factory. The engine issues work orders; a host runtime executes the roles."
+
+# Modes are closed role sets. A stage may override the base role list.
+# Every artifact must still have an owner active in the selected mode;
+# `factory doctor` and `factory verify` enforce that.
+modes:
+  nano:
+    description: "One interviewer/spec author, one fullstack builder, one verifier, one orchestrator."
+    roles: ["00-orchestrator", "01-smart-interviewer", "12-fullstack-developer", "02-independent-verifier"]
+    budget: { tokens: 400000, minutes: 90, usd: 6 }
+    stage_roles:
+      s_in: ["00-orchestrator", "01-smart-interviewer", "12-fullstack-developer", "02-independent-verifier"]
+      s00_intake: ["00-orchestrator", "01-smart-interviewer", "02-independent-verifier"]
+      s0_vision: ["01-smart-interviewer", "02-independent-verifier"]
+      s1_spec: ["01-smart-interviewer", "02-independent-verifier"]
+      s15_quarantine: ["00-orchestrator", "02-independent-verifier"]
+      s2_architecture: ["12-fullstack-developer", "02-independent-verifier"]
+      s3_plan: ["01-smart-interviewer", "12-fullstack-developer", "02-independent-verifier"]
+      s4_build: ["12-fullstack-developer", "02-independent-verifier"]
+      s5_acceptance: ["12-fullstack-developer", "02-independent-verifier"]
+      s6_security: ["12-fullstack-developer", "02-independent-verifier"]
+      s7_release: ["12-fullstack-developer", "02-independent-verifier"]
+      s8_docs: ["12-fullstack-developer", "02-independent-verifier"]
+      s9_learn: ["00-orchestrator", "01-smart-interviewer", "02-independent-verifier"]
+    artifact_owners:
+      onboarding_plan: "01-smart-interviewer"
+      restore_drill: "01-smart-interviewer"
+      brownfield_audit: "01-smart-interviewer"
+      vision: "01-smart-interviewer"
+      backlog: "01-smart-interviewer"
+      competitors: "01-smart-interviewer"
+      product_metrics: "01-smart-interviewer"
+      spec: "01-smart-interviewer"
+      spec_human: "01-smart-interviewer"
+      traceability: "01-smart-interviewer"
+      domain_model: "01-smart-interviewer"
+      access_matrix: "01-smart-interviewer"
+      architecture: "12-fullstack-developer"
+      api_contract: "12-fullstack-developer"
+      data_model: "12-fullstack-developer"
+      threat_model: "12-fullstack-developer"
+      adr: "12-fullstack-developer"
+      ux_flows: "12-fullstack-developer"
+      screens: "12-fullstack-developer"
+      ai_design: "12-fullstack-developer"
+      plan: "01-smart-interviewer"
+      technical_debt: "01-smart-interviewer"
+      test_report: "12-fullstack-developer"
+      acceptance: "12-fullstack-developer"
+      security_review_skills: "00-orchestrator"
+      skills_lock: "00-orchestrator"
+      security_review_app: "12-fullstack-developer"
+      db_report: "12-fullstack-developer"
+      data_pipeline: "12-fullstack-developer"
+      runbook_deploy: "12-fullstack-developer"
+      runbook_ops: "12-fullstack-developer"
+      release_notes: "12-fullstack-developer"
+      product_readme: "12-fullstack-developer"
+      user_guide: "12-fullstack-developer"
+      product_tests: "12-fullstack-developer"
+  standard:
+    description: "Backend/CLI product team with product, analysis, architecture, build, QA, security and release."
+    roles: ["00-orchestrator", "01-smart-interviewer", "02-independent-verifier", "03-product-owner", "04-team-lead", "05-business-analyst", "06-system-analyst", "08-software-architect", "12-fullstack-developer", "14-qa-engineer", "16-security-engineer", "19-devops-engineer"]
+    budget: { tokens: 1500000, minutes: 360, usd: 25 }
+    artifact_owners:
+      ux_flows: "08-software-architect"
+      screens: "08-software-architect"
+      ai_design: "08-software-architect"
+      product_tests: "12-fullstack-developer"
+      db_report: "12-fullstack-developer"
+      data_pipeline: "12-fullstack-developer"
+      runbook_ops: "19-devops-engineer"
+      product_readme: "12-fullstack-developer"
+      user_guide: "12-fullstack-developer"
+  enterprise:
+    description: "All 22 roles."
+    roles: ["*"]
+    budget: { tokens: 6000000, minutes: 1440, usd: 120 }
+  brownfield:
+    description: "Standard team plus a mandatory backup/restore drill before any write."
+    roles: ["00-orchestrator", "01-smart-interviewer", "02-independent-verifier", "03-product-owner", "04-team-lead", "05-business-analyst", "06-system-analyst", "08-software-architect", "12-fullstack-developer", "14-qa-engineer", "16-security-engineer", "19-devops-engineer"]
+    budget: { tokens: 1800000, minutes: 480, usd: 30 }
+    artifact_owners:
+      ux_flows: "08-software-architect"
+      screens: "08-software-architect"
+      ai_design: "08-software-architect"
+      product_tests: "12-fullstack-developer"
+      db_report: "12-fullstack-developer"
+      data_pipeline: "12-fullstack-developer"
+      runbook_ops: "19-devops-engineer"
+      product_readme: "12-fullstack-developer"
+      user_guide: "12-fullstack-developer"
+
+# Stages are ordered. `entry` names the previous stage exit; `exit` is a
+# human-readable contract. Gates are checked by `factory gate`.
+stages:
+  - id: s_in
+    order: 0
+    title: "Brownfield intake and verified backup"
+    entry: []
+    exit: ["backup bundle exists", "dirty worktree archived", "restore drill passed", "untouchable paths recorded"]
+    roles: ["00-orchestrator", "01-smart-interviewer", "08-software-architect", "02-independent-verifier"]
+    artifacts: ["onboarding_plan", "restore_drill", "brownfield_audit"]
+    gate:
+      id: gate_s_in
+      approver: human
+      blocking: true
+      evidence: ["factory verify --stage s_in", "restore-drill.md status PASS"]
+    max_attempts: 2
+    rework_to: s_in
+
+  - id: s00_intake
+    order: 10
+    title: "Greenfield interview"
+    entry: ["s_in.exit"]
+    exit: ["customer profile fixed", "goals and out-of-scope recorded", "GLOSSARY populated"]
+    roles: ["00-orchestrator", "01-smart-interviewer", "02-independent-verifier"]
+    artifacts: ["interview_brief", "glossary"]
+    gate:
+      id: gate_s00
+      approver: human
+      blocking: true
+      evidence: ["factory verify --stage s00_intake", "interview brief accepted"]
+    max_attempts: 3
+    rework_to: s00_intake
+
+  - id: s0_vision
+    order: 20
+    title: "Product vision and scope"
+    entry: ["s00_intake.exit"]
+    exit: ["Out-of-Scope list exists", "every backlog item has user value", "metrics are measurable"]
+    roles: ["03-product-owner", "01-smart-interviewer", "02-independent-verifier"]
+    artifacts: ["vision", "backlog", "competitors", "product_metrics"]
+    gate:
+      id: gate_s0
+      approver: human
+      blocking: false
+      evidence: ["factory verify --stage s0_vision"]
+    max_attempts: 3
+    rework_to: s0_vision
+
+  - id: s1_spec
+    order: 30
+    title: "Dual-view specification"
+    entry: ["s0_vision.exit"]
+    exit: ["REQ sets equal", "traceability written", "human spec approved"]
+    roles: ["05-business-analyst", "06-system-analyst", "01-smart-interviewer", "02-independent-verifier"]
+    artifacts: ["spec", "spec_human", "traceability", "domain_model", "access_matrix"]
+    gate:
+      id: gate_s1
+      approver: human
+      blocking: true
+      evidence: ["factory verify --stage s1_spec", "spec-human.md approved by human"]
+    max_attempts: 3
+    rework_to: s1_spec
+
+  - id: s15_quarantine
+    order: 40
+    title: "External skill quarantine"
+    entry: ["s1_spec.exit"]
+    exit: ["scanner complete", "lock has hashes", "no unsafe or incomplete skill installed"]
+    roles: ["16-security-engineer", "00-orchestrator", "02-independent-verifier"]
+    artifacts: ["security_review_skills", "skills_lock"]
+    gate:
+      id: gate_s15
+      approver: "02-independent-verifier"
+      blocking: true
+      evidence: ["factory quarantine verify-lock", "factory verify --stage s15_quarantine"]
+    max_attempts: 3
+    rework_to: s15_quarantine
+
+  - id: s2_architecture
+    order: 50
+    title: "Architecture and frozen contract"
+    entry: ["s15_quarantine.exit"]
+    exit: ["every REQ mapped to a component", "api-contract frozen", "ADR recorded", "threat model exists"]
+    roles: ["08-software-architect", "07-ux-ui-designer", "09-ai-engineer", "17-dba", "16-security-engineer", "02-independent-verifier"]
+    artifacts: ["architecture", "api_contract", "data_model", "threat_model", "adr", "ux_flows", "screens", "ai_design"]
+    gate:
+      id: gate_s2
+      approver: "02-independent-verifier"
+      blocking: true
+      evidence: ["factory verify --stage s2_architecture", "api-contract has no TODO"]
+    max_attempts: 3
+    rework_to: s2_architecture
+
+  - id: s3_plan
+    order: 60
+    title: "Task decomposition"
+    entry: ["s2_architecture.exit"]
+    exit: ["100% REQ assigned", "Allowed Files do not overlap", "every task has a test command"]
+    roles: ["04-team-lead", "02-independent-verifier"]
+    artifacts: ["plan", "technical_debt"]
+    gate:
+      id: gate_s3
+      approver: "02-independent-verifier"
+      blocking: true
+      evidence: ["factory tasks import --from plan.md", "factory verify --stage s3_plan"]
+    max_attempts: 3
+    rework_to: s3_plan
+
+  - id: s4_build
+    order: 70
+    title: "Parallel build"
+    entry: ["s3_plan.exit"]
+    exit: ["every task accepted", "build exit code 0", "tests pass in a clean checkout"]
+    roles: ["09-ai-engineer", "10-frontend-developer", "11-backend-developer", "12-fullstack-developer", "13-mobile-developer", "15-qa-automation-engineer", "18-data-engineer", "04-team-lead", "02-independent-verifier"]
+    artifacts: ["deliverable", "product_src", "product_tests"]
+    gate:
+      id: gate_s4
+      approver: "02-independent-verifier"
+      blocking: true
+      evidence: ["all tasks accepted", "factory verify --stage s4_build"]
+    max_attempts: 3
+    rework_to: s4_build
+    parallel: true
+
+  - id: s5_acceptance
+    order: 80
+    title: "Acceptance testing"
+    entry: ["s4_build.exit"]
+    exit: ["every REQ PASS", "zero Critical/High defects", "three clean test runs"]
+    roles: ["14-qa-engineer", "15-qa-automation-engineer", "02-independent-verifier"]
+    artifacts: ["test_report", "acceptance"]
+    gate:
+      id: gate_s5
+      approver: "02-independent-verifier"
+      blocking: true
+      evidence: ["factory verify --stage s5_acceptance", "acceptance.md 100% PASS"]
+    max_attempts: 3
+    rework_to: s4_build
+
+  - id: s6_security
+    order: 90
+    title: "Application security and data review"
+    entry: ["s5_acceptance.exit"]
+    exit: ["no Critical/High issue", "migrations reversible", "pipeline idempotent"]
+    roles: ["16-security-engineer", "17-dba", "18-data-engineer", "11-backend-developer", "12-fullstack-developer", "02-independent-verifier"]
+    artifacts: ["security_review_app", "db_report", "data_pipeline"]
+    gate:
+      id: gate_s6
+      approver: "02-independent-verifier"
+      blocking: true
+      evidence: ["factory verify --stage s6_security"]
+    max_attempts: 3
+    rework_to: s4_build
+
+  - id: s7_release
+    order: 100
+    title: "Release and verified rollback"
+    entry: ["s6_security.exit"]
+    exit: ["deploy and rollback drill recorded", "RTO measured", "human release approval"]
+    roles: ["19-devops-engineer", "20-system-administrator", "02-independent-verifier"]
+    artifacts: ["runbook_deploy", "runbook_ops", "release_notes"]
+    gate:
+      id: gate_s7
+      approver: human
+      blocking: true
+      evidence: ["factory verify --stage s7_release", "rollback drill stdout attached"]
+    max_attempts: 3
+    rework_to: s7_release
+
+  - id: s8_docs
+    order: 110
+    title: "Product documentation"
+    entry: ["s7_release.exit"]
+    exit: ["quickstart works", "every command verified", "factory README untouched"]
+    roles: ["21-technical-writer", "14-qa-engineer", "12-fullstack-developer", "02-independent-verifier"]
+    artifacts: ["product_readme", "user_guide"]
+    gate:
+      id: gate_s8
+      approver: "02-independent-verifier"
+      blocking: false
+      evidence: ["factory verify --stage s8_docs", "doc commands verified by QA"]
+    max_attempts: 3
+    rework_to: s8_docs
+
+  - id: s9_learn
+    order: 120
+    title: "Metrics and controlled self-improvement"
+    entry: ["s8_docs.exit"]
+    exit: ["metrics computed", "lessons recorded", "improvement patch reviewed by human"]
+    roles: ["00-orchestrator", "03-product-owner", "02-independent-verifier"]
+    artifacts: ["metrics", "lessons_learned", "improvement_patch"]
+    gate:
+      id: gate_s9
+      approver: human
+      blocking: true
+      evidence: ["factory metrics", "factory verify --stage s9_learn", "human patch review"]
+    max_attempts: 2
+    rework_to: s9_learn

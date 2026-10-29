@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/DenisZakharov2/autonomous-sw-factory/schemas/task.schema.json",
+  "title": "FactoryTask",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["task_id", "stage", "owner", "reqs", "allowed_files", "deps", "status", "attempts", "artifacts", "lease"],
+  "properties": {
+    "task_id": {"type": "string", "pattern": "^TASK-[A-Z0-9-]+$"},
+    "stage": {"type": "string"},
+    "owner": {"type": "string"},
+    "reqs": {"type": "array", "items": {"type": "string", "pattern": "^REQ-[A-Z0-9-]+$"}},
+    "allowed_files": {"type": "array", "items": {"type": "string"}},
+    "deps": {"type": "array", "items": {"type": "string"}},
+    "status": {"type": "string", "enum": ["pending", "in_progress", "blocked", "review", "accepted", "escalated"]},
+    "attempts": {"type": "integer", "minimum": 0},
+    "artifacts": {"type": "array", "items": {"type": "string"}},
+    "lease": {"type": ["string", "null"]}
+  }
+}

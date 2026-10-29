@@ -1,0 +1,14 @@
+# Отчёт DBA (`runs/<run_id>/artifacts/db-report.md`)
+
+## 1. Миграции
+| Миграция | up -> down -> up | Потеря данных |
+| :--- | :--- | :--- |
+| `{{migration}}` | `{{cycle}}` | `{{data_loss}}` |
+
+## 2. EXPLAIN
+```
+{{explain_output}}
+```
+
+## 3. Вердикт
+`{{verdict}}` — обратимость: `{{reversible}}`; индексы: `{{indexes}}`.

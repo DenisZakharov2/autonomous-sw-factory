@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/DenisZakharov2/autonomous-sw-factory/schemas/event.schema.json",
+  "title": "FactoryEvent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id", "run_id", "seq", "timestamp_utc", "stage", "task_id", "role", "event_type", "model", "why", "for_what", "action", "artifacts", "verdict", "prev_hash", "hash"],
+  "properties": {
+    "event_id": {"type": "string", "pattern": "^EVT-[0-9]{6}$"},
+    "run_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"},
+    "seq": {"type": "integer", "minimum": 1},
+    "timestamp_utc": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},
+    "stage": {"type": "string", "enum": ["init", "s_in", "s00_intake", "s0_vision", "s1_spec", "s15_quarantine", "s2_architecture", "s3_plan", "s4_build", "s5_acceptance", "s6_security", "s7_release", "s8_docs", "s9_learn"]},
+    "task_id": {"type": ["string", "null"], "pattern": "^TASK-[A-Z0-9-]+$"},
+    "role": {"type": "string", "pattern": "^[0-9]{2}-[a-z0-9-]+$"},
+    "event_type": {"type": "string", "enum": ["INIT", "STAGE_ENTER", "STAGE_EXIT", "TASK_ADD", "TASK_CLAIM", "TASK_DONE", "ARTIFACT_SUBMIT", "VERIFY", "GATE_DECISION", "REWORK", "ESCALATION", "RISK_ACCEPTANCE", "SKILL_INSTALL", "SELF_IMPROVEMENT"]},
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tier", "model_id", "effort"],
+      "properties": {
+        "tier": {"type": "string", "enum": ["tier-1-economy", "tier-2-balanced", "tier-3-frontier"]},
+        "model_id": {"type": "string", "minLength": 1},
+        "effort": {"type": "string", "enum": ["low", "medium", "high", "max"]}
+      }
+    },
+    "why": {"type": "string", "minLength": 1},
+    "for_what": {"type": "string", "minLength": 1},
+    "action": {"type": "string", "minLength": 1},
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256", "bytes"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "bytes": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "verdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "verified_by"],
+      "properties": {
+        "status": {"type": "string", "enum": ["INIT_OK", "DRAFT", "PASS", "FAIL", "NEEDS_HUMAN", "ACCEPTED_RISK", "BLOCKED"]},
+        "verified_by": {"type": "string", "minLength": 1},
+        "reason_code": {"type": "string"},
+        "evidence": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "parent_event_id": {"type": ["string", "null"], "pattern": "^EVT-[0-9]{6}$"},
+    "prev_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  }
+}

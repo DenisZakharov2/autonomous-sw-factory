@@ -1,0 +1,14 @@
+# Поток данных (`runs/<run_id>/artifacts/data-pipeline.md`)
+
+## 1. Поток
+`{{source}} -> {{transform}} -> {{sink}}`
+
+## 2. Идемпотентность
+- Ключ идемпотентности: `{{idempotency_key}}`
+- Двойной прогон: `{{double_run}}`
+- Дубли: `{{duplicates}}`
+
+## 3. DLQ
+- Куда: `{{dlq}}`
+- Причина: `{{reason}}`
+- Повтор: `{{retry}}`

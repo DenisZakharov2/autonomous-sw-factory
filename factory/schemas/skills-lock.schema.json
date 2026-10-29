@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/DenisZakharov2/autonomous-sw-factory/schemas/skills-lock.schema.json",
+  "title": "SkillsLock",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "skills"],
+  "properties": {
+    "schema_version": {"type": "string", "const": "1.0.0"},
+    "skills": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "pack", "commit", "path", "sha256", "license", "model_invocable", "scanner", "approved_by"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "pack": {"type": "string", "minLength": 1},
+          "commit": {"type": "string", "pattern": "^([a-f0-9]{40}|local)$"},
+          "path": {"type": "string", "minLength": 1},
+          "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "license": {"type": "string", "minLength": 1},
+          "model_invocable": {"type": "boolean"},
+          "scanner": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "version", "severity", "recommendation", "is_complete", "coverage_percent", "scanned_at"],
+            "properties": {
+              "name": {"type": "string", "const": "skillspector"},
+              "version": {"type": "string", "minLength": 1},
+              "severity": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]},
+              "recommendation": {"type": "string", "enum": ["SAFE", "CAUTION", "DO_NOT_INSTALL"]},
+              "is_complete": {"type": "boolean"},
+              "coverage_percent": {"type": "number", "minimum": 0, "maximum": 100},
+              "scanned_at": {"type": "string", "minLength": 1}
+            }
+          },
+          "approved_by": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

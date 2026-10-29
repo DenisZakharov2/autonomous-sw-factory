@@ -1,0 +1,20 @@
+# ИИ-дизайн (`runs/<run_id>/artifacts/ai-design.md`)
+
+## 1. Промпты
+| Шаблон | Назначение | Вход | Выход |
+| :--- | :--- | :--- | :--- |
+| `{{prompt}}` | {{purpose}} | {{input}} | {{output}} |
+
+## 2. Валидация
+- Схема ответа: `{{schema}}`
+- Таймаут: `{{timeout}}`
+- Ретраи: `{{retries}}`
+
+## 3. Fallback
+`{{fallback}}` — детерминированное поведение при ошибке или таймауте LLM.
+
+## 4. Eval
+- Датасет: `{{dataset}}`
+- Кейсов: `{{cases}}`
+- Adversarial injection: `{{injection_cases}}`
+- Порог: `{{threshold}}`

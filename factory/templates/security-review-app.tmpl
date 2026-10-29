@@ -1,0 +1,17 @@
+# Аудит безопасности приложения (`runs/<run_id>/artifacts/security-review-app.md`)
+
+## 1. Секреты
+- Сканирование: `{{secret_scan}}`
+- Найдено: `{{secret_findings}}`
+
+## 2. Инъекции
+- SQL/NoSQL: `{{injection_sql}}`
+- Prompt injection: `{{injection_prompt}}`
+- Path traversal: `{{traversal}}`
+
+## 3. Доступ
+- Матрица `access-matrix.md` соблюдена: `{{access_ok}}`
+- Проверки авторизации: `{{auth_checks}}`
+
+## 4. Вердикт
+`{{verdict}}` — Critical/High: `{{critical_high}}`; доказательства: `{{evidence}}`.

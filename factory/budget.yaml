@@ -1,0 +1,17 @@
+schema_version: "1.0.0"
+
+# A blocking veto is a stop, not a comment. After this many reworks on the
+# same stage the run is escalated to a human.
+max_veto_retries: 3
+default_max_attempts: 3
+
+on_attempts_exhausted: "escalate"
+on_budget_exhausted: "pause"
+on_model_unavailable: "fallback_then_escalate"
+
+# Budgets live in pipeline.yaml under each mode so there is one source of
+# truth. These are hard stops, checked by `factory cost` and by the runner.
+enforce:
+  tokens: true
+  minutes: true
+  usd: true

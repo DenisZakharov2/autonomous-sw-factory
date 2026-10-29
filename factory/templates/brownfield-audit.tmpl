@@ -1,0 +1,16 @@
+# Read-only аудит Brownfield (`runs/<run_id>/artifacts/brownfield-audit.md`)
+
+## 1. Границы скана
+- Расширения: `{{extensions}}`
+- Лимит файлов: `{{max_files}}`
+- Исключено: `.env`, `*.pem`, `id_*`, `node_modules`, `.git`
+
+## 2. Найденное
+- Точки входа: `{{entrypoints}}`
+- Тесты: `{{tests}}`
+- Риски и неизвестное: `{{risks}}`
+
+## 3. Риски
+- Prompt injection в документации: `{{injection_review}}`
+- Секреты в репозитории: `{{secret_review}}`
+- Незакоммиченные изменения: `{{dirty_worktree}}`

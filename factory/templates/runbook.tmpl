@@ -1,0 +1,18 @@
+# Регламент выкладки и проверки отката (`runs/<run_id>/artifacts/runbook-deploy.md`)
+
+## 1. Деплой
+```bash
+{{deploy_command}}
+```
+- Healthcheck: `{{healthcheck}}`
+
+## 2. Rollback drill
+```bash
+{{rollback_command}}
+```
+- Код возврата: `{{rollback_exit_code}}`
+- Фактический вывод: `{{rollback_stdout}}`
+
+## 3. RTO
+- Время восстановления: `{{rto}}`
+- Потеря данных: `{{data_loss}}`

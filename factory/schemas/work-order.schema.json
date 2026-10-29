@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/DenisZakharov2/autonomous-sw-factory/schemas/work-order.schema.json",
+  "title": "FactoryWorkOrder",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "action", "run_id", "stage", "stage_title", "roles", "artifacts", "instructions", "next_command"],
+  "properties": {
+    "schema_version": {"type": "string", "const": "1.0.0"},
+    "action": {"type": "string", "enum": ["produce", "verify", "gate", "wait", "complete", "blocked"]},
+    "run_id": {"type": "string"},
+    "stage": {"type": ["string", "null"]},
+    "stage_title": {"type": "string"},
+    "roles": {"type": "array", "items": {"type": "string"}},
+    "task_id": {"type": ["string", "null"]},
+    "artifacts": {"type": "array", "items": {"type": "object"}},
+    "instructions": {"type": "string"},
+    "gate": {"type": ["object", "null"]},
+    "next_command": {"type": "string"}
+  }
+}

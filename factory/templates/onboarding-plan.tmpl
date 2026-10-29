@@ -1,0 +1,22 @@
+# План бережного подключения (`runs/<run_id>/artifacts/onboarding-plan.md`)
+
+## 1. Исходное состояние
+- Репозиторий: `{{repo_path}}`
+- Ветка и commit: `{{branch}}` / `{{commit}}`
+- `git status --porcelain`: `{{git_status}}`
+
+## 2. Бэкап
+- Git bundle: `runs/{{run_id}}/backups/pre-factory.bundle`
+- Архив worktree: `runs/{{run_id}}/backups/dirty-worktree.tar.gz`
+- Манифест SHA-256: `runs/{{run_id}}/backups/manifest.sha256`
+
+## 3. Восстановление
+- Временный клон: `{{restore_clone}}`
+- Команда проверки: `{{restore_command}}`
+- Результат: `PENDING` (заполняется после прогона `restore-drill.md`)
+
+## 4. Untouchable Paths
+- `{{untouchable_glob_1}}`
+- `{{untouchable_glob_2}}`
+
+Эти пути проверяются перед каждой записью; нарушение — блокирующее вето.

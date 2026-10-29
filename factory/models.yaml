@@ -1,0 +1,34 @@
+schema_version: "1.0.0"
+default_tier: "tier-2-balanced"
+
+# The factory does not hardcode vendor model IDs. A host runtime resolves each
+# tier, or the operator sets the environment variable named in `model_env`.
+# This keeps the journal honest: it records the model that actually ran.
+tiers:
+  tier-1-economy:
+    provider: "runtime"
+    model: "runtime-default"
+    model_env: "FACTORY_MODEL_TIER_1"
+    effort: "low"
+    max_tokens: 8192
+    price_per_mtok_in: null
+    price_per_mtok_out: null
+  tier-2-balanced:
+    provider: "runtime"
+    model: "runtime-default"
+    model_env: "FACTORY_MODEL_TIER_2"
+    effort: "medium"
+    max_tokens: 32768
+    price_per_mtok_in: null
+    price_per_mtok_out: null
+  tier-3-frontier:
+    provider: "runtime"
+    model: "runtime-default"
+    model_env: "FACTORY_MODEL_TIER_3"
+    effort: "high"
+    max_tokens: 131072
+    price_per_mtok_in: null
+    price_per_mtok_out: null
+
+# Order used when a tier is unavailable. The first entry must be the default.
+fallback: ["tier-3-frontier", "tier-2-balanced", "tier-1-economy"]

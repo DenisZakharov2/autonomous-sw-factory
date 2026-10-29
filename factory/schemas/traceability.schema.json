@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/DenisZakharov2/autonomous-sw-factory/schemas/traceability.schema.json",
+  "title": "RequirementTraceability",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "requirements"],
+  "properties": {
+    "schema_version": {"type": "string", "const": "1.0.0"},
+    "requirements": {
+      "type": "object",
+      "minProperties": 1,
+      "patternProperties": {
+        "^REQ-[A-Z0-9-]+$": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["spec", "tasks", "tests", "acceptance"],
+          "properties": {
+            "spec": {"type": "string", "minLength": 1},
+            "tasks": {"type": "array", "items": {"type": "string", "pattern": "^TASK-[A-Z0-9-]+$"}},
+            "tests": {"type": "array", "items": {"type": "string"}},
+            "acceptance": {"type": "string", "minLength": 1}
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

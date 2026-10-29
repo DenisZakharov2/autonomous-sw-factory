@@ -8,7 +8,13 @@ from pathlib import Path
 from typing import Any
 
 from .artifacts import artifact_path, validate_stage
-from .config import load_artifacts, load_pipeline, resolve_model
+from .config import (
+    load_artifacts,
+    load_budget,
+    load_pipeline,
+    resolve_model,
+    validate_against_schema,
+)
 from .errors import RunError, VerificationError
 from .journal import append_event
 from .paths import run_dir as safe_run_dir
@@ -293,7 +299,7 @@ def _blocked_work_order(
     }
 
 
-def next_action(run_id: str, *, root: str | Path | None = None) -> dict[str, Any]:
+def _next_action(run_id: str, *, root: str | Path | None = None) -> dict[str, Any]:
     run_dir = safe_run_dir(run_id, root)
     state = load_state(run_dir)
     pipeline = load_pipeline()
@@ -320,7 +326,7 @@ def next_action(run_id: str, *, root: str | Path | None = None) -> dict[str, Any
     if gate.get("status") == "approved":
         state["stage_status"][stage["id"]] = "accepted"
         save_state(run_dir, state)
-        return next_action(run_id, root=root)
+        return _next_action(run_id, root=root)
     if stage["id"] == "s4_build":
         tasks = [task for task in state["tasks"].values() if task.get("stage") == "s4_build"]
         if not tasks:
@@ -348,6 +354,13 @@ def next_action(run_id: str, *, root: str | Path | None = None) -> dict[str, Any
                     "next_command": f"factory status --run-id {run_id} --json",
                 }
     return _stage_work_order(run_dir, run_id, state, stage, pipeline, registry)
+
+
+def next_action(run_id: str, *, root: str | Path | None = None) -> dict[str, Any]:
+    """Return the next work order, validated against its own schema."""
+    order = _next_action(run_id, root=root)
+    validate_against_schema(order, "work-order.schema.json", f"work order ({order['action']})")
+    return order
 
 
 def submit_work(
@@ -460,12 +473,18 @@ def gate_reject(
     _check_gate_approver(stage, approver)
     gate_record(state, stage, status="rejected", decided_by=approver, evidence=evidence)
     gate = stage_gate(state, stage)
-    if gate["attempts"] >= stage["max_attempts"]:
-        state["stage_status"][stage["id"]] = "escalated"
+    budget = load_budget()
+    max_attempts = min(
+        int(stage.get("max_attempts", budget["default_max_attempts"])),
+        int(budget["max_veto_retries"]),
+    )
+    if gate["attempts"] >= max_attempts:
+        exhausted = str(budget.get("on_attempts_exhausted", "escalate"))
+        state["stage_status"][stage["id"]] = "blocked" if exhausted == "pause" else "escalated"
         state["veto_counters"][stage["id"]] = state["veto_counters"].get(stage["id"], 0) + 1
         summary = (
             f"Gate {gate_id} rejected by {approver}; "
-            f"{gate['attempts']}/{stage['max_attempts']} attempts exhausted, escalated to human"
+            f"{gate['attempts']}/{max_attempts} attempts exhausted, escalated to human"
         )
     else:
         if stage["rework_to"] != stage["id"]:

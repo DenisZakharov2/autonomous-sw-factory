@@ -102,7 +102,20 @@ def load_models() -> dict[str, Any]:
 
 
 def load_budget() -> dict[str, Any]:
-    return _read_yaml(PACKAGE_ROOT / "budget.yaml")
+    """Attempt limits are enforced by the engine; token/minute/usd budgets by the runtime."""
+    data = _read_yaml(PACKAGE_ROOT / "budget.yaml")
+    attempts = data.get("default_max_attempts")
+    if not isinstance(attempts, int) or isinstance(attempts, bool) or attempts < 1:
+        raise ConfigError("budget.yaml: default_max_attempts must be a positive integer")
+    veto = data.get("max_veto_retries")
+    if not isinstance(veto, int) or isinstance(veto, bool) or veto < 1:
+        raise ConfigError("budget.yaml: max_veto_retries must be a positive integer")
+    if data.get("on_attempts_exhausted", "escalate") not in {"escalate", "pause"}:
+        raise ConfigError("budget.yaml: on_attempts_exhausted must be escalate or pause")
+    enforce = data.get("enforce", {})
+    if not isinstance(enforce, dict):
+        raise ConfigError("budget.yaml: enforce must be a mapping")
+    return data
 
 
 def resolve_model(tier: str) -> dict[str, str]:

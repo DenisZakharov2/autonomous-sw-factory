@@ -123,3 +123,43 @@ def test_scanner_missing_is_error(tmp_path):
     skill = make_skill(tmp_path)
     with pytest.raises(QuarantineError):
         scan_skill(skill, scanner="/definitely/not/a/scanner")
+
+
+def test_default_approver_matches_the_cli_default():
+    import inspect
+
+    from factory.cli import build_parser
+
+    cli_default = build_parser().parse_args(["quarantine", "scan", "x"]).approved_by
+    function_default = inspect.signature(quarantine_skill).parameters["approved_by"].default
+    assert cli_default == function_default == "auto:skillspector"
+
+
+def test_cli_quarantine_logs_skill_install(tmp_path, monkeypatch):
+    from factory import cli as cli_module
+    from factory.journal import read_events
+    from factory.quarantine import ScanResult
+
+    skill = make_skill(tmp_path)
+    result = ScanResult(
+        recommendation="SAFE", severity="LOW", is_complete=True, coverage_percent=100.0,
+        scanner_version="2.12.0",
+    )
+    entry = {"name": "demo", "sha256": "b" * 64}
+    monkeypatch.setattr(
+        cli_module, "quarantine_skill", lambda *args, **kwargs: (AUTO_ALLOW, result, entry)
+    )
+    assert cli_module.main(["init", "--run-id", "run-01", "--runs-root", str(tmp_path)]) == 0
+    code = cli_module.main([
+        "quarantine", "scan", str(skill), "--name", "demo",
+        "--lock", str(tmp_path / "skills-lock.json"),
+        "--run-id", "run-01", "--runs-root", str(tmp_path),
+    ])
+    assert code == 0
+    events = read_events(tmp_path / "run-01" / "blackbox.jsonl")
+    installs = [event for event in events if event["event_type"] == "SKILL_INSTALL"]
+    assert len(installs) == 1
+    assert installs[0]["role"] == "00-orchestrator"
+    assert installs[0]["verdict"]["status"] == "DRAFT"
+    assert installs[0]["stage"] == "s15_quarantine"
+    assert entry["sha256"][:12] in installs[0]["action"]

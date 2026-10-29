@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/DenisZakharov2/autonomous-sw-factory/schemas/task.schema.json",
   "title": "FactoryTask",
+  "description": "One entry of state.tasks. Must stay identical to state.schema.json $defs.task; doctor enforces the parity.",
   "type": "object",
   "additionalProperties": false,
   "required": ["task_id", "stage", "owner", "reqs", "allowed_files", "deps", "status", "attempts", "artifacts", "lease"],
@@ -15,6 +16,7 @@
     "status": {"type": "string", "enum": ["pending", "in_progress", "blocked", "review", "accepted", "escalated"]},
     "attempts": {"type": "integer", "minimum": 0},
     "artifacts": {"type": "array", "items": {"type": "string"}},
-    "lease": {"type": ["string", "null"]}
+    "lease": {"type": ["string", "null"]},
+    "reject_reasons": {"type": "array", "items": {"type": "string"}}
   }
 }

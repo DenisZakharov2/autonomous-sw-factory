@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from factory.artifacts import (
+    check_sections,
     extract_req_ids,
     validate_acceptance,
     validate_plan,
@@ -12,10 +13,12 @@ from factory.artifacts import (
 )
 from factory.config import (
     ConfigError,
+    load_budget,
     load_json,
     validate_instance,
 )
 from factory.verify import (
+    schema_parity_errors,
     validate_role_card,
     validate_roles,
     validate_schemas,
@@ -174,3 +177,92 @@ def test_stage_validation_catches_missing_artifact(nano_run):
 
 def test_extract_req_ids_ignores_placeholders():
     assert extract_req_ids("REQ-001 and REQ-### and REQ-NFR-002") == {"REQ-001", "REQ-NFR-002"}
+
+
+def test_acceptance_pending_is_rejected(nano_run):
+    run_dir, _, _ = nano_run
+    _write_spec(run_dir, ("REQ-001",))
+    (run_dir / "artifacts" / "acceptance.md").write_text(
+        "# Acceptance\n## 1. Матрица приёмки\n| REQ-001 | criterion | evidence | `PENDING` |\n"
+        "## 2. Дефекты\n",
+        encoding="utf-8",
+    )
+    errors = validate_acceptance(run_dir)
+    assert any("PENDING" in error for error in errors)
+    assert any("lacks an explicit PASS row" in error for error in errors)
+
+
+def test_acceptance_requires_pass_for_every_req(nano_run):
+    run_dir, _, _ = nano_run
+    _write_spec(run_dir, ("REQ-001", "REQ-002"))
+    (run_dir / "artifacts" / "acceptance.md").write_text(
+        "# Acceptance\n## 1. Матрица приёмки\n"
+        "| REQ | Критерий | Доказательство | Статус |\n"
+        "| `REQ-001` | add | `test_add` | `PASS` |\n"
+        "## 2. Дефекты\n| `BUG-001` | `Low` | cosmetic | `Open` |\n",
+        encoding="utf-8",
+    )
+    errors = validate_acceptance(run_dir)
+    assert errors == ["acceptance.md lacks an explicit PASS row for REQ-002"]
+
+
+def test_acceptance_blocked_marker_is_rejected(nano_run):
+    run_dir, _, _ = nano_run
+    _write_spec(run_dir, ("REQ-001",))
+    (run_dir / "artifacts" / "acceptance.md").write_text(
+        "# Acceptance\n## 1. Матрица приёмки\n| `REQ-001` | add | none | `PASS` |\n"
+        "| `REQ-002` | - | - | `BLOCKED` |\n## 2. Дефекты\n",
+        encoding="utf-8",
+    )
+    assert any("BLOCKED" in error for error in validate_acceptance(run_dir))
+
+
+def test_check_sections_requires_a_standalone_heading():
+    required = ["## 1. Что сделано"]
+    assert check_sections("# Report\n## 1. Что сделано\nbody\n", required) == []
+    assert check_sections("# Report\nsee `## 1. Что сделано` inline\n", required) == required
+    assert check_sections("# Report\n## 1. Что сделано и проверено\n", required) == required
+
+
+def test_empty_screens_directory_is_rejected(nano_run):
+    from factory.config import load_artifacts, load_pipeline
+    from factory.state import find_stage
+
+    run_dir, _, _ = nano_run
+    stage = find_stage(load_pipeline(), "s2_architecture")
+    errors = validate_stage(run_dir, stage, load_artifacts(), {})
+    assert any("artifacts/screens" in error and "empty" in error for error in errors)
+
+
+def test_empty_patches_directory_is_rejected(nano_run):
+    from factory.config import load_artifacts, load_pipeline
+    from factory.state import find_stage
+
+    run_dir, _, _ = nano_run
+    stage = find_stage(load_pipeline(), "s9_learn")
+    errors = validate_stage(run_dir, stage, load_artifacts(), {})
+    assert any("artifacts/patches" in error and "empty" in error for error in errors)
+
+
+def test_standalone_schemas_match_the_state_records():
+    state_schema = load_json(Path("factory/schemas/state.schema.json"))
+    for name, key in (("task.schema.json", "task"), ("gate.schema.json", "gate")):
+        other = load_json(Path("factory/schemas") / name)
+        assert schema_parity_errors(state_schema, name, other, key) == []
+
+    drifted = load_json(Path("factory/schemas/gate.schema.json"))
+    drifted["properties"].pop("decided_by")
+    assert schema_parity_errors(state_schema, "gate.schema.json", drifted, "gate")
+
+
+def test_schema_parity_reports_a_missing_definition():
+    assert schema_parity_errors({}, "gate.schema.json", {}, "gate") == [
+        "state.schema.json is missing $defs.gate"
+    ]
+
+
+def test_budget_config_is_typed():
+    budget = load_budget()
+    assert isinstance(budget["default_max_attempts"], int)
+    assert isinstance(budget["max_veto_retries"], int)
+    assert budget["default_max_attempts"] >= 1

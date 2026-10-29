@@ -13,8 +13,8 @@ from factory.engine import (
     task_reject,
     task_submit,
 )
-from factory.errors import RunError
-from factory.state import get_task, load_state, save_state
+from factory.errors import ConfigError, RunError
+from factory.state import get_task, load_state, reject_task, save_state
 
 PLAN = (
     "# Plan\n## 1. Задачи\n"
@@ -241,3 +241,34 @@ def test_blocked_stage_does_not_report_produce(nano_run):
     order = next_action("run-01", root=run.parent)
     assert order["action"] == "blocked"
     assert order["artifacts"] == []
+
+
+def test_next_action_validates_its_work_order(monkeypatch, nano_run):
+    run, _, _ = nano_run
+    monkeypatch.setattr(
+        "factory.engine._next_action",
+        lambda run_id, root=None: {"action": "produce"},
+    )
+    with pytest.raises(ConfigError, match="work order"):
+        next_action("run-01", root=run.parent)
+
+
+def test_task_attempt_limit_is_configurable(nano_run):
+    run, _, _ = nano_run
+    _plan_run(run)
+    state = load_state(run)
+    reject_task(state, "TASK-001", "first", max_attempts=2)
+    assert get_task(state, "TASK-001")["status"] == "pending"
+    reject_task(state, "TASK-001", "second", max_attempts=2)
+    assert get_task(state, "TASK-001")["status"] == "escalated"
+
+
+def test_task_default_attempt_limit_matches_budget(nano_run):
+    run, _, _ = nano_run
+    _plan_run(run)
+    state = load_state(run)
+    for attempt in range(2):
+        reject_task(state, "TASK-001", f"attempt {attempt}")
+    assert get_task(state, "TASK-001")["status"] == "pending"
+    reject_task(state, "TASK-001", "last")
+    assert get_task(state, "TASK-001")["status"] == "escalated"

@@ -8,6 +8,6 @@
   "cycle_time_p90_minutes": 0.03,
   "cost_per_artifact_usd": null,
   "top_reject_reasons": [],
-  "verification_coverage": 0.9230769230769231,
+  "verification_coverage": 1.0,
   "traceability_coverage": 1.0
 }

@@ -239,7 +239,7 @@ def quarantine_skill(
     commit: str,
     license: str,
     lock_path: Path,
-    approved_by: str = "human:pending",
+    approved_by: str = "auto:skillspector",
     scanner: str = "skillspector",
     min_coverage: float = 95.0,
     no_llm: bool = False,

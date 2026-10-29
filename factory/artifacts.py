@@ -37,7 +37,13 @@ def pattern_paths(run_dir: Path, spec: dict[str, Any]) -> list[Path]:
 
 
 def check_sections(text: str, required: list[str]) -> list[str]:
-    return [section for section in required if section not in text]
+    """A required section must be a whole heading line, not a substring anywhere."""
+    missing = []
+    for section in required:
+        pattern = re.compile(rf"^{re.escape(section)}\s*$", re.MULTILINE)
+        if not pattern.search(text):
+            missing.append(section)
+    return missing
 
 
 def validate_markdown(path: Path, required_sections: list[str]) -> list[str]:
@@ -116,9 +122,22 @@ def validate_acceptance(run_dir: Path) -> list[str]:
         return ["acceptance.md is missing"]
     reqs = extract_req_ids(spec.read_text(encoding="utf-8")) if spec.exists() else set()
     text = acceptance.read_text(encoding="utf-8")
-    errors = [f"acceptance.md does not cover {req}" for req in sorted(reqs) if req not in text]
-    if re.search(r"\|\s*`?FAIL`?\s*\|", text, re.IGNORECASE):
-        errors.append("acceptance.md contains a FAIL row")
+    errors: list[str] = []
+    for marker, label in (
+        (re.compile(r"\bPENDING\b", re.IGNORECASE), "PENDING"),
+        (re.compile(r"\[ТРЕБУЕТ ПРОВЕРКИ\]"), "[ТРЕБУЕТ ПРОВЕРКИ]"),
+        (re.compile(r"\bFAIL\b", re.IGNORECASE), "FAIL"),
+        (re.compile(r"\bBLOCKED\b", re.IGNORECASE), "BLOCKED"),
+    ):
+        if marker.search(text):
+            errors.append(f"acceptance.md contains a {label} marker; only PASS is accepted")
+    for req in sorted(reqs):
+        token = re.compile(rf"(?<![A-Z0-9-]){re.escape(req)}(?![A-Z0-9-])")
+        if not any(
+            token.search(line) and re.search(r"\bPASS\b", line, re.IGNORECASE)
+            for line in text.splitlines()
+        ):
+            errors.append(f"acceptance.md lacks an explicit PASS row for {req}")
     return errors
 
 
@@ -132,7 +151,7 @@ def validate_stage(run_dir: Path, stage: dict[str, Any], registry: dict[str, Any
             path = artifact_path(run_dir, spec)
             if not path.exists() or not path.is_dir():
                 errors.append(f"missing directory: {path}")
-            elif artifact_id in {"product_src", "product_tests"} and not any(path.rglob("*")):
+            elif not any(item.is_file() for item in path.rglob("*")):
                 errors.append(f"directory is empty: {path}")
             continue
         if spec.get("per_task"):

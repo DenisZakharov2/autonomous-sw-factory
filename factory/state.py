@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from .config import load_json, load_pipeline, validate_against_schema
+from .config import load_budget, load_json, load_pipeline, validate_against_schema
 from .errors import RunError
 from .journal import utc_now
 from .paths import validate_task_id
@@ -208,10 +208,18 @@ def accept_task(state: dict[str, Any], task_id: str) -> dict[str, Any]:
     return task
 
 
-def reject_task(state: dict[str, Any], task_id: str, reason: str) -> dict[str, Any]:
+def reject_task(
+    state: dict[str, Any],
+    task_id: str,
+    reason: str,
+    *,
+    max_attempts: int | None = None,
+) -> dict[str, Any]:
+    validate_task_id(task_id)
     task = get_task(state, task_id)
+    limit = max_attempts or int(load_budget()["default_max_attempts"])
     task["attempts"] += 1
-    task["status"] = "escalated" if task["attempts"] >= 3 else "pending"
+    task["status"] = "escalated" if task["attempts"] >= limit else "pending"
     task["lease"] = None
     task.setdefault("reject_reasons", []).append(reason)
     return task

@@ -469,6 +469,10 @@ def main() -> int:
     write_metrics(EXAMPLE)
     submit_and_gate("s9_learn", "00-orchestrator", "gate_s9", "human:example", "patch queued for human review")
 
+    # Metrics count approved gates, so they are recomputed after gate_s9 closes:
+    # computing them before the final gate understates verification_coverage.
+    write_metrics(EXAMPLE)
+
     errors = verify_run(EXAMPLE, "s9_learn", require_gate=True)
     if errors:
         print("EXAMPLE VERIFY FAILED")

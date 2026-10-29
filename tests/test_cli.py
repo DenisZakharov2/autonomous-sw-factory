@@ -115,6 +115,19 @@ def test_metrics_returns_all_eight(tmp_path):
         assert key in data
 
 
+def test_budget_command_reports_engine_limits(tmp_path):
+    assert cli("init", "--run-id", "demo", "--mode", "nano", runs_root=tmp_path).returncode == 0
+    result = cli("budget", "--run-id", "demo", runs_root=tmp_path)
+    assert result.returncode == 0, result.stderr
+    data = json.loads(result.stdout)
+    assert data["default_max_attempts"] == 3
+    assert data["mode"] == "nano"
+    assert data["mode_budget"]["minutes"] == 90
+    assert data["enforced_by_engine"] == ["attempts", "veto_retries"]
+    assert data["runtime_responsibility"] == ["minutes", "tokens", "usd"]
+    assert data["attempts_used"] == {"gates": {}, "tasks": {}}
+
+
 def test_brownfield_starts_at_s_in(tmp_path):
     assert cli("init", "--run-id", "legacy", "--mode", "brownfield", runs_root=tmp_path).returncode == 0
     status = json.loads(cli("status", "--run-id", "legacy", "--json", runs_root=tmp_path).stdout)

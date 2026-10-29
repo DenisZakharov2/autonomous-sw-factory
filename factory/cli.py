@@ -7,7 +7,13 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .config import load_artifacts, project_root
+from .config import (
+    load_artifacts,
+    load_budget,
+    load_pipeline,
+    project_root,
+    resolve_model,
+)
 from .engine import (
     gate_approve,
     gate_reject,
@@ -23,7 +29,7 @@ from .engine import (
     task_submit,
 )
 from .errors import FactoryError
-from .journal import read_events, verify_chain
+from .journal import append_event, read_events, verify_chain
 from .metrics import compute_metrics, write_metrics
 from .paths import run_dir as safe_run_dir
 from .quarantine import (
@@ -205,6 +211,26 @@ def cmd_quarantine(args: argparse.Namespace) -> int:
         print("failed analyzers: " + ", ".join(result.failed_analyzers))
     if entry:
         print(f"lock entry written: {args.lock}")
+        if args.run_id:
+            run_dir = safe_run_dir(args.run_id, _runs_root(args))
+            model = resolve_model("tier-2-balanced")
+            append_event(
+                run_dir,
+                stage="s15_quarantine",
+                task_id=None,
+                role="00-orchestrator",
+                event_type="SKILL_INSTALL",
+                why="Quarantine scan auto-allowed the skill",
+                for_what=f"Install {args.name}",
+                action=f"Installed {args.name} sha256={entry['sha256'][:12]}",
+                verdict_status="DRAFT",
+                verified_by="00-orchestrator",
+                evidence=[f"lock: {args.lock}", f"scan: {result.recommendation}/{result.severity}"],
+                model_tier=model["tier"],
+                model_id=model["model_id"],
+                reasoning_effort=model["effort"],
+            )
+            print(f"SKILL_INSTALL logged: {args.run_id}")
     return {
         AUTO_ALLOW: 0,
         ESCALATE_HUMAN: 2,
@@ -248,6 +274,44 @@ def cmd_artifacts(args: argparse.Namespace) -> int:
 
 def cmd_models(args: argparse.Namespace) -> int:
     _print_json({tier: model_for(tier) for tier in ("tier-1-economy", "tier-2-balanced", "tier-3-frontier")})
+    return 0
+
+
+def cmd_budget(args: argparse.Namespace) -> int:
+    budget = load_budget()
+    pipeline = load_pipeline()
+    payload: dict[str, object] = {
+        "default_max_attempts": budget["default_max_attempts"],
+        "max_veto_retries": budget["max_veto_retries"],
+        "on_attempts_exhausted": budget.get("on_attempts_exhausted", "escalate"),
+        "on_budget_exhausted": budget.get("on_budget_exhausted"),
+        "on_model_unavailable": budget.get("on_model_unavailable"),
+        "enforced_by_engine": ["attempts", "veto_retries"],
+        "runtime_responsibility": sorted(
+            name for name, enabled in (budget.get("enforce") or {}).items() if enabled
+        ),
+    }
+    if args.run_id:
+        state = load_state(safe_run_dir(args.run_id, _runs_root(args)))
+        payload["mode"] = state["mode"]
+        payload["mode_budget"] = pipeline["modes"][state["mode"]].get("budget")
+        payload["attempts_used"] = {
+            "gates": {
+                gate_id: record["attempts"]
+                for gate_id, record in state["gate_status"].items()
+                if record.get("attempts")
+            },
+            "tasks": {
+                task_id: task["attempts"]
+                for task_id, task in state["tasks"].items()
+                if task.get("attempts")
+            },
+        }
+    else:
+        payload["mode_budgets"] = {
+            mode: cfg.get("budget") for mode, cfg in pipeline["modes"].items()
+        }
+    _print_json(payload)
     return 0
 
 
@@ -330,6 +394,8 @@ def build_parser() -> argparse.ArgumentParser:
     quarantine.add_argument("--license", default="unknown")
     quarantine.add_argument("--lock", default="skills-lock.json")
     quarantine.add_argument("--skills-root")
+    quarantine.add_argument("--run-id", help="write a SKILL_INSTALL event to this run")
+    quarantine.add_argument("--runs-root")
     quarantine.add_argument("--approved-by", default="auto:skillspector")
     quarantine.add_argument("--scanner", default="skillspector")
     quarantine.add_argument("--min-coverage", type=float, default=95.0)
@@ -354,6 +420,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     models = sub.add_parser("models", help="show resolved model tiers")
     models.set_defaults(func=cmd_models)
+
+    budget = sub.add_parser("budget", help="show attempt limits and mode budgets")
+    budget.add_argument("--run-id")
+    budget.add_argument("--runs-root")
+    budget.set_defaults(func=cmd_budget)
     return parser
 
 

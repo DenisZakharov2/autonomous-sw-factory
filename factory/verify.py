@@ -9,7 +9,14 @@ import jsonschema
 import yaml
 
 from .artifacts import validate_stage, validate_templates
-from .config import PACKAGE_ROOT, load_artifacts, load_json, load_models, load_pipeline
+from .config import (
+    PACKAGE_ROOT,
+    SCHEMA_DIR,
+    load_artifacts,
+    load_json,
+    load_models,
+    load_pipeline,
+)
 from .errors import ConfigError, FactoryError, RunError
 from .journal import verify_chain
 from .pipeline import role_ids, validate_pipeline
@@ -126,6 +133,23 @@ def validate_roles() -> list[str]:
     return errors
 
 
+PARITY_KEYS = ("type", "additionalProperties", "required", "properties")
+
+
+def schema_parity_errors(
+    state_schema: dict[str, Any], name: str, other: dict[str, Any], key: str
+) -> list[str]:
+    """A standalone schema must describe exactly the record the state stores."""
+    expected = (state_schema.get("$defs") or {}).get(key)
+    if expected is None:
+        return [f"state.schema.json is missing $defs.{key}"]
+    if {field: expected.get(field) for field in PARITY_KEYS} != {
+        field: other.get(field) for field in PARITY_KEYS
+    }:
+        return [f"{name} has drifted from state.schema.json $defs.{key}"]
+    return []
+
+
 def validate_schemas() -> list[str]:
     errors: list[str] = []
     for path in sorted((PACKAGE_ROOT / "schemas").glob("*.json")):
@@ -134,6 +158,14 @@ def validate_schemas() -> list[str]:
             jsonschema.Draft202012Validator.check_schema(schema)
         except (ConfigError, jsonschema.SchemaError) as exc:
             errors.append(f"{path.name}: invalid JSON Schema: {exc}")
+    try:
+        state_schema = load_json(SCHEMA_DIR / "state.schema.json")
+        for name, key in (("task.schema.json", "task"), ("gate.schema.json", "gate")):
+            errors.extend(
+                schema_parity_errors(state_schema, name, load_json(SCHEMA_DIR / name), key)
+            )
+    except ConfigError as exc:
+        errors.append(str(exc))
     return errors
 
 

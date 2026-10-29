@@ -1,13 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/DenisZakharov2/autonomous-sw-factory/schemas/gate.schema.json",
-  "title": "FactoryGateDecision",
+  "title": "FactoryGateRecord",
+  "description": "One entry of state.gate_status. Must stay identical to state.schema.json $defs.gate; doctor enforces the parity.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["gate_id", "stage", "status", "approver", "decided_by", "decided_at", "evidence", "attempts"],
+  "required": ["status", "approver", "decided_by", "decided_at", "evidence", "attempts"],
   "properties": {
-    "gate_id": {"type": "string", "pattern": "^gate_"},
-    "stage": {"type": "string"},
     "status": {"type": "string", "enum": ["pending", "approved", "rejected", "needs_human"]},
     "approver": {"type": "string"},
     "decided_by": {"type": ["string", "null"]},

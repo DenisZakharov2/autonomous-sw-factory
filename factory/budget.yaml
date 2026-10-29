@@ -1,16 +1,23 @@
 schema_version: "1.0.0"
 
 # A blocking veto is a stop, not a comment. After this many reworks on the
-# same stage the run is escalated to a human.
+# same stage the run is escalated to a human. max_veto_retries caps the
+# per-stage max_attempts from pipeline.yaml; default_max_attempts is the
+# fallback for a stage that declares no limit.
 max_veto_retries: 3
 default_max_attempts: 3
 
-on_attempts_exhausted: "escalate"
+on_attempts_exhausted: "escalate"   # escalate | pause
 on_budget_exhausted: "pause"
 on_model_unavailable: "fallback_then_escalate"
 
-# Budgets live in pipeline.yaml under each mode so there is one source of
-# truth. These are hard stops, checked by `factory cost` and by the runner.
+# What the engine enforces: attempts per task (state.reject_task) and per gate
+# (engine.gate_reject), plus the veto retry cap. `factory budget` prints these
+# limits and the attempts already consumed.
+#
+# Token, minute and USD budgets live in pipeline.yaml under each mode and are
+# enforced by the host runtime, not by this engine: journal events still carry
+# no token or price fields, so cost_per_artifact_usd stays null.
 enforce:
   tokens: true
   minutes: true

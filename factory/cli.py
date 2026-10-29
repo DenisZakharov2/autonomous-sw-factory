@@ -114,6 +114,8 @@ def cmd_submit(args: argparse.Namespace) -> int:
 
 
 def cmd_task(args: argparse.Namespace) -> int:
+    if args.task_command not in {"import", "list"} and not args.task_id:
+        raise FactoryError("--task-id is required for this task command")
     if args.task_command == "import":
         tasks = import_plan(args.run_id, root=_runs_root(args))
         print(f"imported {len(tasks)} tasks")
@@ -190,6 +192,8 @@ def cmd_quarantine(args: argparse.Namespace) -> int:
             return 1
         print(f"LOCK OK: {args.lock}")
         return 0
+    if not args.path:
+        raise FactoryError("a skill path is required for quarantine scan")
     action, result, entry = quarantine_skill(
         Path(args.path), name=args.name, pack=args.pack, commit=args.commit,
         license=args.license, lock_path=Path(args.lock), approved_by=args.approved_by,

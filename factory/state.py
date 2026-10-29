@@ -9,6 +9,7 @@ from typing import Any
 from .config import load_json, load_pipeline, validate_against_schema
 from .errors import RunError
 from .journal import utc_now
+from .paths import validate_task_id
 
 STAGE_STATUSES = {"pending", "in_progress", "review", "accepted", "blocked", "escalated"}
 GATE_STATUSES = {"pending", "approved", "rejected", "needs_human"}
@@ -147,10 +148,52 @@ def claim_task(state: dict[str, Any], task_id: str, owner: str) -> dict[str, Any
     return task
 
 
-def submit_task(state: dict[str, Any], task_id: str, artifacts: list[str]) -> dict[str, Any]:
+def _resolve_under(run_dir: Path, raw: str) -> Path:
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        candidate = run_dir / candidate
+    return candidate.resolve()
+
+
+def _allowed_paths(task: dict[str, Any], run_dir: Path) -> list[tuple[Path, bool]]:
+    """Allowed files resolved against the run directory, plus the task deliverable."""
+    allowed: list[tuple[Path, bool]] = []
+    for entry in task["allowed_files"]:
+        allowed.append((_resolve_under(run_dir, str(entry)), str(entry).endswith("/")))
+    allowed.append((_resolve_under(run_dir, f"tasks/{task['task_id']}/deliverable.md"), False))
+    return allowed
+
+
+def check_allowed_files(task: dict[str, Any], artifacts: list[str], run_dir: Path) -> None:
+    allowed = _allowed_paths(task, run_dir)
+    for item in artifacts:
+        candidate = _resolve_under(run_dir, str(item))
+        if any(
+            candidate == path or (is_dir and path in candidate.parents)
+            for path, is_dir in allowed
+        ):
+            continue
+        raise RunError(
+            f"artifact {item!r} is outside allowed_files for {task['task_id']}: "
+            f"{task['allowed_files']}"
+        )
+
+
+def submit_task(
+    state: dict[str, Any],
+    task_id: str,
+    role: str,
+    artifacts: list[str],
+    *,
+    run_dir: Path,
+) -> dict[str, Any]:
+    validate_task_id(task_id)
     task = get_task(state, task_id)
+    if task["owner"] != role:
+        raise RunError(f"task {task_id} is owned by {task['owner']}, not {role}")
     if task["status"] != "in_progress":
         raise RunError(f"task {task_id} is {task['status']}, cannot submit")
+    check_allowed_files(task, artifacts, run_dir)
     task["status"] = "review"
     task["artifacts"] = artifacts
     task["lease"] = None

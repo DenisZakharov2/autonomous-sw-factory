@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .artifacts import validate_stage
+from .artifacts import artifact_path, validate_stage
 from .config import load_artifacts, load_pipeline, resolve_model
 from .errors import RunError, VerificationError
 from .journal import append_event
@@ -47,6 +47,67 @@ def _check_artifact_paths(run_dir: Path, artifacts: list[str]) -> None:
             candidate = run_dir / candidate
         if not candidate.exists():
             raise RunError(f"artifact does not exist: {candidate}")
+
+
+def _check_gate_approver(stage: dict[str, Any], approver: str) -> None:
+    """A gate is decided only by its declared approver, on approve and on reject."""
+    expected = stage["gate"]["approver"]
+    gate_id = stage["gate"]["id"]
+    if expected == "human":
+        if not approver.startswith("human:"):
+            raise RunError(f"gate {gate_id} requires a human approver, got {approver!r}")
+    elif approver != expected:
+        raise RunError(f"gate {gate_id} must be decided by {expected}, got {approver!r}")
+
+
+def _declared_artifact_base(run_dir: Path, spec: dict[str, Any]) -> tuple[Path, bool]:
+    """Resolved base path of a declared artifact and whether it scopes a directory."""
+    path = str(spec["path"])
+    if spec.get("per_pattern") and "{num}" in path:
+        return (run_dir / path.rsplit("/", 1)[0]).resolve(), True
+    if spec.get("root"):
+        return artifact_path(run_dir, spec), False
+    return (run_dir / path).resolve(), bool(spec.get("directory"))
+
+
+def _check_stage_artifact_owners(
+    run_dir: Path,
+    stage: dict[str, Any],
+    role: str,
+    artifacts: list[str],
+    pipeline: dict[str, Any],
+    state: dict[str, Any],
+    registry: dict[str, Any],
+) -> None:
+    """A stage submit may only carry artifacts owned by the submitting role."""
+    if not artifacts:
+        return
+    declared = []
+    for spec in stage_artifacts(pipeline, registry, state["mode"], stage, run_dir=run_dir):
+        if spec.get("per_task"):
+            continue
+        base, is_dir = _declared_artifact_base(run_dir, spec)
+        declared.append((str(spec.get("owner", "")), base, is_dir))
+    for item in artifacts:
+        candidate = Path(item)
+        if not candidate.is_absolute():
+            candidate = run_dir / candidate
+        candidate = candidate.resolve()
+        owner = next(
+            (
+                candidate_owner
+                for candidate_owner, base, is_dir in declared
+                if candidate == base or (is_dir and base in candidate.parents)
+            ),
+            None,
+        )
+        if owner is None:
+            raise RunError(f"artifact {item!r} is not declared for stage {stage['id']}")
+        if owner != role:
+            raise RunError(
+                f"artifact {item!r} on stage {stage['id']} is owned by {owner}, not {role}"
+            )
+
 
 def init_run(
     run_id: str,
@@ -235,12 +296,17 @@ def submit_work(
     run_dir = safe_run_dir(run_id, root)
     state = load_state(run_dir)
     pipeline = load_pipeline()
+    registry = load_artifacts()
     stage = find_stage(pipeline, stage_id)
     if role not in effective_roles(pipeline, state["mode"], stage):
         raise RunError(f"role {role} is not active on {stage_id} in mode {state['mode']}")
     _check_artifact_paths(run_dir, artifacts)
     if task_id:
-        submit_task(state, task_id, artifacts)
+        submit_task(state, task_id, role, artifacts, run_dir=run_dir)
+    else:
+        _check_stage_artifact_owners(
+            run_dir, stage, role, artifacts, pipeline, state, registry
+        )
     state["stage_status"][stage_id] = "review"
     save_state(run_dir, state)
     model = resolve_model("tier-2-balanced")
@@ -276,12 +342,7 @@ def gate_approve(
     stage = next((s for s in pipeline["stages"] if s["gate"]["id"] == gate_id), None)
     if stage is None:
         raise RunError(f"unknown gate: {gate_id}")
-    expected = stage["gate"]["approver"]
-    if expected == "human":
-        if not approver.startswith("human:"):
-            raise RunError(f"gate {gate_id} requires a human approver, got {approver!r}")
-    elif approver != expected:
-        raise RunError(f"gate {gate_id} must be approved by {expected}, got {approver!r}")
+    _check_gate_approver(stage, approver)
     errors = verify_run(run_dir, stage["id"], require_gate=False)
     if errors:
         raise VerificationError("gate preconditions failed:\n- " + "\n- ".join(errors))
@@ -329,6 +390,7 @@ def gate_reject(
     stage = next((s for s in pipeline["stages"] if s["gate"]["id"] == gate_id), None)
     if stage is None:
         raise RunError(f"unknown gate: {gate_id}")
+    _check_gate_approver(stage, approver)
     gate_record(state, stage, status="rejected", decided_by=approver, evidence=evidence)
     gate = stage_gate(state, stage)
     if gate["attempts"] >= stage["max_attempts"]:
@@ -429,10 +491,11 @@ def task_claim(run_id: str, task_id: str, owner: str, *, root: str | Path | None
 
 
 def task_submit(run_id: str, task_id: str, role: str, artifacts: list[str], *, root: str | Path | None = None) -> dict[str, Any]:
+    validate_task_id(task_id)
     run_dir = safe_run_dir(run_id, root)
     state = load_state(run_dir)
     _check_artifact_paths(run_dir, artifacts)
-    submit_task(state, task_id, artifacts)
+    submit_task(state, task_id, role, artifacts, run_dir=run_dir)
     save_state(run_dir, state)
     model = resolve_model("tier-2-balanced")
     return append_event(
@@ -444,6 +507,7 @@ def task_submit(run_id: str, task_id: str, role: str, artifacts: list[str], *, r
 
 
 def task_accept(run_id: str, task_id: str, *, root: str | Path | None = None) -> dict[str, Any]:
+    validate_task_id(task_id)
     run_dir = safe_run_dir(run_id, root)
     state = load_state(run_dir)
     accept_task(state, task_id)
@@ -459,6 +523,7 @@ def task_accept(run_id: str, task_id: str, *, root: str | Path | None = None) ->
 
 
 def task_reject(run_id: str, task_id: str, reason: str, *, root: str | Path | None = None) -> dict[str, Any]:
+    validate_task_id(task_id)
     run_dir = safe_run_dir(run_id, root)
     state = load_state(run_dir)
     reject_task(state, task_id, reason)

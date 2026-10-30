@@ -10,7 +10,7 @@ from factory.runtime.base import RunContext
 from factory.runtime.hermes import HermesExecutor
 from factory.runtime.opencode import OpenCodeExecutor
 from factory.runtime.prompt import build_prompt
-from factory.runtime.sandbox import sandbox_command
+from factory.runtime.sandbox import sandbox_available, sandbox_command
 
 
 def _stub(bin_dir: Path, name: str, body: str) -> Path:
@@ -161,6 +161,7 @@ def test_hermes_failed_turn_is_not_success(tmp_path, monkeypatch, context):
     assert result.exit_code == 1
 
 
+@pytest.mark.skipif(not sandbox_available(), reason="bubblewrap is not installed")
 def test_sandbox_wraps_with_a_narrow_view(tmp_path):
     cmd = sandbox_command(["true"], tmp_path, enabled=True)
     assert cmd[0] == "bwrap"
@@ -179,6 +180,7 @@ def test_sandbox_wraps_with_a_narrow_view(tmp_path):
         sandbox_command(["true"], tmp_path, backend="systemd")
 
 
+@pytest.mark.skipif(not sandbox_available(), reason="bubblewrap is not installed")
 def test_sandbox_binds_context_read_write_paths(tmp_path, context):
     usage = tmp_path / "usage.json"
     cmd = HermesExecutor(sandbox=True).command(

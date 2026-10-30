@@ -3,6 +3,15 @@
 All notable changes are recorded here. The project follows a simple
 `0.MINOR.PATCH` scheme until `1.0.0`.
 
+## [0.2.1] — 2026-10-30
+
+### Fixed
+
+- **CI:** sandbox-тесты помечены `skipif`, когда `bwrap` не установлен, а сам CI
+  ставит `bubblewrap`; на GitHub runners матрица падала с
+  `bubblewrap is not installed`, хотя локально всё проходило. Функциональность
+  `0.2.0` не менялась.
+
 ## [0.2.0] — 2026-10-30
 
 ### Added

@@ -40,7 +40,7 @@ Out of scope:
 - the unsiged hash chain being rewritable by a writer who recomputes it — this
   is a documented limitation, not a surprise.
 
-## Controls in `0.2.0`
+## Controls in `0.2.1`
 
 - strict run-id regex and resolved-path checks;
 - `fcntl.flock` around journal writes;

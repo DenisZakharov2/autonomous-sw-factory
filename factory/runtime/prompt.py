@@ -86,8 +86,11 @@ def build_prompt(
     role: str | None = None,
     evidence: list[str] | None = None,
     max_chars: int = 26000,
+    workspace: Path | None = None,
 ) -> str:
     from ..config import load_artifacts, load_pipeline as _pipeline
+
+    workspace = Path(workspace) if workspace is not None else run_dir
 
     pipeline = _pipeline()
     registry = load_artifacts()
@@ -244,7 +247,7 @@ def build_prompt(
         lines.append("")
 
     lines.append("# Разрешённые пути")
-    lines.append(f"Работай только внутри `{run_dir}`. Разрешено писать:")
+    lines.append(f"Работай только внутри `{workspace}`. Разрешено писать:")
     pending_paths = [str(item.get("path")) for item in own]
     if not pending_paths and stage_errors:
         pending_paths = [

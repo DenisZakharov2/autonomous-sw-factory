@@ -19,7 +19,7 @@ from ..engine import gate_approve, gate_reject, next_action, submit_work, task_a
 from ..errors import FactoryError, RunError
 from ..journal import sha256_file
 from ..paths import run_dir as safe_run_dir
-from ..state import load_state
+from ..state import find_stage, load_state
 from ..verify import verify_run
 from .base import Executor, RunContext, RuntimeFailure, safe_write_text
 from .evidence import EvidenceStore
@@ -184,9 +184,20 @@ def _submit_order(
     run_dir: Path,
     root: str | Path | None,
     state: dict[str, Any],
+    *,
+    role: str | None = None,
 ) -> list[str]:
+    """Submit the declared artifacts this step's role is responsible for.
+
+    A stage order lists every artifact of the stage.  Submitting the whole
+    plan after each step re-submits artifacts that other roles produced
+    earlier, attributes them to a role that did not run, and inflates the
+    journal.  The acting role filters the plan.
+    """
     task = state["tasks"].get(str(order.get("task_id"))) if order.get("task_id") else None
     plan = work_order_submit_plan(order, run_dir, task=task)
+    if role:
+        plan = [entry for entry in plan if entry["owner"] == role]
     if not plan:
         return []
     task_id = order.get("task_id")
@@ -220,6 +231,55 @@ def _submit_order(
     return [entry["path"] for entry in plan]
 
 
+def _ready_build_tasks(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Pending build tasks whose dependencies are already accepted.
+
+    A task in `review` or `in_progress` means the sequential path owns the
+    next step; parallel work must not jump ahead of it.
+    """
+    tasks = [task for task in state["tasks"].values() if task.get("stage") == "s4_build"]
+    if any(task["status"] in {"review", "in_progress", "escalated", "blocked"} for task in tasks):
+        return []
+    return [
+        task
+        for task in tasks
+        if task["status"] == "pending"
+        and all(
+            state["tasks"].get(dep, {}).get("status") == "accepted"
+            for dep in task.get("deps", [])
+        )
+    ]
+
+
+def _record_parallel_usage(
+    ledger: UsageLedger, outcomes: list[Any], *, executor_name: str
+) -> None:
+    for outcome in outcomes:
+        usage = dict(outcome.usage or {})
+        ledger.append(
+            {
+                "step": ledger.next_step(),
+                "parallel": True,
+                "task_id": outcome.task_id,
+                "stage": "s4_build",
+                "role": outcome.role,
+                "executor": executor_name,
+                "exit_code": 0 if outcome.ok else 1,
+                "seconds": outcome.seconds,
+                "tokens_total": usage.get("tokens_total"),
+                "tokens_in": usage.get("tokens_in"),
+                "tokens_out": usage.get("tokens_out"),
+                "cache_read": usage.get("cache_read"),
+                "api_calls": usage.get("api_calls"),
+                "model": usage.get("model"),
+                "usd": usage.get("usd"),
+                "prompt_chars": outcome.prompt_chars,
+                "summary": (outcome.error or "worktree task merged")[:500],
+                "transcript": outcome.transcript,
+            }
+        )
+
+
 def run_loop(
     run_id: str,
     executor: Executor,
@@ -229,6 +289,7 @@ def run_loop(
     budget: dict[str, Any] | None = None,
     enforce: dict[str, Any] | None = None,
     prompt_limit: int = 26000,
+    parallel_tasks: int = 0,
     progress: Callable[[int, dict[str, Any]], None] | None = None,
 ) -> LoopResult:
     run_dir = safe_run_dir(run_id, root)
@@ -274,6 +335,76 @@ def run_loop(
             progress(step, order)
         action = str(order["action"])
         stage_id = order.get("stage")
+
+        if parallel_tasks > 1 and action == "produce" and stage_id == "s4_build":
+            current = load_state(run_dir)
+            ready = _ready_build_tasks(current)
+            if len(ready) >= 2:
+                from .worktree import run_parallel_tasks
+
+                stage = find_stage(pipeline, "s4_build")
+                try:
+                    batch = run_parallel_tasks(
+                        run_id,
+                        run_dir,
+                        stage,
+                        ready[:parallel_tasks],
+                        executor,
+                        root=root,
+                        max_workers=parallel_tasks,
+                        prompt_limit=prompt_limit,
+                    )
+                except FactoryError as exc:
+                    path = evidence_store.write_step(
+                        step, order, {"status": "parallel_failed", "error": str(exc)}
+                    )
+                    stop = finish("parallel_failed", STOP, str(exc), stage_id)
+                    stop.evidence_path = str(path)
+                    return stop
+                _record_parallel_usage(
+                    ledger,
+                    batch.outcomes,
+                    executor_name=getattr(executor, "name", type(executor).__name__),
+                )
+                evidence_store.write_step(
+                    step,
+                    order,
+                    {
+                        "status": "parallel_batch",
+                        "tasks": batch.tasks,
+                        "merged": sorted(batch.merged),
+                        "outcomes": [
+                            {
+                                "task_id": item.task_id,
+                                "ok": item.ok,
+                                "error": item.error,
+                                "changed": item.changed,
+                                "worktree": item.worktree,
+                            }
+                            for item in batch.outcomes
+                        ],
+                    },
+                )
+                violation = ledger.budget_violation(budget, enforce)
+                if violation:
+                    path = evidence_store.write_step(
+                        step, order, {"status": "budget", "violation": violation}
+                    )
+                    stop = finish("budget", STOP, violation, stage_id)
+                    stop.evidence_path = str(path)
+                    return stop
+                if not batch.ok:
+                    errors = [item.error for item in batch.outcomes if item.error]
+                    stop = finish(
+                        "parallel_failed",
+                        STOP,
+                        "; ".join(errors) or "no parallel task produced artifacts",
+                        stage_id,
+                    )
+                    return stop
+                last_digest = None
+                evidence = []
+                continue
 
         if action == "complete":
             return finish("complete", COMPLETE, "all gates approved", None)
@@ -478,7 +609,9 @@ def run_loop(
 
         state = load_state(run_dir)
         task = state["tasks"].get(str(order.get("task_id"))) if order.get("task_id") else None
-        submitted = _submit_order(run_id, order, run_dir, root, state)
+        submitted = _submit_order(
+            run_id, order, run_dir, root, state, role=order.get("next_role")
+        )
         digest = _artifact_digest(order, run_dir, task)
         stage_now = load_state(run_dir)["stage_status"].get(str(order.get("stage")))
         if digest == last_digest and digest:

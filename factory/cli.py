@@ -197,6 +197,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         max_steps=args.max_steps,
         root=root,
         budget=budget,
+        parallel_tasks=args.parallel_tasks,
         progress=progress,
     )
     if args.json:

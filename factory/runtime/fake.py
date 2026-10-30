@@ -76,12 +76,14 @@ class FakeExecutor:
         scenario: str = "ok",
         fixture_root: Path | None = None,
         sleep_seconds: float = 0.0,
+        respect_roles: bool = True,
     ) -> None:
         if scenario not in SCENARIOS:
             raise RunError(f"unknown fake scenario {scenario!r}; choose from {sorted(SCENARIOS)}")
         self.scenario = scenario
         self.fixture_root = fixture_root or FIXTURE_ROOT
         self.sleep_seconds = sleep_seconds
+        self.respect_roles = respect_roles
 
     # -- writing -------------------------------------------------------
     def _fixture(self, relative: str) -> str | None:
@@ -156,9 +158,27 @@ class FakeExecutor:
     def execute(self, order: dict[str, Any], context: RunContext) -> ExecutionResult:
         from ..state import load_state
 
-        state = load_state(context.run_dir)
+        if (context.run_dir / "state.json").is_file():
+            state = load_state(context.run_dir)
+        else:
+            # A worktree is a copy of the product, not of the control plane;
+            # the task it belongs to travels in the context.
+            state = {"tasks": {}}
+            if context.task is not None:
+                state["tasks"][str(context.task["task_id"])] = context.task
         written: list[str] = []
-        for spec in order.get("artifacts") or []:
+        specs = list(order.get("artifacts") or [])
+        if self.respect_roles:
+            # A real executor only writes what its own role owns.  Writing the
+            # whole stage let the fake mask a dispatch bug: the runtime could
+            # submit another role's files and close a multi-role stage in one
+            # step.
+            specs = [
+                spec
+                for spec in specs
+                if str(spec.get("owner") or "") in {"", "{task.owner}", context.role}
+            ]
+        for spec in specs:
             written.extend(self._write_spec(spec, order, context.run_dir, state))
 
         if self.scenario == "break-artifact" and written:

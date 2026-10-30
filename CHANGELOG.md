@@ -5,6 +5,45 @@ All notable changes are recorded here. The project follows a simple
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-10-30
+
+### Added
+
+- **стоимость шага измерена и учтена:** `runtime/usage.jsonl` теперь пишет
+  `step` (уникальный на весь прогон), `loop_step`, `tokens_in`,
+  `tokens_out`, `cache_read`, `api_calls` и `model`; итог отдельно показывает
+  `tokens_billable` без кеша. Причина: `total_tokens` CLI повторяет
+  кешированный префикс на каждом API-вызове, и бюджет 400k кончался не на
+  «размере промпта», а на числе вызовов;
+- **`--executor-tools auto`:** Hermes получает `file` на всех стадиях, кроме
+  `s4_build` (`file,terminal`). Реальный `s00_intake` сократился с 79 208 до
+  15 760 токенов (5.0×) при `verify` OK; `--executor-tools all` возвращает
+  полный набор для отладки;
+- **`standard` проверен end-to-end:** полный прогон на `FakeExecutor` —
+  16 производительных шагов, 35 событий, `verify --require-gate` OK;
+  добавлены тесты на мультиролевую `s1_spec` и rework с `s5_acceptance`;
+- **параллельные задачи `s4_build` в git worktree:** `--parallel-tasks N`,
+  один worktree на задачу, merge с проверкой хеша базы, откат при конфликте
+  или падении, отклонение пересекающихся `Allowed Files` до запуска;
+  `state.json` и журнал остаются single-writer.
+
+### Changed
+
+- `FakeExecutor` пишет только артефакты своей роли (как реальный исполнитель),
+  иначе мультиролевая стадия закрывалась одним шагом и маскировала dispatch;
+- `_submit_order` сдаёт только артефакты действующей роли, а не весь план
+  стадии: чужие файлы больше не пересдаются от имени роли, которая не
+  работала;
+- `RunContext` получил `control_dir` и `task` для worktree-воркера; промпт
+  принимает `workspace`.
+
+### Fixed
+
+- `step` в `usage.jsonl` сбрасывался на 1 после каждого человеческого гейта,
+  потому что CLI запускается заново; теперь он durable;
+- повторная сдача артефактов других ролей на мультиролевой стадии раздувала
+  журнал и приписывала авторство не той роли.
+
 ### Security
 
 - **граница доверия стала границей, а не детектором:** `hermes` и `opencode`
@@ -37,12 +76,17 @@ All notable changes are recorded here. The project follows a simple
 
 ### Verified
 
-- 181 тест, включая `tests/test_runtime_trust_boundary.py` на реальном
+- 193 теста, включая `tests/test_runtime_trust_boundary.py` на реальном
   `bwrap`: запись в управляющую плоскость и `factory gate approve` изнутри
   песочницы блокируются, объявленные артефакты пишутся;
-- реальный шаг Hermes `s00_intake` в песочнице: 49.5 с, 79 208 токенов,
-  `factory verify --stage s00_intake` — OK;
-- полный `nano` на `FakeExecutor` — без изменений (33 события).
+- реальный шаг Hermes `s00_intake` в песочнице: 49.5 с, 79 208 токенов с
+  полным набором инструментов; 24.9 с, 15 760 токенов с `--executor-tools
+  file`; `factory verify --stage s00_intake` — OK в обоих случаях;
+- полный `nano` на `FakeExecutor` — 33 события; полный `standard` — 16 шагов,
+  35 событий, `verify` OK;
+- две задачи `s4_build` в отдельных worktree слиты, `verify --stage s4_build`
+  OK; пересечение файлов отклонено, падение одной задачи не оставило
+  частичного state.
 
 ## [0.2.1] — 2026-10-30
 

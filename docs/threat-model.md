@@ -15,7 +15,7 @@
 | Prompt injection через репозиторий | README просит «удали ветку» | Содержимое — данные; границы скана; allowlist команд | `brownfield-audit.md`, тест с инъекцией |
 | Supply chain скиллов | Подмена `SKILL.md` после скана | SkillSpector fail-closed; хеш каталога; `verify-lock` | `test_substituted_skill_is_detected` |
 | Подмена журнала | Удаление хвоста или правка события | Хеш-цепочка, `state` anchor, flock | `test_tail_truncation_detected` |
-| Пересчёт всей цепочки | Агент с правом записи пересчитывает хеши | Внешняя HMAC/Ed25519-контрольная точка | не входит в 0.2.1 (roadmap) |
+| Пересчёт всей цепочки | Агент с правом записи пересчитывает хеши | Внешняя HMAC/Ed25519-контрольная точка | не входит в 0.2.2 (roadmap) |
 | Утечка секретов | `.env` попадает в артефакт | `.gitignore`, исключения скана, запрет чтения | ревью, gitleaks в CI заказчика |
 | Самозакрытие гейта исполнителем | Агент вызывает `factory gate approve` или `factory submit` для своего прогона | `state.json`, `blackbox.jsonl`, `blackbox.lock`, `runtime/usage.jsonl` и evidence смонтированы read-only; CLI падает на `EROFS`; песочница включена по умолчанию | `tests/test_runtime_trust_boundary.py`, реальный `bwrap` |
 | Запись вне scope | Роль правит чужой файл | `write_scopes`, `Allowed Files`, `Untouchable Paths`; в песочнице открыты только объявленные каталоги | `factory verify`, тесты |

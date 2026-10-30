@@ -142,7 +142,7 @@ FACTORY_ROOT="$PWD/examples/nano-todo" FACTORY_RUNS_ROOT="$PWD/examples" \
 Проверка:
 
 ```bash
-.venv/bin/python -m pytest -q                         # 181 тест
+.venv/bin/python -m pytest -q                         # 193 теста
 .venv/bin/python -m pytest -q tests/test_runtime_trust_boundary.py
 ```
 

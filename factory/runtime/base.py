@@ -75,6 +75,8 @@ class RunContext:
     runtime_dir: Path | None = None
     sequence: int = 0
     extra_read_write: tuple[str, ...] = ()
+    control_dir: Path | None = None
+    task: dict[str, Any] | None = None
 
     @property
     def role(self) -> str:
@@ -95,9 +97,15 @@ class RunContext:
         return f"ev-{marker:04d}-{stage}-{role}.{suffix}"
 
     def _safe_base(self) -> Path:
-        """Runtime directory, refusing a symlinked or escaping path."""
-        base = Path(self.runtime_dir or (self.run_dir / "runtime"))
-        run = self.run_dir.resolve()
+        """Runtime directory, refusing a symlinked or escaping path.
+
+        `run_dir` is the workspace an executor writes (a worktree for a
+        parallel task); `control_dir` is the run whose `runtime/` holds the
+        prompt and usage files.  They differ for worktree steps.
+        """
+        control = Path(self.control_dir or self.run_dir)
+        base = Path(self.runtime_dir or (control / "runtime"))
+        run = control.resolve()
         if base.is_symlink():
             raise RuntimeFailure(f"runtime directory is a symlink: {base}")
         resolved = base.resolve()

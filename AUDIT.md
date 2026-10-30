@@ -150,3 +150,29 @@ FACTORY_ROOT="$PWD/examples/nano-todo" FACTORY_RUNS_ROOT="$PWD/examples" \
 артефакты валидны, `factory verify --stage s00_intake` — OK. Попытка
 `factory gate approve` внутри песочницы: exit 1, `Read-only file system:
 .../blackbox.lock`, хеш `state.json` не изменился.
+
+## Подпись журнала 30.10.2026 (после 0.2.2)
+
+Проверялось поведение, а не текст: `factory sign` на реальном прогоне, затем
+семь способов обойти журнал или сорвать подпись.
+
+| Сценарий | Что сделано | Что увидел `factory verify` |
+| :--- | :--- | :--- |
+| Пересчёт всей цепочки | изменён `why` у события, все `hash`/`prev_hash` пересчитаны, `state.json` выправлен | `journal head matches no signed checkpoint: the chain was rewritten after signing` |
+| Усечение журнала | две подписи, затем журнал обрезан до головы первой | `journal head matches checkpoint #1 of 2: the journal was truncated after signing` |
+| Чужой ключ | подпись ключом A, проверка ключом B | `checkpoint #1 was signed with key <A>, the supplied key is <B>` |
+| Правка копии в прогоне | изменён `event_count` в `runs/<id>/checkpoint.json` | `checkpoint.json inside the run differs from the checkpoint store copy` |
+| Новые события после подписи | `stale`, не ошибка | `checkpoint: stale (signed N events, journal has M) - re-sign` |
+| Ключ внутри прогона | `--key-file runs/<id>/journal.key` | `ConfigError`: ключ должен лежать вне каталога прогона |
+| Подпись сломанной цепочки | правка события без пересчёта | `RunError: refusing to sign a journal that does not verify` |
+
+```bash
+.venv/bin/python -m pytest tests/test_checkpoint.py -q   # 12 тестов
+.venv/bin/python -m pytest -q                            # 205 тестов
+factory sign   --run-id demo --key-file ~/.config/factory/journal.key
+factory verify --run-id demo --key-file ~/.config/factory/journal.key
+```
+
+Остаточный риск записан в `docs/checkpoints.md`: HMAC — симметричная подпись
+(проверяющему нужен ключ), store не append-only (удаление файла выглядит как
+`unsigned`), root и запись в store не покрыты, автоподписи в `factory run` нет.

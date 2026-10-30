@@ -5,6 +5,26 @@ All notable changes are recorded here. The project follows a simple
 
 ## [Unreleased]
 
+### Added
+
+- **подписанные контрольные точки журнала:** `factory sign --run-id ID
+  --key-file KEY` считает HMAC-SHA256 от головы цепочки (run_id, `key_id`,
+  `event_count`, `head_hash`, `created_at`) и кладёт якорь в store вне `runs/`
+  (`~/.local/state/factory/checkpoints` или `FACTORY_CHECKPOINT_DIR`), а копию —
+  в `runs/<id>/checkpoint.json`. `factory verify` различает `signed`, `stale`
+  (новые события после подписи — не ошибка), `rolled_back` (журнал усечён до
+  старой подписи) и `diverged` (цепочка переписана); ключ и store внутри
+  прогона отклоняются, сломанную цепочку подписывать нельзя. Контракт и
+  границы — `docs/checkpoints.md`.
+
+### Verified
+
+- 205 тестов; `tests/test_checkpoint.py` пересчитывает всю цепочку, усекает
+  журнал до подписанной головы, подставляет чужой ключ и правит копию
+  чекпоинта в прогоне — `verify` ловит каждый случай;
+- smoke на реальном CLI: `factory sign` → `factory verify` OK, после пересчёта
+  цепочки с чужим `why` — `journal head matches no signed checkpoint`.
+
 ## [0.2.2] — 2026-10-30
 
 ### Added

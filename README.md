@@ -14,6 +14,7 @@
 - **13 стадий** от `s_in`/`s00_intake` до `s9_learn` с явными гейтами.
 - **Исполнимый Python-движок**: `init`, `next`, `submit`, `gate`, `verify`, `task`, `quarantine`, `trace`, `metrics`, `doctor`.
 - **Рантайм `factory run`**: work order → исполнитель → проверка → сдача → гейт; `pending_artifacts` и `next_role` в каждом ордере, `usage.jsonl` с durable-шагом и разбивкой токенов, evidence и стоп-гарды (подмена состояния, запись вне прогона, бюджет). Адаптеры: `fake` (без модели), `hermes`, `opencode`; реальные CLI запускаются в `bwrap` по умолчанию, управляющая плоскость read-only. `standard` проверен до `complete`; `--parallel-tasks N` собирает независимые задачи `s4_build` в отдельных git worktree; `--executor-tools auto` платит за `file`, а `terminal` включает только на сборке — см. [`docs/runtime.md`](docs/runtime.md).
+- **Подписанные контрольные точки**: `factory sign` кладёт HMAC-SHA256 головы журнала в store вне `runs/`; `factory verify` отличает `stale` от `rolled_back` и `diverged`, то есть усечение журнала и пересчёт всей цепочки — см. [`docs/checkpoints.md`](docs/checkpoints.md).
 - **Журнал с хеш-цепочкой** SHA-256, блокировкой записи, state-якорем и семантической проверкой `PASS`.
 - **Независимый верификатор**: `PASS` может поставить только `02-independent-verifier`; человек может принять риск отдельным событием.
 - **Карантин скиллов**: адаптер `NVIDIA/SkillSpector 2.12.0` с fail-closed и локом хешей.
@@ -125,6 +126,7 @@ python -m unittest discover -s examples/nano-todo/product/tests -v
 | `factory run --run-id ID --executor fake\|hermes\|opencode` | Исполнить цикл: order → исполнитель → проверка → сдача → гейт. Коды: `0` готово, `2` нужен человек, `3` эскалация |
 | `factory submit --run-id ID --stage S --role R --artifact P` | Сдать артефакты продюсера |
 | `factory verify --run-id ID [--stage S] [--require-gate]` | Детерминированная проверка |
+| `factory sign --run-id ID --key-file KEY` | Подписать голову журнала HMAC-чекпоинтом вне `runs/` |
 | `factory gate approve|reject|accept-risk --gate G --approver human:ID` | Решение гейта; `accept-risk` закрывает эскалацию с записью риска |
 | `factory stage reset --run-id ID --stage S --approver human:ID --reason T` | Сбросить эскалированную стадию |
 | `factory veto --run-id ID --stage S --role R --code C --evidence E` | Блокирующее вето роли |
@@ -201,7 +203,7 @@ factory/                 # движок и конфиги
   budget.yaml            # лимиты и поведение
 tests/                   # инварианты, CLI, конкурентность, схемы, рантайм
 examples/nano-todo/      # эталонный прогон
-docs/                    # quickstart, runtime, threat model, metrics, adapters
+docs/                    # quickstart, runtime, checkpoints, threat model, metrics, adapters
 ```
 
 ## Ограничения

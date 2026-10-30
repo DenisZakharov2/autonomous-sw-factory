@@ -32,6 +32,7 @@ from .engine import (
     task_submit,
     veto,
 )
+from .checkpoint import checkpoint_state, sign_run, verify_checkpoint
 from .errors import FactoryError
 from .journal import append_event, read_events, verify_chain
 from .metrics import compute_metrics, write_metrics
@@ -309,15 +310,59 @@ def cmd_gate(args: argparse.Namespace) -> int:
 def cmd_verify(args: argparse.Namespace) -> int:
     run_dir = safe_run_dir(args.run_id, _runs_root(args))
     errors = verify_run(run_dir, args.stage, require_gate=args.require_gate)
+    errors.extend(
+        verify_checkpoint(
+            run_dir,
+            key_file=Path(args.key_file) if args.key_file else None,
+            store=Path(args.store) if args.store else None,
+        )
+    )
+    status = checkpoint_state(
+        run_dir, Path(args.store) if args.store else None
+    )
     if args.json:
-        _print_json({"run_id": args.run_id, "stage": args.stage, "ok": not errors, "errors": errors})
+        _print_json(
+            {
+                "run_id": args.run_id,
+                "stage": args.stage,
+                "ok": not errors,
+                "errors": errors,
+                "checkpoint": status,
+            }
+        )
     elif errors:
         print("VERIFY FAILED:")
         for error in errors:
             print(f"- {error}")
     else:
         print(f"VERIFY OK: {run_dir} stage={args.stage or 'current'}")
+        if status["status"] == "unsigned":
+            print("checkpoint: unsigned (factory sign --run-id ... anchors the journal head)")
+        elif status["status"] == "stale":
+            print(
+                f"checkpoint: stale (signed {status['signed_event_count']} events, "
+                f"journal has {status['event_count']}) - re-sign to move the anchor"
+            )
+        else:
+            print(f"checkpoint: {status['status']} ({status['event_count']} events)")
     return 1 if errors else 0
+
+
+def cmd_sign(args: argparse.Namespace) -> int:
+    run_dir = safe_run_dir(args.run_id, _runs_root(args))
+    result = sign_run(
+        run_dir,
+        key_file=Path(args.key_file) if args.key_file else None,
+        store=Path(args.store) if args.store else None,
+    )
+    if args.json:
+        _print_json(result)
+    else:
+        print(
+            f"SIGNED {args.run_id}: events={result['event_count']} "
+            f"key={result['key_id']} store={result['store']}"
+        )
+    return 0
 
 
 def cmd_log(args: argparse.Namespace) -> int:
@@ -598,9 +643,19 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--run-id", required=True)
     verify.add_argument("--stage")
     verify.add_argument("--require-gate", action="store_true")
+    verify.add_argument("--key-file", help="HMAC key for the signed checkpoint")
+    verify.add_argument("--store", help="checkpoint store directory")
     verify.add_argument("--runs-root")
     verify.add_argument("--json", action="store_true")
     verify.set_defaults(func=cmd_verify)
+
+    sign = sub.add_parser("sign", help="sign the journal head into a checkpoint store")
+    sign.add_argument("--run-id", required=True)
+    sign.add_argument("--key-file", help="HMAC key file (or FACTORY_JOURNAL_KEY)")
+    sign.add_argument("--store", help="checkpoint store directory (outside runs/)")
+    sign.add_argument("--runs-root")
+    sign.add_argument("--json", action="store_true")
+    sign.set_defaults(func=cmd_sign)
 
     log = sub.add_parser("log", help="journal commands")
     log.add_argument("log_command", choices=["verify", "show"])

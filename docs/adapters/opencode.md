@@ -1,5 +1,25 @@
 # OpenCode adapter
 
+## One-shot mode (`factory run --executor opencode`)
+
+`factory/runtime/opencode.py` runs:
+
+```bash
+opencode run --auto --standalone --format json [--model provider/model] "<prompt>"
+```
+
+- `--format json` streams events; the adapter reads `usage`/`cost` if present and
+  treats a `{"type":"error"}` event as a failed step even when the CLI exits 0.
+- `--standalone` avoids depending on the background server.
+- The step has a hard timeout (`--timeout`, default 1800 s). Without a selected
+  provider `opencode run` hangs and prints `Transport: socket closed`; the
+  timeout turns that into exit code 124 instead of a stuck factory.
+- Provider must be configured first (`opencode auth login` or a provider in
+  `~/.config/opencode/opencode.jsonc`). Version tested: `v2.0.29`.
+
+Generated prompts and stdout/stderr land in `runs/<id>/runtime/ev-*.prompt.md`
+and `ev-*.log`.
+
 ## Capabilities
 
 | Capability | Support |

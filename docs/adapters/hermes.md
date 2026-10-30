@@ -1,5 +1,28 @@
 # Hermes Agent adapter
 
+## One-shot mode (`factory run --executor hermes`)
+
+`factory/runtime/hermes.py` runs:
+
+```bash
+hermes -z "<prompt>" --in <run_dir> --usage-file <runtime>/usage.json \
+  --reasoning medium [--yolo] [-m model]
+```
+
+- `-z` answers one turn and exits; `--in` sets the working directory to the run.
+- `--usage-file` writes real token counts; the adapter copies them into
+  `runs/<id>/runtime/usage.jsonl`.
+- `failed: true` in that file becomes a non-zero exit code: Hermes can exit 0
+  after a provider error, and the factory must not treat an error message as an
+  artifact.
+- `--reasoning medium` is the safe default: some providers (Nemotron) reject
+  effort levels they do not implement and answer HTTP 400.
+- `--yolo` auto-approves the agent's own tool calls; it never closes a factory
+  gate.
+- Measured on `s00_intake`: ~28 s and ~162k tokens for one step, because the
+  agent re-sends its context on every tool turn. The `nano` budget (400k) covers
+  roughly two such steps; raise the mode budget for a full real run.
+
 ## Capabilities
 
 | Capability | Support |

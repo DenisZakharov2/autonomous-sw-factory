@@ -3,6 +3,86 @@
 All notable changes are recorded here. The project follows a simple
 `0.MINOR.PATCH` scheme until `1.0.0`.
 
+## [0.2.0] — 2026-10-30
+
+### Added
+
+- **исполняемый рантайм `factory/runtime/`**: протокол `Executor`
+  (`execute(order, context) -> ExecutionResult`), `run_loop` и команда
+  `factory run --run-id ID --executor fake|hermes|opencode`. Коды выхода:
+  `0` — прогон завершён, `2` — нужен человек, `3` — эскалация;
+- **`pending_artifacts` и `next_role` в work order**: каждый ордер теперь
+  говорит, какой именно артефакт отсутствует или невалиден, кто его владелец
+  и кто действует следующим. Для `s4_build` скоуп сужается до одной задачи;
+- **`validate_artifact`** — проверка одного объявленного артефакта, на которой
+  построены и `pending_artifacts`, и `validate_stage`;
+- **`work_order_submit_plan/paths`**: сдаются только объявленные артефакты,
+  существующие на диске; для задачи — только её `Allowed Files` и
+  `deliverable.md`. Отчёт исполнителя о «созданных файлах» больше не является
+  списком для submit;
+- **учёт бюджета**: `runs/<id>/runtime/usage.jsonl` (шаг, стадия, роль,
+  секунды, токены, usd, exit code) и остановка при превышении бюджета режима;
+  неизвестные числа остаются `null`, а не нулём;
+- **evidence**: `runs/<id>/runtime/evidence/*.json` с результатом `verify`,
+  хешем `state.json`, головой журнала и хешами сданных артефактов;
+- **tripwires `factory/runtime/guard.py`**: хеши `state.json`,
+  `blackbox.jsonl`, `blackbox.lock`, `idea.md` и список файлов в каталоге
+  прогонов сверяются до и после шага; подмена — остановка `tampered`;
+- **`FakeExecutor`** на эталонных артефактах `examples/nano-todo`: полный
+  `nano` без модели и сети, плюс сценарии `break-artifact`, `write-state`,
+  `escape`, `slow`;
+- **адаптеры**: `OpenCodeExecutor` (`opencode run --format json`, жёсткий
+  таймаут, разбор usage), `HermesExecutor` (`hermes -z ... --in ...
+  --usage-file`, реальные токены, `failed: true` → ненулевой код),
+  `sandbox_command` (`bwrap`: read-only корень, запись только в каталог
+  прогона и явные `--sandbox-rw`); `systemd-run --user` не принимает
+  `ProtectHome`/`ProtectSystem`, поэтому backend заменён;
+- **вход стадии intake**: `factory init --idea "..."` пишет
+  `runs/<id>/idea.md`, промпт включает его как единственный источник истины о
+  продукте и защищает tripwire-ом;
+- **обратная связь по стадии**: если артефакты на месте, а `validate_stage`
+  не проходит, промпт получает список ошибок и разрешение перезаписать
+  объявленные файлы;
+- **страж `no_progress`**: если объявленные артефакты не изменились за два шага
+  подряд, прогон останавливается с кодом `3`, а не жжёт бюджет на пустых
+  повторах;
+- **`docs/runtime.md`** — контракт, цикл, безопасность, тесты и состояние
+  адаптеров.
+
+### Fixed
+
+- root-артефакты (`skills-lock.json`) всегда разрешаются от корня проекта: копия
+  внутри каталога прогона больше не подменяет файл, который хеширует журнал;
+- `s15_quarantine` получает в промпте явную область сканирования (`skills/`
+  проекта, а не библиотеки хост-агента) и требование к путям в локе;
+- `s3_plan` получает список ролей, активных на `s4_build`: колонка роли в
+  `plan.md` больше не заполняется ролью автора плана;
+- неудачный `gate_approve` роли превращается в `gate_reject` с текстом ошибки,
+  а не в остановку `gate_failed`.
+
+### Changed
+
+- `factory init` принимает `--idea`; `factory run` создаёт отсутствующий прогон
+  сам (`--no-init` это запрещает);
+- work order schema: `pending_artifacts` и `next_role` обязательны;
+- `init_run` пишет `idea.md`, если идея передана.
+
+### Verified
+
+- полный `nano` на `FakeExecutor`: 33 события, `verify --require-gate` без
+  ошибок, `trace` 100%, `log verify` OK — и в исходном дереве, и из
+  установленного колеса в чистом venv;
+- реальный прогон Hermes дошёл до `s4_build`: `s00_intake`, `s0_vision`,
+  `s1_spec` (после реального rework на REQ-паритете), `s15_quarantine`,
+  `s2_architecture`, `s3_plan` (после rework на владельце задачи); 5 задач
+  импортированы. Прогон остановлен tripwire-ом: агент сам выполнил
+  `factory gate approve --gate gate_s3`, потому что ордер говорил «then submit
+  them», а CLI не отличает рантайм от агента. Это зафиксировано как граница
+  доверия, а не как успешный полный прогон;
+- OpenCode-адаптер проверен на stub-бинарнике; end-to-end прогон невозможен,
+  пока в окружении не выбран провайдер (`opencode run` без провайдера висит и
+  возвращает `Transport: socket closed`).
+
 ## [0.1.2] — 2026-10-30
 
 ### Fixed

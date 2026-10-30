@@ -88,7 +88,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
-    run_dir, state, event = init_run(args.run_id, args.mode, root=_runs_root(args), force=args.force)
+    run_dir, state, event = init_run(
+        args.run_id, args.mode, root=_runs_root(args), force=args.force, idea=args.idea
+    )
     if args.json:
         _print_json({"run_dir": str(run_dir), "state": state, "event": event})
     else:
@@ -114,6 +116,101 @@ def cmd_next(args: argparse.Namespace) -> int:
     order = next_action(args.run_id, root=_runs_root(args))
     _print_json(order)
     return 0 if order["action"] != "blocked" else 1
+
+
+def _build_executor(args: argparse.Namespace):
+    if args.executor == "fake":
+        from .runtime.fake import FakeExecutor
+
+        return FakeExecutor(scenario=args.fake_scenario)
+    if args.executor == "opencode":
+        from .runtime.opencode import OpenCodeExecutor
+
+        return OpenCodeExecutor(
+            model=args.executor_model,
+            mode=args.opencode_mode,
+            timeout=args.timeout,
+            sandbox=args.sandbox,
+            read_write=tuple(args.sandbox_rw or ()),
+        )
+    from .runtime.hermes import HermesExecutor
+
+    return HermesExecutor(
+        model=args.executor_model,
+        reasoning=args.reasoning,
+        timeout=args.timeout,
+        sandbox=args.sandbox,
+        read_write=tuple(args.sandbox_rw or ()),
+        yolo=args.yolo,
+    )
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    from .runtime.loop import run_loop
+
+    root = _runs_root(args)
+    run_dir = safe_run_dir(args.run_id, root)
+    if not run_dir.is_dir():
+        if args.no_init:
+            raise FactoryError(f"run {args.run_id!r} does not exist; run `factory init` first")
+        init_run(args.run_id, args.mode, root=root, idea=args.idea)
+    executor = _build_executor(args)
+    if not args.json:
+        print(f"RUN {args.run_id} executor={args.executor} max_steps={args.max_steps}")
+
+    def progress(step: int, order: dict) -> None:
+        if args.json:
+            return
+        print(
+            f"[{step:02d}] {order['action']:<8} {str(order.get('stage') or '-'):<15} "
+            f"{str(order.get('next_role') or '-'):<24} pending={len(order.get('pending_artifacts') or [])}"
+        )
+
+    budget = None
+    if any(value is not None for value in (args.budget_tokens, args.budget_minutes, args.budget_usd)):
+        state = load_state(run_dir)
+        mode_budget = dict(load_pipeline()["modes"][state["mode"]].get("budget") or {})
+        for key, value in (
+            ("tokens", args.budget_tokens),
+            ("minutes", args.budget_minutes),
+            ("usd", args.budget_usd),
+        ):
+            if value is not None:
+                mode_budget[key] = value
+        budget = mode_budget
+    result = run_loop(
+        args.run_id,
+        executor,
+        max_steps=args.max_steps,
+        root=root,
+        budget=budget,
+        progress=progress,
+    )
+    if args.json:
+        _print_json(
+            {
+                "run_id": result.run_id,
+                "status": result.status,
+                "code": result.code,
+                "steps": result.steps,
+                "stage": result.stage,
+                "message": result.message,
+                "usage": result.usage,
+                "evidence": result.evidence_path,
+            }
+        )
+        return result.code
+    print()
+    print(f"RESULT: {result.status} after {result.steps} step(s) (exit {result.code})")
+    if result.code == 2:
+        print(f"NEXT: {result.message}")
+        print("A human gate is never closed by the runtime, with or without --yes.")
+    elif result.message:
+        print(f"DETAIL: {result.message}")
+    if result.evidence_path:
+        print(f"EVIDENCE: {result.evidence_path}")
+    print(f"USAGE: {result.usage}")
+    return result.code
 
 
 def cmd_submit(args: argparse.Namespace) -> int:
@@ -366,6 +463,7 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--mode", default="nano", choices=["nano", "standard", "enterprise", "brownfield"])
     init.add_argument("--runs-root")
     init.add_argument("--force", action="store_true", help="archive an existing run and start over")
+    init.add_argument("--idea", help="one-paragraph product idea handed to the intake stage")
     init.add_argument("--json", action="store_true")
     init.set_defaults(func=cmd_init)
 
@@ -379,6 +477,28 @@ def build_parser() -> argparse.ArgumentParser:
     nxt.add_argument("--run-id", required=True)
     nxt.add_argument("--runs-root")
     nxt.set_defaults(func=cmd_next)
+
+    run = sub.add_parser("run", help="execute work orders with a runtime executor")
+    run.add_argument("--run-id", required=True)
+    run.add_argument("--mode", default="nano", choices=["nano", "standard", "enterprise", "brownfield"])
+    run.add_argument("--executor", default="fake", choices=["fake", "opencode", "hermes"])
+    run.add_argument("--max-steps", type=int, default=60)
+    run.add_argument("--runs-root")
+    run.add_argument("--no-init", action="store_true", help="refuse to create a missing run")
+    run.add_argument("--idea", help="product idea written to runs/<id>/idea.md when the run is created")
+    run.add_argument("--json", action="store_true")
+    run.add_argument("--executor-model", help="model override handed to the executor CLI")
+    run.add_argument("--timeout", type=float, default=1800.0, help="per-step timeout in seconds")
+    run.add_argument("--budget-tokens", type=int, help="override the mode token budget for this run")
+    run.add_argument("--budget-minutes", type=float, help="override the mode minute budget")
+    run.add_argument("--budget-usd", type=float, help="override the mode usd budget")
+    run.add_argument("--sandbox", action="store_true", help="wrap the executor in a bubblewrap read-only root")
+    run.add_argument("--sandbox-rw", action="append", help="extra path the sandboxed executor may write (repeatable)")
+    run.add_argument("--yolo", action="store_true", help="pass --yolo to hermes")
+    run.add_argument("--reasoning", default="medium", help="reasoning effort passed to hermes")
+    run.add_argument("--opencode-mode", default="run", choices=["run", "prompt"])
+    run.add_argument("--fake-scenario", default="ok", choices=["ok", "break-artifact", "write-state", "escape", "slow"])
+    run.set_defaults(func=cmd_run)
 
     submit = sub.add_parser("submit", help="submit artifacts for a stage")
     submit.add_argument("--run-id", required=True)

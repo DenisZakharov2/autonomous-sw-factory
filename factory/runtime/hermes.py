@@ -1,0 +1,144 @@
+"""Hermes adapter: `hermes -z <prompt> --in <run_dir> --usage-file ...`.
+
+Hermes runs one turn and exits, and `--usage-file` writes real token counts.
+That matters twice: the factory can account for cost, and a provider error is
+visible even when the CLI itself exits 0.  The adapter maps `failed: true` in
+the usage file to a non-zero exit code so the loop stops instead of treating
+an error message as an artifact.
+
+Some providers reject a reasoning effort they do not implement (Nemotron, for
+example, accepts only none/medium/high), so the adapter sends `medium` by
+default instead of leaving the choice to the global config.
+"""
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import time
+from pathlib import Path
+from typing import Any
+
+from .base import ExecutionResult, RunContext
+from .sandbox import sandbox_command
+
+
+def _read_usage(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
+class HermesExecutor:
+    name = "hermes"
+
+    def __init__(
+        self,
+        *,
+        binary: str = "hermes",
+        model: str | None = None,
+        reasoning: str = "medium",
+        timeout: float = 1800.0,
+        sandbox: bool = False,
+        read_write: tuple[str, ...] = (),
+        yolo: bool = False,
+        extra_args: tuple[str, ...] = (),
+    ) -> None:
+        self.binary = binary
+        self.model = model or os.environ.get("FACTORY_HERMES_MODEL")
+        self.reasoning = reasoning
+        self.timeout = timeout
+        self.sandbox = sandbox
+        self.read_write = tuple(read_write)
+        self.yolo = yolo
+        self.extra_args = tuple(extra_args)
+
+    def command(
+        self, prompt: str, run_dir: Path, usage_file: Path, extra_read_write: tuple[str, ...] = ()
+    ) -> list[str]:
+        cmd = [self.binary, "-z", prompt, "--in", str(run_dir), "--usage-file", str(usage_file)]
+        if self.model:
+            cmd.extend(["-m", self.model])
+        if self.reasoning:
+            cmd.extend(["--reasoning", self.reasoning])
+        if self.yolo:
+            cmd.append("--yolo")
+        cmd.extend(self.extra_args)
+        return sandbox_command(
+            cmd, run_dir, read_write=self.read_write + tuple(extra_read_write), enabled=self.sandbox
+        )
+
+    def execute(self, order: dict[str, Any], context: RunContext) -> ExecutionResult:
+        transcript = context.path_in_runtime()
+        usage_path = context.path_in_runtime("usage.json")
+        cmd = self.command(
+            context.prompt, context.run_dir, usage_path, extra_read_write=context.extra_read_write
+        )
+        started = time.monotonic()
+        try:
+            completed = subprocess.run(
+                cmd,
+                cwd=str(context.run_dir),
+                capture_output=True,
+                text=True,
+                timeout=self.timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            elapsed = time.monotonic() - started
+            stdout = exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+            stderr = exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+            transcript.write_text(
+                f"# hermes timeout after {elapsed:.1f}s\n\n## stdout\n{stdout[-20000:]}"
+                f"\n\n## stderr\n{stderr[-20000:]}\n",
+                encoding="utf-8",
+            )
+            return ExecutionResult(
+                exit_code=124,
+                stdout=stdout,
+                stderr=f"hermes timed out after {self.timeout:.0f}s",
+                summary="hermes timed out",
+                usage={"seconds": round(elapsed, 3)},
+                transcript_path=str(transcript),
+            )
+        except FileNotFoundError:
+            return ExecutionResult(
+                exit_code=127,
+                stderr=f"hermes binary not found: {self.binary}",
+                summary="hermes is not installed",
+            )
+        elapsed = time.monotonic() - started
+        usage_raw = _read_usage(usage_path)
+        failed = bool(usage_raw.get("failed")) or usage_raw.get("completed") is False
+        exit_code = completed.returncode
+        if failed and exit_code == 0:
+            exit_code = 1
+        tokens = usage_raw.get("total_tokens")
+        usage = {
+            "seconds": round(elapsed, 3),
+            "tokens_total": int(tokens) if isinstance(tokens, (int, float)) else None,
+            "tokens_in": usage_raw.get("input_tokens"),
+            "tokens_out": usage_raw.get("output_tokens"),
+            "usd": usage_raw.get("estimated_cost_usd"),
+            "model": usage_raw.get("model"),
+        }
+        display = [("<prompt>" if item == context.prompt else item) for item in cmd]
+        transcript.write_text(
+            f"# hermes step {context.step} — {context.role} @ {context.stage}\n"
+            f"exit_code: {exit_code}\ncommand: {' '.join(display)}\n\n"
+            f"## usage\n{json.dumps(usage, ensure_ascii=False, indent=2)}\n\n"
+            f"## stdout\n{completed.stdout[-40000:]}\n\n## stderr\n{completed.stderr[-20000:]}\n",
+            encoding="utf-8",
+        )
+        summary = (completed.stdout or "").strip()[-2000:] or (completed.stderr or "").strip()[-2000:]
+        return ExecutionResult(
+            exit_code=exit_code,
+            stdout=completed.stdout,
+            stderr=completed.stderr or ("" if not failed else "hermes reported a failed turn"),
+            summary=summary,
+            usage=usage,
+            transcript_path=str(transcript),
+        )

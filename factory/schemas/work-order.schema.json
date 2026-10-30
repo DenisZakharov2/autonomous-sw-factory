@@ -4,7 +4,7 @@
   "title": "FactoryWorkOrder",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "action", "run_id", "stage", "stage_title", "roles", "artifacts", "instructions", "next_command"],
+  "required": ["schema_version", "action", "run_id", "stage", "stage_title", "roles", "artifacts", "pending_artifacts", "next_role", "instructions", "next_command"],
   "properties": {
     "schema_version": {"type": "string", "const": "1.0.0"},
     "action": {"type": "string", "enum": ["produce", "verify", "gate", "wait", "complete", "blocked"]},
@@ -14,6 +14,21 @@
     "roles": {"type": "array", "items": {"type": "string"}},
     "task_id": {"type": ["string", "null"]},
     "artifacts": {"type": "array", "items": {"type": "object"}},
+    "pending_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "path", "owner", "errors"],
+        "properties": {
+          "id": {"type": "string"},
+          "path": {"type": "string"},
+          "owner": {"type": "string"},
+          "errors": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "next_role": {"type": ["string", "null"]},
     "instructions": {"type": "string"},
     "gate": {"type": ["object", "null"]},
     "next_command": {"type": "string"}

@@ -15,6 +15,7 @@ from .artifacts import (
     collect_artifact_entries,
     pattern_paths,
     resolve_recorded_path,
+    validate_artifact,
     validate_stage,
 )
 from .config import (
@@ -167,9 +168,10 @@ def _check_stage_artifact_owners(
             continue
         base, is_dir = _declared_artifact_base(run_dir, spec)
         declared.append((str(spec.get("owner", "")), base, is_dir))
+    roots = _root_paths(pipeline, registry, state["mode"], stage, run_dir)
     for entry in entries:
         path = str(entry["path"])
-        candidate = resolve_recorded_path(run_dir, path)
+        candidate = resolve_recorded_path(run_dir, path, root_paths=roots)
         owner = next(
             (
                 candidate_owner
@@ -239,6 +241,75 @@ def _task_entries(run_dir: Path, task: dict[str, Any]) -> list[dict[str, Any]]:
     return collect_artifact_entries(run_dir, paths)
 
 
+def _pending_artifacts(
+    run_dir: Path,
+    state: dict[str, Any],
+    stage: dict[str, Any],
+    pipeline: dict[str, Any],
+    registry: dict[str, Any],
+    *,
+    task: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Declared artifacts of this order that are missing or fail validation.
+
+    A work order that only lists `roles` and `artifacts` forces a runtime to
+    guess who still owes what on a multi-role stage.  This is the answer.
+    """
+    specs = stage_artifacts(
+        pipeline,
+        registry,
+        state["mode"],
+        stage,
+        task_id=task["task_id"] if task else None,
+        run_dir=run_dir,
+    )
+    pending: list[dict[str, Any]] = []
+    task_scope = state["tasks"] if task is None else {str(task["task_id"]): task}
+    for spec in specs:
+        if spec.get("per_task"):
+            spec["stage"] = stage["id"]
+        errors = validate_artifact(run_dir, spec, task_scope)
+        if not errors:
+            continue
+        owner = str(spec.get("owner", ""))
+        if owner == "{task.owner}" and task:
+            owner = str(task["owner"])
+        pending.append(
+            {
+                "id": str(spec.get("id", spec.get("path", ""))),
+                "path": str(spec.get("path", "")),
+                "owner": owner,
+                "errors": errors[:3],
+            }
+        )
+    return pending
+
+
+def _next_role(
+    pending: list[dict[str, Any]],
+    order: dict[str, Any],
+    stage: dict[str, Any],
+    task: dict[str, Any] | None,
+) -> str | None:
+    if task is not None:
+        if task.get("status") == "review":
+            return "02-independent-verifier"
+        return str(task.get("owner") or "") or None
+    if order.get("action") == "gate":
+        approver = str(stage["gate"]["approver"])
+        return None if approver == "human" else approver
+    if pending:
+        owner = str(pending[0].get("owner") or "")
+        if owner and not owner.startswith("{"):
+            return owner
+    for spec in order.get("artifacts") or []:
+        owner = str(spec.get("owner") or "")
+        if owner and not owner.startswith("{"):
+            return owner
+    roles = order.get("roles") or []
+    return str(roles[0]) if roles else None
+
+
 def _write_verification(run_dir: Path, task: dict[str, Any]) -> Path:
     """The verifier's report required by the 02 role card."""
     task_id = str(task["task_id"])
@@ -263,6 +334,7 @@ def init_run(
     *,
     root: str | Path | None = None,
     force: bool = False,
+    idea: str | None = None,
 ) -> tuple[Path, dict[str, Any], dict[str, Any]]:
     validate_run_id(run_id)
     pipeline = load_pipeline()
@@ -280,6 +352,8 @@ def init_run(
         "tasks", "product/src", "product/docs", "product/tests", "product/migrations",
     ]:
         (target / sub).mkdir(parents=True, exist_ok=True)
+    if idea:
+        (target / "idea.md").write_text(idea.strip() + "\n", encoding="utf-8")
     model = _model_for("00-orchestrator", "tier-3-frontier")
     with run_lock(target):
         state = new_state(run_id, mode, pipeline)
@@ -312,8 +386,9 @@ def _task_work_order(
     pipeline: dict[str, Any],
     registry: dict[str, Any],
 ) -> dict[str, Any]:
+    state = load_state(run_dir)
     artifacts = stage_artifacts(
-        pipeline, registry, load_state(run_dir)["mode"], stage, task_id=task["task_id"], run_dir=run_dir
+        pipeline, registry, state["mode"], stage, task_id=task["task_id"], run_dir=run_dir
     )
     status = task["status"]
     if status == "review":
@@ -354,6 +429,10 @@ def _task_work_order(
         "roles": roles,
         "task_id": task["task_id"],
         "artifacts": artifacts,
+        "pending_artifacts": _pending_artifacts(
+            run_dir, state, stage, pipeline, registry, task=task
+        ),
+        "next_role": _next_role([], {"action": action}, stage, task),
         "instructions": instructions,
         "gate": stage["gate"],
         "next_command": next_command,
@@ -406,7 +485,7 @@ def _stage_work_order(
             f"factory submit --run-id {run_id} --stage {stage['id']} "
             "--role <role> --artifact <path>"
         )
-    return {
+    order = {
         "schema_version": "1.0.0",
         "action": action,
         "run_id": run_id,
@@ -415,10 +494,18 @@ def _stage_work_order(
         "roles": effective_roles(pipeline, state["mode"], stage),
         "task_id": None,
         "artifacts": artifacts,
+        "pending_artifacts": [],
+        "next_role": None,
         "instructions": instructions,
         "gate": stage["gate"],
         "next_command": next_command,
     }
+    if action in {"produce", "verify", "gate"}:
+        order["pending_artifacts"] = _pending_artifacts(
+            run_dir, state, stage, pipeline, registry
+        )
+    order["next_role"] = _next_role(order["pending_artifacts"], order, stage, None)
+    return order
 
 
 def _reset_rework_chain(
@@ -490,6 +577,8 @@ def _blocked_work_order(
         "roles": effective_roles(pipeline, state["mode"], stage),
         "task_id": task_id,
         "artifacts": [],
+        "pending_artifacts": [],
+        "next_role": None,
         "instructions": (
             f"Human decision required: {reason}. Review the journal with "
             f"`factory log show --run-id {run_id}`, then accept the risk or reset the stage."
@@ -515,6 +604,8 @@ def _next_action(run_id: str, *, root: str | Path | None = None) -> dict[str, An
             "roles": [],
             "task_id": None,
             "artifacts": [],
+            "pending_artifacts": [],
+            "next_role": None,
             "instructions": "All stages are accepted.",
             "gate": None,
             "next_command": f"factory metrics --run-id {run_id}",
@@ -562,6 +653,8 @@ def _next_action(run_id: str, *, root: str | Path | None = None) -> dict[str, An
                     "roles": [],
                     "task_id": None,
                     "artifacts": [],
+                    "pending_artifacts": [],
+                    "next_role": None,
                     "instructions": "All remaining tasks wait on unfinished dependencies.",
                     "gate": stage["gate"],
                     "next_command": f"factory status --run-id {run_id} --json",

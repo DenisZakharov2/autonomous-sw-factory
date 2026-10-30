@@ -1,4 +1,4 @@
-# DESIGN.md — концепция Autonomous Software Factory v0.1.2
+# DESIGN.md — концепция Autonomous Software Factory v0.2.0
 
 ## 1. Задача
 
@@ -20,7 +20,7 @@
 4. **Доказательство вместо обещания.** Каждый `PASS` имеет evidence; каждый артефакт — хеш; каждая стадия — проверяемый критерий.
 5. **Рантайм-агностичность.** Ядро не вызывает вендорскую модель. Оно выдаёт JSON work order; Hermes, Claude Code, OpenCode или Cursor его исполняют. `models.yaml` разрешает tier через runtime/env.
 6. **Изоляция.** Комплект (`factory/`) не перезаписывается прогоном. Всё, что создаёт прогон, лежит в `runs/<run_id>/` (или в `examples/<run>/` для эталона).
-7. **Честный статус.** Версия `0.1.2`: движок, схемы, тесты и reference run есть; полной автономности и встроенной модели нет.
+7. **Честный статус.** Версия `0.2.0`: движок, схемы, тесты, reference run и исполняемый рантайм (`factory run`) есть; полной автономности и встроенной модели нет.
 
 ## 3. Модель исполнения
 
@@ -36,6 +36,10 @@
   "artifacts": [
     {"id": "spec", "path": "artifacts/spec.md", "template": "templates/spec.tmpl", "owner": "05-business-analyst"}
   ],
+  "pending_artifacts": [
+    {"id": "spec", "path": "artifacts/spec.md", "owner": "05-business-analyst", "errors": ["missing artifact: ..."]}
+  ],
+  "next_role": "05-business-analyst",
   "gate": {"id": "gate_s1", "approver": "human", "blocking": true},
   "next_command": "factory submit --run-id ... --stage s1_spec --role ... --artifact ..."
 }
@@ -50,6 +54,14 @@
 5. не ставить `PASS` и не писать в чужие файлы.
 
 Свежий контекст на роль — рекомендация, а не требование ядра. Если рантайм не умеет субагентов, он передаёт `handoff` вручную: решения, открытые вопросы, отвергнутые варианты, пути и хеши.
+
+Начиная с `0.2.0` этот контракт исполняет `factory run`: он получает order,
+вызывает адаптер (`fake`, `hermes`, `opencode`), сдаёт только объявленные и
+существующие артефакты, пишет `runtime/usage.jsonl` и `runtime/evidence/`, а на
+человеческом гейте останавливается с кодом `2`. Детали — в
+[runtime.md](docs/runtime.md). В work order добавлены `pending_artifacts` и
+`next_role`, чтобы на мультиролевой стадии не приходилось угадывать, кто ещё не
+сдал свой артефакт.
 
 ### 3.2 Стадии
 
@@ -160,7 +172,8 @@ Read-only скан ограничен расширениями, числом ф�
 
 ## 11. Дорожная карта
 
-- `0.1.2` — транзакционное ядро, целостность артефактов, рабочий автомат стадий (текущая).
-- `0.2.0` — адаптеры Hermes/Claude Code/OpenCode, `handoff.md`, стоимость из runtime.
+- `0.1.2` — транзакционное ядро, целостность артефактов, рабочий автомат стадий.
+- `0.2.0` — исполняемый рантайм: `pending_artifacts`/`next_role`, адаптеры fake/Hermes/OpenCode, `usage.jsonl`, evidence, tripwire (текущая).
+- `0.2.x` — параллельные задачи в git worktree, `handoff.md`, стоимость из runtime в метриках.
 - `0.3.0` — подписанные контрольные точки, внешний eval-набор, сравнение прогонов.
 - `1.0.0` — после полного прогона `nano`, `standard` и `brownfield` на реальном продукте и зелёного CI на трёх ОС.

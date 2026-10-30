@@ -29,6 +29,18 @@ jobs:
         run: factory doctor
       - name: Tests
         run: pytest -q
+      - name: Runtime reference run (no model)
+        run: |
+          export FACTORY_ROOT="$RUNNER_TEMP/factory-run"
+          export FACTORY_RUNS_ROOT="$FACTORY_ROOT/runs"
+          set +e
+          factory run --run-id ci-nano --executor fake --max-steps 4
+          code=$?
+          set -e
+          test "$code" = 2
+          factory gate approve --run-id ci-nano --gate gate_s00 \
+            --approver human:ci --evidence "ci stand-in"
+          factory verify --run-id ci-nano --stage s00_intake
       - name: Build reference run
         run: python examples/build_nano_todo.py
       - name: Verify reference run

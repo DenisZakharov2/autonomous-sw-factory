@@ -5,12 +5,15 @@ import pytest
 
 from factory.artifacts import (
     check_sections,
+    collect_artifact_entries,
     extract_req_ids,
+    resolve_recorded_path,
     validate_acceptance,
     validate_plan,
     validate_stage,
     validate_traceability,
 )
+from factory.journal import sha256_file
 from factory.config import (
     ConfigError,
     load_budget,
@@ -266,3 +269,24 @@ def test_budget_config_is_typed():
     assert isinstance(budget["default_max_attempts"], int)
     assert isinstance(budget["max_veto_retries"], int)
     assert budget["default_max_attempts"] >= 1
+
+
+def test_root_artifact_ignores_a_stray_copy_inside_the_run(tmp_path, monkeypatch):
+    monkeypatch.setenv("FACTORY_ROOT", str(tmp_path))
+    run_dir = tmp_path / "runs" / "r"
+    run_dir.mkdir(parents=True)
+    project_copy = tmp_path / "skills-lock.json"
+    project_copy.write_text('{"schema_version": "1.0.0", "skills": []}\n', encoding="utf-8")
+    stray = run_dir / "skills-lock.json"
+    stray.write_text("{}", encoding="utf-8")
+
+    entries = collect_artifact_entries(
+        run_dir, ["skills-lock.json"], root_paths=["skills-lock.json"]
+    )
+    assert entries[0]["path"] == "skills-lock.json"
+    assert entries[0]["sha256"] == sha256_file(project_copy)
+    assert entries[0]["sha256"] != sha256_file(stray)
+    resolved = resolve_recorded_path(
+        run_dir, "skills-lock.json", root_paths=["skills-lock.json"]
+    )
+    assert resolved == project_copy.resolve()

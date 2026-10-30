@@ -221,10 +221,13 @@ def _check_recorded_artifacts(
     run_dir: Path, entries: list[dict[str, Any]], label: str
 ) -> list[str]:
     errors: list[str] = []
+    root_paths = [
+        str(spec["path"]) for spec in load_artifacts()["artifacts"].values() if spec.get("root")
+    ]
     for entry in entries:
         recorded = str(entry.get("path", ""))
         expected = str(entry.get("sha256", ""))
-        target = resolve_recorded_path(run_dir, recorded)
+        target = resolve_recorded_path(run_dir, recorded, root_paths=root_paths)
         if not target.exists():
             errors.append(f"{label}: artifact is missing: {recorded}")
             continue

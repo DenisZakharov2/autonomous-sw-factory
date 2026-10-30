@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0.0",
+  "requirements": {
+    "REQ-001": {
+      "spec": "artifacts/spec.md#REQ-001",
+      "tasks": [
+        "TASK-001"
+      ],
+      "tests": [
+        "product/tests/test_todo.py::test_add"
+      ],
+      "acceptance": "A-1"
+    },
+    "REQ-002": {
+      "spec": "artifacts/spec.md#REQ-002",
+      "tasks": [
+        "TASK-001"
+      ],
+      "tests": [
+        "product/tests/test_todo.py::test_list"
+      ],
+      "acceptance": "A-2"
+    },
+    "REQ-003": {
+      "spec": "artifacts/spec.md#REQ-003",
+      "tasks": [
+        "TASK-002"
+      ],
+      "tests": [
+        "product/tests/test_todo.py::test_done"
+      ],
+      "acceptance": "A-3"
+    }
+  }
+}

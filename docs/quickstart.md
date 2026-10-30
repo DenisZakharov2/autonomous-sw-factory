@@ -12,12 +12,13 @@ factory --version
 factory doctor
 ```
 
-Ожидаемо: `factory 0.1.2`, `DOCTOR OK`, 22 роли, 13 стадий, 38 шаблонов, 9 схем.
+Ожидаемо: `factory 0.2.0`, `DOCTOR OK`, 22 роли, 13 стадий, 38 шаблонов, 9 схем.
 
 ## 2. Новый прогон
 
 ```bash
-factory init --run-id my-first --mode nano
+factory init --run-id my-first --mode nano \
+  --idea "CLI todo без зависимостей для одного разработчика"
 factory status --run-id my-first
 factory next --run-id my-first
 ```
@@ -48,7 +49,26 @@ factory gate approve --run-id my-first --gate gate_s00 \
 
 `gate_s00` — человеческий: без `human:` он не закроется. После закрытия `factory next` покажет `s0_vision`.
 
-## 5. Эталонный прогон
+## 5. Автоматический прогон
+
+```bash
+factory run --run-id my-first --executor fake --max-steps 60
+factory gate approve --run-id my-first --gate gate_s00 \
+  --approver human:your-name --evidence "brief accepted"
+factory run --run-id my-first --executor fake --max-steps 60
+```
+
+`fake` — детерминированный исполнитель на эталонных артефактах: он доказывает цикл и не вызывает модель. С реальным исполнителем:
+
+```bash
+factory run --run-id live --executor hermes --yolo --timeout 900
+# или
+factory run --run-id live --executor opencode --executor-model provider/model
+```
+
+`factory run` останавливается на первом человеческом гейте с кодом `2` и печатает точную команду для человека; `0` — прогон завершён, `3` — эскалация. Токены, секунды и цена пишутся в `runs/<id>/runtime/usage.jsonl`, доказательства — в `runs/<id>/runtime/evidence/`. Подробности: [`runtime.md`](runtime.md).
+
+## 6. Эталонный прогон
 
 ```bash
 FACTORY_ROOT="$PWD/examples/nano-todo" \
@@ -63,7 +83,7 @@ python -m unittest discover -s examples/nano-todo/product/tests -v
 
 Ожидаемо: `VERIFY OK`, `3/3` traceability, `TEST OK`, 3 теста.
 
-## 6. Частые ошибки
+## 7. Частые ошибки
 
 | Ошибка | Причина | Решение |
 | :--- | :--- | :--- |
@@ -75,8 +95,9 @@ python -m unittest discover -s examples/nano-todo/product/tests -v
 | `BLOCK_INCOMPLETE` | Скан скилла неполный | Повторить с LLM/провайдером или не устанавливать |
 | `state.json ... mismatch` | Ручная правка или усечение | Не править вручную; `factory log verify --run-id <id>` |
 
-## 7. Что дальше
+## 8. Что дальше
 
+- `docs/runtime.md` — контракт исполнителя, цикл `factory run`, бюджет и песочница.
 - `docs/adapters/hermes.md` — как исполнять work orders в Hermes.
 - `docs/threat-model.md` — модель угроз.
 - `docs/metrics.md` — восемь метрик.

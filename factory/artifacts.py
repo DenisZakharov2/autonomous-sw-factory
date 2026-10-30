@@ -50,12 +50,23 @@ def artifact_path(run_dir: Path, spec: dict[str, Any], *, task_id: str | None = 
     return resolved
 
 
-def resolve_recorded_path(run_dir: Path, recorded: str) -> Path:
-    """Resolve a path stored in the journal: run-relative first, then project root."""
+def resolve_recorded_path(
+    run_dir: Path, recorded: str, root_paths: Iterable[str] = ()
+) -> Path:
+    """Resolve a path stored in the journal.
+
+    A declared root artifact (`root: true`) always resolves against the project
+    root, even if a stray copy exists inside the run: otherwise an agent could
+    make the journal vouch for the wrong file.
+    """
     raw = recorded[:-1] if recorded.endswith("/") else recorded
     candidate = Path(raw)
     if candidate.is_absolute():
         return candidate
+    normalised = raw.replace("\\", "/")
+    roots = {str(item).replace("\\", "/") for item in root_paths}
+    if normalised in roots:
+        return (project_root() / normalised).resolve()
     local = (run_dir / candidate).resolve()
     if local.exists():
         return local
@@ -123,11 +134,12 @@ def collect_artifact_entries(
 
         candidate = raw_path.resolve()
         is_root = False
-        if not Path(raw).is_absolute() and not candidate.exists():
-            normalised = raw.replace("\\", "/")
-            if normalised in roots:
-                candidate = (project_root() / normalised).resolve()
-                is_root = True
+        normalised = raw.replace("\\", "/")
+        if not Path(raw).is_absolute() and normalised in roots:
+            # The declaration wins over a run-local copy of a root artifact.
+            candidate = (project_root() / normalised).resolve()
+            is_root = True
+            _reject_symlink(candidate)
         if Path(raw).is_absolute() and not _within(candidate, run_dir):
             for root in roots:
                 if candidate == (project_root() / root).resolve():
@@ -394,41 +406,59 @@ def validate_acceptance(run_dir: Path) -> list[str]:
     return errors
 
 
+def validate_artifact(
+    run_dir: Path, spec: dict[str, Any], tasks: dict[str, Any] | None = None
+) -> list[str]:
+    """Validate one declared artifact spec, independently of its stage.
+
+    This is what lets a work order say *which* artifact is still missing on a
+    multi-role stage, instead of only "the stage is not valid yet".
+    """
+    errors: list[str] = []
+    tasks = tasks or {}
+    if spec.get("directory"):
+        path = artifact_path(run_dir, spec)
+        if not path.exists() or not path.is_dir():
+            errors.append(f"missing directory: {path}")
+        elif not any(item.is_file() for item in path.rglob("*")):
+            errors.append(f"directory is empty: {path}")
+        return errors
+    if spec.get("per_task"):
+        owners = [task for task in tasks.values() if task.get("stage") == spec.get("stage")]
+        if not owners:
+            owners = [task for task in tasks.values() if task.get("task_id") == spec.get("task_id")]
+        if not owners:
+            errors.append(f"no task to validate {spec.get('id', spec.get('path'))} against")
+        for task in owners:
+            path = artifact_path(run_dir, spec, task_id=task["task_id"])
+            errors.extend(validate_markdown(path, list(spec.get("required_sections", []))))
+        return errors
+    if spec.get("per_pattern"):
+        paths = pattern_paths(run_dir, spec)
+        if not paths:
+            errors.append(f"missing artifact pattern: {spec['path']}")
+        for path in paths:
+            errors.extend(validate_markdown(path, list(spec.get("required_sections", []))))
+        return errors
+    path = artifact_path(run_dir, spec)
+    if spec.get("schema"):
+        errors.extend(validate_json_artifact(path, Path(str(spec["schema"])).name))
+    if spec.get("required_sections"):
+        errors.extend(validate_markdown(path, list(spec["required_sections"])))
+    elif not spec.get("schema") and not spec.get("directory") and not path.exists():
+        errors.append(f"missing artifact: {path}")
+    return errors
+
+
 def validate_stage(run_dir: Path, stage: dict[str, Any], registry: dict[str, Any], tasks: dict[str, Any] | None = None) -> list[str]:
     errors: list[str] = []
     tasks = tasks or {}
     for artifact_id in stage["artifacts"]:
         spec = dict(registry["artifacts"][artifact_id])
         spec["id"] = artifact_id
-        if spec.get("directory"):
-            path = artifact_path(run_dir, spec)
-            if not path.exists() or not path.is_dir():
-                errors.append(f"missing directory: {path}")
-            elif not any(item.is_file() for item in path.rglob("*")):
-                errors.append(f"directory is empty: {path}")
-            continue
         if spec.get("per_task"):
-            owners = [task for task in tasks.values() if task.get("stage") == stage["id"]]
-            if not owners:
-                errors.append(f"stage {stage['id']} has no tasks; cannot validate {artifact_id}")
-            for task in owners:
-                path = artifact_path(run_dir, spec, task_id=task["task_id"])
-                errors.extend(validate_markdown(path, list(spec.get("required_sections", []))))
-            continue
-        if spec.get("per_pattern"):
-            paths = pattern_paths(run_dir, spec)
-            if not paths:
-                errors.append(f"missing artifact pattern: {spec['path']}")
-            for path in paths:
-                errors.extend(validate_markdown(path, list(spec.get("required_sections", []))))
-            continue
-        path = artifact_path(run_dir, spec)
-        if spec.get("schema"):
-            errors.extend(validate_json_artifact(path, Path(str(spec["schema"])).name))
-        if spec.get("required_sections"):
-            errors.extend(validate_markdown(path, list(spec["required_sections"])))
-        elif not spec.get("schema") and not spec.get("directory") and not path.exists():
-            errors.append(f"missing artifact: {path}")
+            spec["stage"] = stage["id"]
+        errors.extend(validate_artifact(run_dir, spec, tasks))
     if stage["id"] == "s1_spec":
         errors.extend(validate_traceability(run_dir))
     if stage["id"] == "s3_plan":

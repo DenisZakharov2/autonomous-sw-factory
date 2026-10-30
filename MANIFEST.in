@@ -15,4 +15,5 @@ recursive-include docs *
 recursive-include examples *
 recursive-include tests *.py
 recursive-include factory *.yaml *.md *.json *.tmpl
+recursive-include factory/runtime/fixtures *
 global-exclude __pycache__ *.py[cod]

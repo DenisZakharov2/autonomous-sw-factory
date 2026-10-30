@@ -1,6 +1,6 @@
 # Autonomous Software Factory
 
-**Версия 0.1.2.** Это исполнимый kit для стадийной разработки ПО с независимой проверкой, а не «полностью автономная фабрика из 22 думающих агентов». Движок выдаёт work orders, проверяет артефакты и ведёт журнал; роли исполняет хост-рантайм (Hermes, Claude Code, OpenCode, Cursor) или человек.
+**Версия 0.2.0.** Это исполнимый kit для стадийной разработки ПО с независимой проверкой, а не «полностью автономная фабрика из 22 думающих агентов». Движок выдаёт work orders, проверяет артефакты и ведёт журнал; роли исполняет рантайм (`factory run` с адаптерами Hermes, OpenCode или детерминированным fake), либо человек.
 
 [![CI](https://github.com/DenisZakharov2/autonomous-sw-factory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/DenisZakharov2/autonomous-sw-factory/actions/workflows/ci.yml) · [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -13,6 +13,7 @@
 - **22 ролевые карты** с восемью разделами: назначение, входы, процедура, выходы, Definition of Done, вето, запреты, эскалация.
 - **13 стадий** от `s_in`/`s00_intake` до `s9_learn` с явными гейтами.
 - **Исполнимый Python-движок**: `init`, `next`, `submit`, `gate`, `verify`, `task`, `quarantine`, `trace`, `metrics`, `doctor`.
+- **Рантайм `factory run`**: work order → исполнитель → проверка → сдача → гейт; `pending_artifacts` и `next_role` в каждом ордере, `usage.jsonl`, evidence и три стоп-гарда (подмена состояния, запись вне прогона, бюджет). Адаптеры: `fake` (без модели), `hermes`, `opencode`; см. [`docs/runtime.md`](docs/runtime.md).
 - **Журнал с хеш-цепочкой** SHA-256, блокировкой записи, state-якорем и семантической проверкой `PASS`.
 - **Независимый верификатор**: `PASS` может поставить только `02-independent-verifier`; человек может принять риск отдельным событием.
 - **Карантин скиллов**: адаптер `NVIDIA/SkillSpector 2.12.0` с fail-closed и локом хешей.
@@ -21,7 +22,7 @@
 
 ## Чего здесь нет
 
-- **Нет встроенной модели.** Код не «думает»; роль исполняет рантайм. Без рантайма фабрика выдаёт work order и проверяет результат, но не пишет текст за вас.
+- **Нет встроенной модели.** Код не «думает»; роль исполняет рантайм. `factory run` умеет вызвать Hermes или OpenCode, но по умолчанию работает `fake` — детерминированный исполнитель на эталонных артефактах, который доказывает цикл, а не автономность.
 - **Нет полной автономности.** Гейты `s1_spec`, `s7_release`, `s9_learn` и Brownfield-drill требуют человека. Это сделано намеренно.
 - **Нет трекера issues и облака.** Задачи живут в `state.json` и `tasks/`; внешние адаптеры — responsibility рантайма.
 - **Нет обещания «22 агента за одну минуту».** Один прогон минимум требует интервью, ТЗ, архитектуры и проверки.
@@ -39,7 +40,24 @@ factory status --run-id demo-01
 factory next --run-id demo-01
 ```
 
-`factory next` печатает JSON work order: стадию, роли, артефакты, шаблоны, схемы, DoD, гейт и следующую команду. Рантайм (или человек) создаёт артефакты по шаблонам и сдаёт их:
+`factory next` печатает JSON work order: стадию, роли, артефакты, шаблоны, схемы, DoD, гейт и следующую команду. Рантайм (или человек) создаёт артефакты по шаблонам и сдаёт их.
+
+Прогнать цикл без модели (детерминированный `fake` пишет эталонные артефакты):
+
+```bash
+factory run --run-id demo-01 --executor fake --max-steps 60
+factory gate approve --run-id demo-01 --gate gate_s00 --approver human:your-name --evidence "brief accepted"
+factory run --run-id demo-01 --executor fake --max-steps 60
+```
+
+С реальным исполнителем:
+
+```bash
+factory run --run-id live-01 --executor hermes --yolo --max-steps 60 --timeout 900
+factory run --run-id live-01 --executor opencode --executor-model provider/model
+```
+
+Ручной путь остаётся доступным:
 
 ```bash
 factory submit --run-id demo-01 --stage s00_intake \
@@ -103,6 +121,7 @@ python -m unittest discover -s examples/nano-todo/product/tests -v
 | `factory init --run-id ID --mode MODE` | Создать изолированный прогон |
 | `factory status --run-id ID` | Показать стадию, гейты, задачи, журнал |
 | `factory next --run-id ID` | Выдать следующий work order в JSON |
+| `factory run --run-id ID --executor fake\|hermes\|opencode` | Исполнить цикл: order → исполнитель → проверка → сдача → гейт. Коды: `0` готово, `2` нужен человек, `3` эскалация |
 | `factory submit --run-id ID --stage S --role R --artifact P` | Сдать артефакты продюсера |
 | `factory verify --run-id ID [--stage S] [--require-gate]` | Детерминированная проверка |
 | `factory gate approve|reject|accept-risk --gate G --approver human:ID` | Решение гейта; `accept-risk` закрывает эскалацию с записью риска |
@@ -159,6 +178,19 @@ factory/                 # движок и конфиги
   artifacts.py           # реестр, Markdown/JSON проверки
   pipeline.py            # стадии, режимы, владельцы
   quarantine.py          # SkillSpector-адаптер
+  runtime/               # исполняемый цикл
+    base.py              # протокол Executor
+    loop.py              # order → execute → verify → submit → gate
+    prompt.py            # сборка промпта
+    submit.py            # какие пути разрешено сдавать
+    guard.py             # tripwire на state.json и каталог прогонов
+    usage.py             # usage.jsonl и бюджет режима
+    evidence.py          # runtime/evidence/*.json
+    fake.py              # детерминированный исполнитель
+    opencode.py          # адаптер OpenCode
+    hermes.py            # адаптер Hermes
+    sandbox.py           # bwrap: read-only корень
+    fixtures/nano/       # эталонные артефакты для fake
   roles/                 # 22 карточки
   schemas/               # 9 JSON-схем
   templates/             # 38 шаблонов
@@ -166,18 +198,19 @@ factory/                 # движок и конфиги
   artifacts.yaml         # реестр артефактов
   models.yaml            # tier → runtime/env
   budget.yaml            # лимиты и поведение
-tests/                   # инварианты, CLI, конкурентность, схемы
+tests/                   # инварианты, CLI, конкурентность, схемы, рантайм
 examples/nano-todo/      # эталонный прогон
-docs/                    # quickstart, threat model, metrics, adapters
+docs/                    # quickstart, runtime, threat model, metrics, adapters
 ```
 
 ## Ограничения
 
 - `models.yaml` намеренно не содержит вендорских ID. Тир разрешается рантаймом или переменными `FACTORY_MODEL_TIER_1/2/3`. Журнал записывает фактический `model_id`, который передал рантайм.
-- Стоимость в `metrics` равна `null`, пока рантайм не начнёт писать `tokens_in/tokens_out/cost_usd`. Мы не выдумываем цифры.
+- Стоимость в `metrics` остаётся `null`: `cost_per_artifact_usd` считается по журналу, а журнал не хранит цены. Рантайм пишет токены и цену отдельно, в `runtime/usage.jsonl`.
 - `Brownfield` поддерживает только git-репозитории. Для папки без git используйте `standard` и сделайте бэкап вручную.
 - `s4_build` принимает задачи из `plan.md`; произвольный формат плана не парсится.
 - Полный прогон требует модели или человека. `examples/nano-todo` — детерминированный reference run, а не доказательство автономности.
+- `factory run` исполняет по одному шагу за вызов исполнителя и останавливается на человеческом гейте. Параллельные задачи в git worktree — отдельный релиз `0.2.x`.
 
 ## Разработка
 

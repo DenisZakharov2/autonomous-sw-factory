@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 def cli(*args, runs_root: Path):
     env = dict(os.environ)
     env["FACTORY_RUNS_ROOT"] = str(runs_root)
+    env["FACTORY_ROOT"] = str(runs_root.parent)
     return subprocess.run(
         [sys.executable, "-m", "factory.cli", *args],
         cwd=ROOT, env=env, capture_output=True, text=True, check=False,
@@ -149,3 +150,36 @@ def test_next_exits_one_when_the_stage_is_escalated(tmp_path):
     order = json.loads(result.stdout)
     assert order["action"] == "blocked"
     assert order["stage"] == "s00_intake"
+
+
+def test_run_with_fake_executor_stops_at_the_first_human_gate(tmp_path):
+    runs = tmp_path / "runs"
+    result = cli(
+        "run", "--run-id", "live", "--executor", "fake", "--max-steps", "4", runs_root=runs
+    )
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "human_gate" in result.stdout
+    assert "factory gate approve" in result.stdout
+    assert (runs / "live" / "state.json").is_file()
+    assert list((runs / "live" / "runtime").glob("ev-*-*.prompt.md"))
+
+
+def test_run_refuses_to_create_a_missing_run_with_no_init(tmp_path):
+    runs = tmp_path / "runs"
+    result = cli("run", "--run-id", "ghost", "--no-init", runs_root=runs)
+    assert result.returncode == 1
+    assert "does not exist" in result.stderr
+    assert not (runs / "ghost").exists()
+
+
+def test_run_json_reports_the_stop_reason(tmp_path):
+    runs = tmp_path / "runs"
+    result = cli(
+        "run", "--run-id", "live", "--executor", "fake", "--max-steps", "4",
+        "--json", runs_root=runs,
+    )
+    assert result.returncode == 2
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "human_gate"
+    assert payload["stage"] == "s00_intake"
+    assert payload["usage"]["steps"] == 1

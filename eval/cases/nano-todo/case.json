@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0.0",
+  "id": "nano-todo",
+  "mode": "nano",
+  "title": "CLI todo: one full cycle through every nano stage",
+  "tags": ["nano", "single-role", "cli", "smoke"],
+  "max_steps": 200,
+  "max_cycles": 20,
+  "thresholds": {"steps_growth": 0, "events_fall": 0, "tokens_growth": 0.1, "usd_growth": 0.1}
+}

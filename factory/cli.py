@@ -452,6 +452,45 @@ def cmd_metrics(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_eval(args: argparse.Namespace) -> int:
+    from .eval import format_eval_report, run_eval_set
+
+    budget = {
+        key: value
+        for key, value in (
+            ("tokens", args.budget_tokens),
+            ("minutes", args.budget_minutes),
+            ("usd", args.budget_usd),
+        )
+        if value is not None
+    }
+    report = run_eval_set(
+        Path(args.cases),
+        _build_executor(args),
+        root=_runs_root(args),
+        baseline=Path(args.baseline) if args.baseline else None,
+        update_baseline=Path(args.update_baseline) if args.update_baseline else None,
+        stamp=args.stamp,
+        budget=budget or None,
+    )
+    if args.json:
+        _print_json(report)
+    else:
+        print(format_eval_report(report))
+    return 0 if report["ok"] else 1
+
+
+def cmd_compare(args: argparse.Namespace) -> int:
+    from .compare import compare_runs, format_compare
+
+    report = compare_runs(args.left, args.right, root=_runs_root(args))
+    if args.json:
+        _print_json(report)
+    else:
+        print(format_compare(report))
+    return 0
+
+
 def cmd_artifacts(args: argparse.Namespace) -> int:
     registry = load_artifacts()["artifacts"]
     rows = []
@@ -508,6 +547,46 @@ def cmd_budget(args: argparse.Namespace) -> int:
     return 0
 
 
+def add_executor_arguments(parser: argparse.ArgumentParser) -> None:
+    """Executor options shared by `factory run` and `factory eval`."""
+    parser.add_argument("--executor", default="fake", choices=["fake", "opencode", "hermes"])
+    parser.add_argument("--executor-model", help="model override handed to the executor CLI")
+    parser.add_argument(
+        "--executor-tools",
+        default="auto",
+        help="Hermes toolsets for a step (`auto`: file, plus terminal on s4_build; `all` keeps the full set)",
+    )
+    parser.add_argument(
+        "--executor-skills",
+        default=None,
+        help="value for Hermes --skills (default: leave the host setting untouched)",
+    )
+    parser.add_argument("--timeout", type=float, default=1800.0, help="per-step timeout in seconds")
+    sandbox = parser.add_mutually_exclusive_group()
+    sandbox.add_argument(
+        "--sandbox",
+        dest="sandbox",
+        action="store_true",
+        default=None,
+        help="wrap the executor in bubblewrap (default for hermes/opencode)",
+    )
+    sandbox.add_argument(
+        "--no-sandbox",
+        dest="sandbox",
+        action="store_false",
+        help="run the executor without the trust boundary (debugging only)",
+    )
+    parser.add_argument("--sandbox-rw", action="append", help="extra path the sandboxed executor may write (repeatable)")
+    parser.add_argument("--yolo", action="store_true", help="pass --yolo to hermes")
+    parser.add_argument("--reasoning", default="medium", help="reasoning effort passed to hermes")
+    parser.add_argument("--opencode-mode", default="run", choices=["run", "prompt"])
+    parser.add_argument(
+        "--fake-scenario",
+        default="ok",
+        choices=["ok", "break-artifact", "write-state", "escape", "slow"],
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="factory", description="Autonomous Software Factory")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -540,7 +619,7 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="execute work orders with a runtime executor")
     run.add_argument("--run-id", required=True)
     run.add_argument("--mode", default="nano", choices=["nano", "standard", "enterprise", "brownfield"])
-    run.add_argument("--executor", default="fake", choices=["fake", "opencode", "hermes"])
+    add_executor_arguments(run)
     run.add_argument("--max-steps", type=int, default=60)
     run.add_argument(
         "--parallel-tasks",
@@ -552,41 +631,33 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--no-init", action="store_true", help="refuse to create a missing run")
     run.add_argument("--idea", help="product idea written to runs/<id>/idea.md when the run is created")
     run.add_argument("--json", action="store_true")
-    run.add_argument("--executor-model", help="model override handed to the executor CLI")
-    run.add_argument(
-        "--executor-tools",
-        default="auto",
-        help="Hermes toolsets for a step (`auto`: file, plus terminal on s4_build; `all` keeps the full set)",
-    )
-    run.add_argument(
-        "--executor-skills",
-        default=None,
-        help="value for Hermes --skills (default: leave the host setting untouched)",
-    )
-    run.add_argument("--timeout", type=float, default=1800.0, help="per-step timeout in seconds")
     run.add_argument("--budget-tokens", type=int, help="override the mode token budget for this run")
     run.add_argument("--budget-minutes", type=float, help="override the mode minute budget")
     run.add_argument("--budget-usd", type=float, help="override the mode usd budget")
-    sandbox = run.add_mutually_exclusive_group()
-    sandbox.add_argument(
-        "--sandbox",
-        dest="sandbox",
-        action="store_true",
-        default=None,
-        help="wrap the executor in bubblewrap (default for hermes/opencode)",
-    )
-    sandbox.add_argument(
-        "--no-sandbox",
-        dest="sandbox",
-        action="store_false",
-        help="run the executor without the trust boundary (debugging only)",
-    )
-    run.add_argument("--sandbox-rw", action="append", help="extra path the sandboxed executor may write (repeatable)")
-    run.add_argument("--yolo", action="store_true", help="pass --yolo to hermes")
-    run.add_argument("--reasoning", default="medium", help="reasoning effort passed to hermes")
-    run.add_argument("--opencode-mode", default="run", choices=["run", "prompt"])
-    run.add_argument("--fake-scenario", default="ok", choices=["ok", "break-artifact", "write-state", "escape", "slow"])
     run.set_defaults(func=cmd_run)
+
+    evaluate = sub.add_parser("eval", help="run the external eval cases against a baseline")
+    evaluate.add_argument("--cases", default="eval/cases", help="directory with one subdirectory per case")
+    evaluate.add_argument("--baseline", help="baseline JSON (default: <cases>/../baseline.json)")
+    evaluate.add_argument(
+        "--update-baseline",
+        help="rewrite this baseline from the current results (refuses a failing case)",
+    )
+    evaluate.add_argument("--stamp", help="run-id suffix (default: UTC timestamp)")
+    evaluate.add_argument("--budget-tokens", type=int, help="override every case token budget")
+    evaluate.add_argument("--budget-minutes", type=float, help="override every case minute budget")
+    evaluate.add_argument("--budget-usd", type=float, help="override every case usd budget")
+    evaluate.add_argument("--runs-root")
+    evaluate.add_argument("--json", action="store_true")
+    add_executor_arguments(evaluate)
+    evaluate.set_defaults(func=cmd_eval)
+
+    compare = sub.add_parser("compare", help="delta between two runs")
+    compare.add_argument("--left", required=True, help="left run id")
+    compare.add_argument("--right", required=True, help="right run id")
+    compare.add_argument("--runs-root")
+    compare.add_argument("--json", action="store_true")
+    compare.set_defaults(func=cmd_compare)
 
     submit = sub.add_parser("submit", help="submit artifacts for a stage")
     submit.add_argument("--run-id", required=True)

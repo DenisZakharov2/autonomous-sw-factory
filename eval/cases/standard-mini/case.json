@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0.0",
+  "id": "standard-mini",
+  "mode": "standard",
+  "title": "Standard team: two owners close the dual-view spec, then build",
+  "tags": ["standard", "multi-role", "spec"],
+  "max_steps": 240,
+  "max_cycles": 20,
+  "thresholds": {"steps_growth": 0, "events_fall": 0, "tokens_growth": 0.1, "usd_growth": 0.1}
+}

@@ -12,10 +12,12 @@ from .artifacts import resolve_recorded_path, sha256_dir, validate_stage, valida
 from .config import (
     PACKAGE_ROOT,
     SCHEMA_DIR,
+    check_schema_cached,
     load_artifacts,
     load_json,
     load_models,
     load_pipeline,
+    project_root,
 )
 from .errors import ConfigError, FactoryError, RunError
 from .journal import read_events, sha256_file, verify_chain
@@ -177,7 +179,7 @@ def validate_schemas() -> list[str]:
     for path in sorted((PACKAGE_ROOT / "schemas").glob("*.json")):
         try:
             schema = load_json(path)
-            jsonschema.Draft202012Validator.check_schema(schema)
+            check_schema_cached(jsonschema.Draft202012Validator, schema)
         except (ConfigError, jsonschema.SchemaError) as exc:
             errors.append(f"{path.name}: invalid JSON Schema: {exc}")
     try:
@@ -218,12 +220,18 @@ def check_state_consistency(run_dir: Path, state: dict[str, Any], pipeline: dict
 
 
 def _check_recorded_artifacts(
-    run_dir: Path, entries: list[dict[str, Any]], label: str
+    run_dir: Path,
+    entries: list[dict[str, Any]],
+    label: str,
+    root_paths: list[str] | None = None,
 ) -> list[str]:
     errors: list[str] = []
-    root_paths = [
-        str(spec["path"]) for spec in load_artifacts()["artifacts"].values() if spec.get("root")
-    ]
+    if root_paths is None:
+        root_paths = [
+            str(spec["path"])
+            for spec in load_artifacts()["artifacts"].values()
+            if spec.get("root")
+        ]
     for entry in entries:
         recorded = str(entry.get("path", ""))
         expected = str(entry.get("sha256", ""))
@@ -279,17 +287,20 @@ def artifact_integrity_errors(
             )
 
     errors: list[str] = []
+    root_paths = [
+        str(spec["path"]) for spec in load_artifacts()["artifacts"].values() if spec.get("root")
+    ]
     for stage, status in state["stage_status"].items():
         if stage_id and stage != stage_id:
             continue
         if status == "accepted":
             entries = approved.get(stage) or list(submitted.get(stage, {}).values())
             if entries:
-                errors.extend(_check_recorded_artifacts(run_dir, entries, f"stage {stage}"))
+                errors.extend(_check_recorded_artifacts(run_dir, entries, f"stage {stage}", root_paths))
         elif status == "review":
             entries = list(submitted.get(stage, {}).values())
             if entries:
-                errors.extend(_check_recorded_artifacts(run_dir, entries, f"stage {stage}"))
+                errors.extend(_check_recorded_artifacts(run_dir, entries, f"stage {stage}", root_paths))
     for task_id, task in state["tasks"].items():
         if stage_id and task.get("stage") != stage_id:
             continue
@@ -300,7 +311,7 @@ def artifact_integrity_errors(
         else:
             entries = []
         if entries:
-            errors.extend(_check_recorded_artifacts(run_dir, entries, f"task {task_id}"))
+            errors.extend(_check_recorded_artifacts(run_dir, entries, f"task {task_id}", root_paths))
     return errors
 
 
@@ -360,6 +371,11 @@ def doctor_report() -> dict[str, Any]:
     errors.extend(validate_roles())
     errors.extend(validate_schemas())
     errors.extend(validate_templates())
+    cases_dir = project_root() / "eval" / "cases"
+    if cases_dir.is_dir():
+        from .eval import validate_cases
+
+        errors.extend(validate_cases(cases_dir))
     return {
         "roles": len(roles),
         "templates": len(list((PACKAGE_ROOT / "templates").glob("*.tmpl"))),

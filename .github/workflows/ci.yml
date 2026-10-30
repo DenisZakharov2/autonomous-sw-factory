@@ -31,6 +31,8 @@ jobs:
         run: factory doctor
       - name: Tests
         run: pytest -q
+      - name: Eval set (fake executor, invariants and baseline)
+        run: factory eval --cases eval/cases --executor fake
       - name: Runtime reference run (no model)
         run: |
           export FACTORY_ROOT="$RUNNER_TEMP/factory-run"

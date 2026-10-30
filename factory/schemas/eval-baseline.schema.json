@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/DenisZakharov2/autonomous-sw-factory/schemas/eval-baseline.schema.json",
+  "title": "EvalBaseline",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "cases"],
+  "properties": {
+    "schema_version": {"type": "string", "const": "1.0.0"},
+    "generated_at": {"type": "string", "minLength": 10},
+    "cases": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/case"}
+    }
+  },
+  "$defs": {
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "steps",
+        "events",
+        "rework_events",
+        "tasks",
+        "gates_closed",
+        "pass_at_1"
+      ],
+      "properties": {
+        "status": {"type": "string", "minLength": 1},
+        "steps": {"type": "integer", "minimum": 0},
+        "loop_steps": {"type": "integer", "minimum": 0},
+        "events": {"type": "integer", "minimum": 0},
+        "rework_events": {"type": "integer", "minimum": 0},
+        "tasks": {"type": "integer", "minimum": 0},
+        "gates_closed": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "pass_at_1": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "tokens": {"type": ["integer", "null"], "minimum": 0},
+        "tokens_billable": {"type": ["integer", "null"], "minimum": 0},
+        "usd": {"type": ["number", "null"], "minimum": 0},
+        "seconds": {"type": ["number", "null"], "minimum": 0},
+        "prompt_chars": {"type": ["integer", "null"], "minimum": 0},
+        "verification_coverage": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "traceability_coverage": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
+      }
+    }
+  }
+}

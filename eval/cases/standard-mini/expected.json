@@ -1,0 +1,61 @@
+{
+  "schema_version": "1.0.0",
+  "status": "complete",
+  "artifacts": [
+    "interview_brief",
+    "glossary",
+    "vision",
+    "backlog",
+    "spec",
+    "spec_human",
+    "traceability",
+    "domain_model",
+    "access_matrix",
+    "plan",
+    "architecture",
+    "api_contract",
+    "threat_model",
+    "adr",
+    "deliverable",
+    "product_src",
+    "product_tests",
+    "test_report",
+    "acceptance",
+    "security_review_app",
+    "db_report",
+    "data_pipeline",
+    "runbook_deploy",
+    "runbook_ops",
+    "release_notes",
+    "product_readme",
+    "user_guide",
+    "metrics",
+    "lessons_learned",
+    "improvement_patch",
+    "skills_lock"
+  ],
+  "requirements": ["REQ-001", "REQ-002", "REQ-003"],
+  "tasks": {"count": 2},
+  "gates_closed": [
+    "gate_s00",
+    "gate_s0",
+    "gate_s1",
+    "gate_s15",
+    "gate_s2",
+    "gate_s3",
+    "gate_s4",
+    "gate_s5",
+    "gate_s6",
+    "gate_s7",
+    "gate_s8",
+    "gate_s9"
+  ],
+  "submitters": {
+    "s1_spec": ["05-business-analyst", "06-system-analyst"]
+  },
+  "product_tests": {
+    "command": ["{python}", "-m", "unittest", "discover", "-s", "product/tests"],
+    "min_tests": 3,
+    "timeout_seconds": 60
+  }
+}

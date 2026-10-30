@@ -3,16 +3,36 @@ from __future__ import annotations
 
 import json
 import os
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
 import jsonschema
 import yaml
+from jsonschema import exceptions as jsonschema_exceptions
+from jsonschema.validators import validator_for
 
 from .errors import ConfigError
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 SCHEMA_DIR = PACKAGE_ROOT / "schemas"
+
+# `jsonschema.validate` re-validates the schema itself on every call, which
+# costs ~60 ms per validation.  A gate runs dozens of validations against the
+# same handful of package schemas, so the result is cached by content.  Only
+# successful checks are cached; a broken schema still raises every time.
+_CHECKED_SCHEMAS: "OrderedDict[str, bool]" = OrderedDict()
+_CHECKED_SCHEMAS_LIMIT = 128
+
+
+def check_schema_cached(cls: Any, schema: dict[str, Any]) -> None:
+    key = json.dumps(schema, sort_keys=True, ensure_ascii=False, default=str)
+    if key in _CHECKED_SCHEMAS:
+        return
+    cls.check_schema(schema)
+    _CHECKED_SCHEMAS[key] = True
+    while len(_CHECKED_SCHEMAS) > _CHECKED_SCHEMAS_LIMIT:
+        _CHECKED_SCHEMAS.popitem(last=False)
 
 
 def project_root() -> Path:
@@ -48,11 +68,13 @@ def load_json(path: Path) -> Any:
 
 
 def validate_instance(instance: Any, schema: dict[str, Any], label: str) -> None:
-    try:
-        jsonschema.validate(instance=instance, schema=schema)
-    except jsonschema.ValidationError as exc:
-        where = ".".join(str(p) for p in exc.absolute_path) or "<root>"
-        raise ConfigError(f"{label} is invalid at {where}: {exc.message}") from exc
+    cls = validator_for(schema)
+    check_schema_cached(cls, schema)
+    validator = cls(schema)
+    error = jsonschema_exceptions.best_match(validator.iter_errors(instance))
+    if error is not None:
+        where = ".".join(str(p) for p in error.absolute_path) or "<root>"
+        raise ConfigError(f"{label} is invalid at {where}: {error.message}") from error
 
 
 def validate_against_schema(instance: Any, schema_name: str, label: str) -> None:

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/DenisZakharov2/autonomous-sw-factory/schemas/eval-case.schema.json",
+  "title": "EvalCase",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "mode", "title"],
+  "properties": {
+    "schema_version": {"type": "string", "const": "1.0.0"},
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"},
+    "mode": {"type": "string", "enum": ["nano", "standard", "brownfield", "enterprise"]},
+    "title": {"type": "string", "minLength": 3},
+    "tags": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "max_steps": {"type": "integer", "minimum": 1, "maximum": 2000},
+    "max_cycles": {"type": "integer", "minimum": 1, "maximum": 50},
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tokens": {"type": ["integer", "null"], "minimum": 1},
+        "minutes": {"type": ["number", "null"], "minimum": 0},
+        "usd": {"type": ["number", "null"], "minimum": 0}
+      }
+    },
+    "thresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "steps_growth": {"type": "integer", "minimum": 0},
+        "events_fall": {"type": "integer", "minimum": 0},
+        "tokens_growth": {"type": "number", "minimum": 0, "maximum": 100},
+        "usd_growth": {"type": "number", "minimum": 0, "maximum": 100}
+      }
+    }
+  }
+}

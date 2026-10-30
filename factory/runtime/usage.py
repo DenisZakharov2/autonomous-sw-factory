@@ -21,6 +21,22 @@ class UsageTotals:
     seconds: float
     tokens: int | None
     usd: float | None
+    tokens_in: int | None = None
+    tokens_out: int | None = None
+    cache_read: int | None = None
+
+    @property
+    def billable_tokens(self) -> int | None:
+        """Input and output only, without cache reads.
+
+        `total_tokens` from a CLI counts a cached prefix again on every API
+        call, so it is the conservative number the budget uses.  `billable`
+        is the provider-invoice number and is reported separately; replacing
+        one with the other silently would make the budget look bigger.
+        """
+        if self.tokens_in is None or self.tokens_out is None:
+            return None
+        return self.tokens_in + self.tokens_out
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -28,6 +44,10 @@ class UsageTotals:
             "seconds": round(self.seconds, 3),
             "minutes": round(self.seconds / 60.0, 4),
             "tokens": self.tokens,
+            "tokens_in": self.tokens_in,
+            "tokens_out": self.tokens_out,
+            "cache_read": self.cache_read,
+            "tokens_billable": self.billable_tokens,
             "usd": self.usd,
         }
 
@@ -57,11 +77,23 @@ class UsageLedger:
                 continue
         return rows
 
+    def next_step(self) -> int:
+        """A number that is unique for the whole run, not for one loop call.
+
+        `factory run` is invoked again after every human gate; a per-call
+        counter used to restart at 1, so the ledger could not say which step
+        of the run a 74k-token call belonged to.
+        """
+        return len(self.records()) + 1
+
     def totals(self) -> UsageTotals:
         rows = self.records()
         seconds = sum(float(row.get("seconds") or 0.0) for row in rows)
         tokens: int | None = 0
         usd: float | None = 0.0
+        tokens_in: int | None = 0
+        tokens_out: int | None = 0
+        cache_read: int | None = 0
         for row in rows:
             value = row.get("tokens_total")
             if value is None:
@@ -73,7 +105,35 @@ class UsageLedger:
                 usd = None
             elif usd is not None:
                 usd += float(cost)
-        return UsageTotals(steps=len(rows), seconds=seconds, tokens=tokens, usd=usd)
+            for name, target in (
+                ("tokens_in", "in"),
+                ("tokens_out", "out"),
+                ("cache_read", "cache"),
+            ):
+                raw = row.get(name)
+                if raw is None:
+                    if target == "in":
+                        tokens_in = None
+                    elif target == "out":
+                        tokens_out = None
+                    else:
+                        cache_read = None
+                else:
+                    if target == "in" and tokens_in is not None:
+                        tokens_in += int(raw)
+                    elif target == "out" and tokens_out is not None:
+                        tokens_out += int(raw)
+                    elif target == "cache" and cache_read is not None:
+                        cache_read += int(raw)
+        return UsageTotals(
+            steps=len(rows),
+            seconds=seconds,
+            tokens=tokens,
+            usd=usd,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            cache_read=cache_read,
+        )
 
     def budget_violation(
         self, budget: dict[str, Any] | None, enforce: dict[str, Any] | None = None

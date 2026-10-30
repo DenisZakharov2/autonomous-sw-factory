@@ -9,6 +9,12 @@ an error message as an artifact.
 Some providers reject a reasoning effort they do not implement (Nemotron, for
 example, accepts only none/medium/high), so the adapter sends `medium` by
 default instead of leaving the choice to the global config.
+
+The adapter also narrows the toolset: a documentation stage writes files, so
+`file` is enough; `s4_build` also needs `terminal` to run the product's check
+command.  The full Hermes toolset adds ~16k tokens of schemas to *every* API
+call of a step, which was the largest single line item in a real run (see
+`docs/runtime.md`, §5.3).
 """
 from __future__ import annotations
 
@@ -45,6 +51,8 @@ class HermesExecutor:
         sandbox: bool = False,
         read_write: tuple[str, ...] = (),
         yolo: bool = False,
+        toolset: str | None = "auto",
+        skills: str | None = None,
         extra_args: tuple[str, ...] = (),
     ) -> None:
         self.binary = binary
@@ -54,16 +62,40 @@ class HermesExecutor:
         self.sandbox = sandbox
         self.read_write = tuple(read_write)
         self.yolo = yolo
+        self.toolset = toolset
+        self.skills = skills
         self.extra_args = tuple(extra_args)
 
+    def toolset_for(self, stage: str | None) -> str | None:
+        """The narrowest toolset that can do this stage's work.
+
+        `s4_build` runs the product's check command, so it keeps `terminal`.
+        Every other stage produces Markdown/JSON, which the `file` toolset
+        covers; loading web, browser, delegation and image schemas there costs
+        tokens without changing the artifact.
+        """
+        if self.toolset and self.toolset.strip().lower() == "auto":
+            return "file,terminal" if stage == "s4_build" else "file"
+        return self.toolset
+
     def command(
-        self, prompt: str, run_dir: Path, usage_file: Path, extra_read_write: tuple[str, ...] = ()
+        self,
+        prompt: str,
+        run_dir: Path,
+        usage_file: Path,
+        extra_read_write: tuple[str, ...] = (),
+        stage: str | None = None,
     ) -> list[str]:
         cmd = [self.binary, "-z", prompt, "--in", str(run_dir), "--usage-file", str(usage_file)]
         if self.model:
             cmd.extend(["-m", self.model])
         if self.reasoning:
             cmd.extend(["--reasoning", self.reasoning])
+        toolset = self.toolset_for(stage)
+        if toolset:
+            cmd.extend(["-t", toolset])
+        if self.skills is not None:
+            cmd.extend(["--skills", self.skills])
         if self.yolo:
             cmd.append("--yolo")
         cmd.extend(self.extra_args)
@@ -75,7 +107,11 @@ class HermesExecutor:
         transcript = context.path_in_runtime()
         usage_path = context.path_in_executor(f"usage-{context.sequence or context.step}.json")
         cmd = self.command(
-            context.prompt, context.run_dir, usage_path, extra_read_write=context.extra_read_write
+            context.prompt,
+            context.run_dir,
+            usage_path,
+            extra_read_write=context.extra_read_write,
+            stage=context.stage,
         )
         started = time.monotonic()
         try:
@@ -123,6 +159,8 @@ class HermesExecutor:
             "tokens_total": int(tokens) if isinstance(tokens, (int, float)) else None,
             "tokens_in": usage_raw.get("input_tokens"),
             "tokens_out": usage_raw.get("output_tokens"),
+            "cache_read": usage_raw.get("cache_read_tokens"),
+            "api_calls": usage_raw.get("api_calls"),
             "usd": usage_raw.get("estimated_cost_usd"),
             "model": usage_raw.get("model"),
         }

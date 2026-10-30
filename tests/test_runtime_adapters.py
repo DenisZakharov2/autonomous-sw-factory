@@ -140,6 +140,7 @@ def test_hermes_command_reads_usage_file(tmp_path, monkeypatch, context):
     assert "--in" in argv
     assert "--usage-file" in argv
     assert "--reasoning" in argv
+    assert argv[argv.index("-t") + 1] == "file"  # s00_intake writes Markdown only
 
 
 def test_hermes_failed_turn_is_not_success(tmp_path, monkeypatch, context):
@@ -159,6 +160,14 @@ def test_hermes_failed_turn_is_not_success(tmp_path, monkeypatch, context):
     monkeypatch.setenv("USAGE_JSON", json.dumps({"failed": True, "completed": False}))
     result = HermesExecutor(timeout=30).execute(context.order, context)
     assert result.exit_code == 1
+
+
+def test_hermes_toolset_follows_the_stage():
+    assert HermesExecutor().toolset_for("s00_intake") == "file"
+    assert HermesExecutor().toolset_for("s1_spec") == "file"
+    assert HermesExecutor().toolset_for("s4_build") == "file,terminal"
+    assert HermesExecutor(toolset="all").toolset_for("s00_intake") == "all"
+    assert HermesExecutor(toolset=None).toolset_for("s4_build") is None
 
 
 @pytest.mark.skipif(not sandbox_available(), reason="bubblewrap is not installed")

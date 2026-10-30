@@ -145,6 +145,7 @@ def _build_executor(args: argparse.Namespace):
         )
     from .runtime.hermes import HermesExecutor
 
+    toolset = None if (args.executor_tools or "").strip().lower() in {"", "all"} else args.executor_tools
     return HermesExecutor(
         model=args.executor_model,
         reasoning=args.reasoning,
@@ -152,6 +153,8 @@ def _build_executor(args: argparse.Namespace):
         sandbox=sandbox,
         read_write=tuple(args.sandbox_rw or ()),
         yolo=args.yolo,
+        toolset=toolset,
+        skills=args.executor_skills,
     )
 
 
@@ -493,11 +496,27 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--mode", default="nano", choices=["nano", "standard", "enterprise", "brownfield"])
     run.add_argument("--executor", default="fake", choices=["fake", "opencode", "hermes"])
     run.add_argument("--max-steps", type=int, default=60)
+    run.add_argument(
+        "--parallel-tasks",
+        type=int,
+        default=0,
+        help="run up to N independent s4_build tasks in separate git worktrees (0 = sequential)",
+    )
     run.add_argument("--runs-root")
     run.add_argument("--no-init", action="store_true", help="refuse to create a missing run")
     run.add_argument("--idea", help="product idea written to runs/<id>/idea.md when the run is created")
     run.add_argument("--json", action="store_true")
     run.add_argument("--executor-model", help="model override handed to the executor CLI")
+    run.add_argument(
+        "--executor-tools",
+        default="auto",
+        help="Hermes toolsets for a step (`auto`: file, plus terminal on s4_build; `all` keeps the full set)",
+    )
+    run.add_argument(
+        "--executor-skills",
+        default=None,
+        help="value for Hermes --skills (default: leave the host setting untouched)",
+    )
     run.add_argument("--timeout", type=float, default=1800.0, help="per-step timeout in seconds")
     run.add_argument("--budget-tokens", type=int, help="override the mode token budget for this run")
     run.add_argument("--budget-minutes", type=float, help="override the mode minute budget")

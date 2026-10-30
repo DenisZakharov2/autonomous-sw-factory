@@ -412,9 +412,11 @@ def run_loop(
         after = Fingerprint.capture(run_dir)
         drift = before.drift(after)
         usage: dict[str, Any] = dict(result.usage or {})
+        ledger_step = ledger.next_step()
         ledger.append(
             {
-                "step": step,
+                "step": ledger_step,
+                "loop_step": step,
                 "stage": stage_id,
                 "task_id": order.get("task_id"),
                 "role": order.get("next_role"),
@@ -422,6 +424,11 @@ def run_loop(
                 "exit_code": result.exit_code,
                 "seconds": round(elapsed, 3),
                 "tokens_total": usage.get("tokens_total"),
+                "tokens_in": usage.get("tokens_in"),
+                "tokens_out": usage.get("tokens_out"),
+                "cache_read": usage.get("cache_read"),
+                "api_calls": usage.get("api_calls"),
+                "model": usage.get("model"),
                 "usd": usage.get("usd"),
                 "prompt_chars": len(prompt),
                 "stdout_chars": len(result.stdout or ""),

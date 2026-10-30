@@ -54,7 +54,7 @@
     "s1_spec": ["05-business-analyst", "06-system-analyst"]
   },
   "product_tests": {
-    "command": ["{python}", "-m", "unittest", "discover", "-s", "product/tests"],
+    "command": ["{python}", "-m", "pytest", "product/tests"],
     "min_tests": 3,
     "timeout_seconds": 60
   }

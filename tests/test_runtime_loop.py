@@ -59,6 +59,30 @@ def test_idea_is_written_and_carried_into_the_prompt(tmp_path, monkeypatch):
     assert "единственный источник истины" in prompt
 
 
+def test_case_constraints_reach_the_prompt_without_an_empty_section(run_env):
+    run_dir = run_env / "run-01"
+    order = next_action("run-01", root=run_env)
+    assert "Ограничения кейса" not in build_prompt(order, run_dir=run_dir)
+
+    (run_dir / "constraints.md").write_text(
+        "# Рамки\n\n- ровно три `REQ`;\n- ровно две задачи.\n", encoding="utf-8"
+    )
+    prompt = build_prompt(order, run_dir=run_dir)
+    assert "# Ограничения кейса" in prompt
+    assert "ровно три `REQ`" in prompt
+    assert "рамки кейса, а не режима" in prompt
+    # The case file's own headings nest under the section title.
+    assert "## Рамки" in prompt
+    assert "\n# Рамки" not in prompt
+
+    # A blank file must not leave an empty heading behind.
+    (run_dir / "constraints.md").write_text("   \n\n", encoding="utf-8")
+    assert "Ограничения кейса" not in build_prompt(order, run_dir=run_dir)
+
+    (run_dir / "constraints.md").write_text("я" * 5000, encoding="utf-8")
+    assert "обрезано" in build_prompt(order, run_dir=run_dir)
+
+
 def test_work_order_says_who_owes_what(run_env):
     order = next_action("run-01", root=run_env)
     assert order["action"] == "produce"

@@ -20,6 +20,8 @@ ROLE_CARD_LIMIT = 4500
 TEMPLATE_LIMIT = 2200
 ACCEPTED_LIMIT = 12
 SUMMARY_LIMIT = 160
+CONSTRAINTS_LIMIT = 4000
+CONSTRAINTS_FILE = "constraints.md"
 
 
 def _clip(text: str, limit: int) -> str:
@@ -27,6 +29,17 @@ def _clip(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[:limit].rstrip() + "\n… (обрезано)"
+
+
+def _demote_headings(text: str) -> str:
+    """Keep the section title the only H1: case files bring their own headings."""
+    out: list[str] = []
+    fenced = False
+    for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        out.append(f"#{line}" if not fenced and line.startswith("#") else line)
+    return "\n".join(out)
 
 
 def _first_line(path: Path) -> str:
@@ -166,6 +179,24 @@ def build_prompt(
             "привычками или другими проектами на этой машине."
         )
         lines.append("")
+
+    # Eval runs carry the case frame in `constraints.md` (copied by the eval
+    # harness).  It is absent for a normal run, so no empty heading appears.
+    constraints_path = run_dir / CONSTRAINTS_FILE
+    if constraints_path.is_file():
+        try:
+            constraints = constraints_path.read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeDecodeError):
+            constraints = ""
+        if constraints:
+            lines.append("# Ограничения кейса")
+            lines.append(_clip(_demote_headings(constraints), CONSTRAINTS_LIMIT))
+            lines.append("")
+            lines.append(
+                "Это рамки кейса, а не режима: число `REQ`, состав задач и роли "
+                "стадии проверяются, поэтому следуй им буквально."
+            )
+            lines.append("")
 
     accepted = _accepted_context(run_dir, order, registry)
     if accepted:

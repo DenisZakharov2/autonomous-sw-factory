@@ -82,6 +82,47 @@ def test_eval_set_matches_the_committed_baseline(tmp_path, monkeypatch):
     assert nano["metrics"]["verification_coverage"] == 1.0
     standard = next(result for result in report["cases"] if result["case"] == "standard-mini")
     assert standard["observed"]["checks"]["ran"] is False  # checks are optional
+    # standard-mini runs its product tests through pytest, like nano-todo: the
+    # case frame lives in constraints.md, not in the mode prompt.
+    assert standard["observed"]["product_tests"]["ok"] is True
+    assert standard["observed"]["product_tests"]["tests"] == 3
+    assert standard["observed"]["product_tests"]["command"][1:] == [
+        "-m",
+        "pytest",
+        "product/tests",
+    ]
+
+
+def test_load_case_reads_an_optional_constraints_file(tmp_path):
+    case_dir = _copy_case("nano-todo", tmp_path)
+    assert load_case(case_dir)["constraints"] is None
+    (case_dir / "constraints.md").write_text("Ровно три `REQ`.\n", encoding="utf-8")
+    assert load_case(case_dir)["constraints"].startswith("Ровно три")
+    # A blank file is the same as no file: no empty prompt section.
+    (case_dir / "constraints.md").write_text("\n \n", encoding="utf-8")
+    assert load_case(case_dir)["constraints"] is None
+    # An unreadable frame is a case error, not a silently ignored file.
+    (case_dir / "constraints.md").write_bytes(b"\xff\xfe# not utf-8\n")
+    with pytest.raises(ConfigError):
+        load_case(case_dir)
+
+
+def test_run_case_copies_constraints_before_the_loop(tmp_path, monkeypatch):
+    monkeypatch.delenv("FACTORY_ROOT", raising=False)
+    case_dir = _copy_case("standard-mini", tmp_path / "cases")
+    seen: dict[str, object] = {}
+
+    def fake_drive(run_id, executor, root, *, max_steps, max_cycles, budget):
+        path = root / run_id / "constraints.md"
+        seen["exists"] = path.is_file()
+        seen["text"] = path.read_text(encoding="utf-8") if path.is_file() else ""
+        return {"status": "complete", "code": 0, "message": "stopped by test", "loop_steps": 0}
+
+    monkeypatch.setattr(eval_module, "_drive_run", fake_drive)
+    bundle = load_case(case_dir)
+    eval_module.run_case(bundle, FakeExecutor(), tmp_path / "runs", "copy")
+    assert seen["exists"] is True
+    assert "REQ-001" in str(seen["text"])
 
 
 def test_eval_writes_a_valid_baseline(tmp_path, monkeypatch):

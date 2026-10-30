@@ -40,6 +40,7 @@ from .trace import build_matrix
 from .verify import verify_run
 
 EVAL_APPROVER = "human:eval"
+CONSTRAINTS_NAME = "constraints.md"
 DEFAULT_MAX_STEPS = 200
 DEFAULT_MAX_CYCLES = 20
 DEFAULT_THRESHOLDS = {
@@ -54,6 +55,22 @@ RAN_RE = re.compile(r"Ran\s+(\d+)\s+tests?\b")
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _case_constraints(case_dir: Path) -> str | None:
+    """Optional frame of the case: how many REQ, which tasks, who submits.
+
+    The case owns its limits; the mode prompt stays generic.  A blank file is
+    the same as no file, so no empty section ever reaches a prompt.
+    """
+    path = case_dir / CONSTRAINTS_NAME
+    if not path.is_file():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ConfigError(f"cannot read {CONSTRAINTS_NAME} in {case_dir}: {exc}") from exc
+    return text if text.strip() else None
 
 
 def load_case(case_dir: Path) -> dict[str, Any]:
@@ -83,6 +100,7 @@ def load_case(case_dir: Path) -> dict[str, Any]:
         "case": case,
         "idea": idea + "\n",
         "expected": expected,
+        "constraints": _case_constraints(case_dir),
         "checks": checks_dir if checks_dir.is_dir() else None,
     }
 
@@ -496,6 +514,9 @@ def run_case(
 
     with _factory_root(run_dir):
         init_run(run_id, case["mode"], root=runs_root, idea=bundle["idea"], force=run_dir.exists())
+        constraints = bundle.get("constraints")
+        if constraints:
+            (run_dir / CONSTRAINTS_NAME).write_text(constraints, encoding="utf-8")
         drive = _drive_run(
             run_id,
             executor,

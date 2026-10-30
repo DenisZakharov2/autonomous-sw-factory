@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "autonomous-sw-factory"
-version = "0.2.2"
+version = "0.3.0"
 description = "Runtime-agnostic, auditable software factory kit with stage gates, task work orders and a hash-chained flight recorder."
 readme = "README.md"
 requires-python = ">=3.10"

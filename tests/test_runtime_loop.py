@@ -107,6 +107,77 @@ def test_human_gate_stops_the_loop(run_env):
     assert state["stage_status"]["s00_intake"] == "review"
 
 
+def test_stage_with_nothing_pending_does_not_call_the_executor(tmp_path, monkeypatch):
+    from factory.config import load_pipeline
+    from factory.engine import import_plan, task_accept, task_claim, task_submit
+    from factory.state import save_state
+
+    monkeypatch.setenv("FACTORY_ROOT", str(tmp_path))
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    monkeypatch.setenv("FACTORY_RUNS_ROOT", str(runs))
+    run_dir, _, _ = init_run("run-01", "nano", root=runs)
+    pipeline = load_pipeline()
+    state = load_state(run_dir)
+    order_map = {stage["id"]: stage["order"] for stage in pipeline["stages"]}
+    for stage in pipeline["stages"]:
+        if stage["order"] < order_map["s4_build"]:
+            state["stage_status"][stage["id"]] = "accepted"
+            state["gate_status"][stage["gate"]["id"]]["status"] = "approved"
+    state["stage_status"]["s4_build"] = "in_progress"
+    state["current_stage"] = "s4_build"
+    save_state(run_dir, state)
+    (run_dir / "artifacts" / "plan.md").write_text(
+        "# Plan\n## 1. Задачи\n"
+        "| `task_id` | Роль | `REQ` | `depends_on` | `Allowed Files` | Проверка |\n"
+        "| :--- | :--- | :--- | :--- | :--- | :--- |\n"
+        "| `TASK-001` | `12-fullstack-developer` | `REQ-001` | `-` | `product/src/todo.py` | `true` |\n"
+        "| `TASK-002` | `12-fullstack-developer` | `REQ-002` | `TASK-001` | `product/src/todo.py` | `true` |\n",
+        encoding="utf-8",
+    )
+    import_plan("run-01", root=runs)
+    (run_dir / "product" / "tests").mkdir(parents=True, exist_ok=True)
+    (run_dir / "product" / "tests" / "test_cli.py").write_text(
+        "def test_ok():\n    assert True\n", encoding="utf-8"
+    )
+    deliverable = (
+        "## 1. Что сделано\n\nСделано.\n## 2. REQ\n\nREQ-001.\n"
+        "## 3. Проверка\n\npytest.\n## 4. Diff\n\nНовый файл.\n"
+    )
+    for task_id in ("TASK-001", "TASK-002"):
+        (run_dir / "product" / "src").mkdir(parents=True, exist_ok=True)
+        (run_dir / "product" / "src" / "todo.py").write_text(
+            f"BODY = {task_id!r}\n", encoding="utf-8"
+        )
+        (run_dir / "tasks" / task_id).mkdir(parents=True, exist_ok=True)
+        (run_dir / "tasks" / task_id / "deliverable.md").write_text(
+            deliverable, encoding="utf-8"
+        )
+        task_claim("run-01", task_id, "12-fullstack-developer", root=runs)
+        task_submit(
+            "run-01", task_id, "12-fullstack-developer",
+            ["product/src/todo.py", f"tasks/{task_id}/deliverable.md"], root=runs,
+        )
+        task_accept("run-01", task_id, root=runs)
+
+    order = next_action("run-01", root=runs)
+    assert order["action"] == "produce"
+    assert order["pending_artifacts"] == []
+
+    class Recorder:
+        name = "recorder"
+        calls: list[str] = []
+
+        def execute(self, order, context):
+            self.calls.append(str(order.get("stage")))
+            return ExecutionResult(exit_code=0)
+
+    recorder = Recorder()
+    run_loop("run-01", recorder, max_steps=2, root=runs)
+    assert "s4_build" not in recorder.calls
+    assert load_state(run_dir)["stage_status"]["s4_build"] == "accepted"
+
+
 def test_full_nano_run_on_fake_executor(run_env):
     result = _run_to_completion("run-01", run_env, FakeExecutor())
     assert result.status == "complete", result.message

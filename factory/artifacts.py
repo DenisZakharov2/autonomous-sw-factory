@@ -364,7 +364,20 @@ def validate_plan(run_dir: Path) -> list[str]:
         return ["spec.md is missing"]
     reqs = extract_req_ids(spec.read_text(encoding="utf-8"))
     covered = extract_req_ids(plan.read_text(encoding="utf-8"))
-    return [f"plan.md does not cover {req}" for req in sorted(reqs - covered)]
+    errors = [f"plan.md does not cover {req}" for req in sorted(reqs - covered)]
+    trace = run_dir / "artifacts" / "traceability.json"
+    if trace.exists():
+        # The traceability matrix is written before the plan exists, so its
+        # task ids are a guess.  Once the plan names the real tasks, a link to
+        # a task that the plan never defines is a defect the last gate would
+        # otherwise discover only after the whole build was paid for.
+        try:
+            data = json.loads(trace.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            errors.append(f"traceability.json is not valid JSON: {exc}")
+        else:
+            errors.extend(_trace_link_errors(run_dir, data.get("requirements", {})))
+    return errors
 
 
 def validate_acceptance(run_dir: Path) -> list[str]:

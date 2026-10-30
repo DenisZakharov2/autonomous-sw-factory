@@ -179,12 +179,25 @@ def test_sandbox_wraps_with_a_narrow_view(tmp_path):
     assert "--unshare-pid" in cmd
     assert "--new-session" in cmd
     run = str(tmp_path.resolve())
-    ro_binds = [
+    binds = [
         (cmd[index + 1], cmd[index + 2])
+        for index, item in enumerate(cmd)
+        if item == "--bind"
+    ]
+    # The run root is writable (atomic writers need the directory), while the
+    # control plane is re-mounted read-only on top of it.
+    assert (run, run) in binds
+    ro_targets = [
+        cmd[index + 2]
         for index, item in enumerate(cmd)
         if item == "--ro-bind"
     ]
-    assert (run, run) in ro_binds
+    assert run not in ro_targets
+    (tmp_path / "state.json").write_text("{}", encoding="utf-8")
+    cmd = sandbox_command(["true"], tmp_path, enabled=True)
+    assert f"{run}/state.json" in [
+        cmd[index + 2] for index, item in enumerate(cmd) if item == "--ro-bind"
+    ]
     assert cmd[cmd.index("--chdir") + 1] == run
     assert cmd[-2:] == ["--", "true"]
     assert sandbox_command(["true"], tmp_path, enabled=False) == ["true"]
@@ -205,5 +218,7 @@ def test_sandbox_binds_context_read_write_paths(tmp_path, context):
     assert cmd[0] == "bwrap"
     assert str(extra.resolve()) in cmd
     binds = [cmd[index + 1] for index, item in enumerate(cmd) if item == "--bind"]
-    assert str(context.run_dir.resolve()) not in binds
+    # The run root is bound writable for atomic artifact writes; the control
+    # plane inside it stays read-only (asserted in the trust-boundary tests).
+    assert str(context.run_dir.resolve()) in binds
     assert str(extra.resolve()) in binds

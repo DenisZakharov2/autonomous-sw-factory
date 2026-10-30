@@ -1,6 +1,6 @@
 # Autonomous Software Factory
 
-**Version 0.2.2.** An executable, stage-gated software factory kit with an independent verifier and a hash-chained flight recorder. It is not a swarm of 22 thinking agents: the engine issues work orders and validates artifacts; the `factory run` runtime (fake, Hermes or OpenCode adapters) or a human executes the roles.
+**Version 0.3.0.** An executable, stage-gated software factory kit with an independent verifier and a hash-chained flight recorder. It is not a swarm of 22 thinking agents: the engine issues work orders and validates artifacts; the `factory run` runtime (fake, Hermes or OpenCode adapters) or a human executes the roles.
 
 [![CI](https://github.com/DenisZakharov2/autonomous-sw-factory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/DenisZakharov2/autonomous-sw-factory/actions/workflows/ci.yml) · [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 

@@ -3,8 +3,8 @@
 These tests exercise the real `bwrap` backend, not just the argv shape: a
 sandboxed shell is asked to append to `state.json`, to truncate the usage
 ledger and to run `factory gate approve` against its own run.  All of those
-must fail at the filesystem level, while writing a declared artifact must
-still work.
+must fail at the filesystem level, while writing a declared artifact and
+atomically replacing a root artifact must still work.
 """
 from __future__ import annotations
 
@@ -113,11 +113,76 @@ def test_declared_artifact_directory_is_writable(run):
 
 
 @SANDBOX
-def test_run_root_is_not_writable(run):
+def test_run_root_is_writable_but_the_control_plane_is_not(run):
+    """The root artifacts (skills-lock.json) need directory write to be replaced atomically."""
     writable = _writable(run)
-    proc = _sandboxed(run, writable, ["sh", "-c", f"touch {run / 'stray.txt'}"])
+    before = _sha(run / "state.json")
+    script = (
+        f"touch {run / 'stray.txt'} && "
+        f"printf '{{\"schema_version\": \"1.0.0\", \"skills\": []}}' > {run / '.lock.tmp'} && "
+        f"mv {run / '.lock.tmp'} {run / 'skills-lock.json'} && "
+        f"printf evil >> {run / 'state.json'}; echo state_rc=$?; "
+        f"rm -f {run / 'state.json'}; echo unlink_rc=$?"
+    )
+    proc = _sandboxed(run, writable, ["sh", "-c", script])
+    assert (run / "skills-lock.json").read_text().startswith('{"schema_version"')
+    assert _sha(run / "state.json") == before
+    assert "state_rc=0" not in proc.stdout
+    assert "unlink_rc=0" not in proc.stdout
+
+
+@SANDBOX
+def test_root_artifact_inside_the_run_is_replaceable_atomically(run, monkeypatch):
+    """A file bound on itself cannot be renamed over; the run root is enough."""
+    monkeypatch.setenv("FACTORY_ROOT", str(run))
+    order = {
+        "artifacts": [
+            {
+                "id": "skills_lock",
+                "path": "skills-lock.json",
+                "resolved_path": "skills-lock.json",
+                "root": True,
+                "owner": "00-orchestrator",
+            }
+        ]
+    }
+    entries = _collect_writable_paths(order, run, None)
+    writable, placeholders = _prepare_writable_paths(entries)
+    try:
+        target = (run / "skills-lock.json").resolve()
+        assert str(target) in writable
+        cmd = sandbox_command(["true"], run, read_write=tuple(writable))
+        file_binds = [cmd[index + 1] for index, item in enumerate(cmd) if item == "--bind"]
+        assert str(target) not in file_binds
+        script = (
+            f"printf '{{\"schema_version\": \"1.0.0\", \"skills\": []}}' > {run}/.tmp-lock && "
+            f"mv {run}/.tmp-lock {run}/skills-lock.json"
+        )
+        proc = subprocess.run(
+            sandbox_command(["sh", "-c", script], run, read_write=tuple(writable)),
+            capture_output=True,
+            text=True,
+            env=sandbox_env(),
+            timeout=60,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert '"skills": []' in (run / "skills-lock.json").read_text()
+    finally:
+        _cleanup_placeholders(placeholders)
+
+
+@SANDBOX
+def test_eval_checks_are_read_only_inside_the_sandbox(run):
+    checks = run / "checks"
+    checks.mkdir(exist_ok=True)
+    (checks / "test_product.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+    before = _sha(checks / "test_product.py")
+    writable = _writable(run)
+    proc = _sandboxed(
+        run, writable, ["sh", "-c", f"printf 'def test_ok(): pass' > {checks / 'test_product.py'}"]
+    )
     assert proc.returncode != 0
-    assert not (run / "stray.txt").exists()
+    assert _sha(checks / "test_product.py") == before
 
 
 @SANDBOX

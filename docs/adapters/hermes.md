@@ -15,13 +15,15 @@ hermes -z "<prompt>" --in <run_dir> --usage-file <runtime>/usage.json \
 - `failed: true` in that file becomes a non-zero exit code: Hermes can exit 0
   after a provider error, and the factory must not treat an error message as an
   artifact.
-- `--reasoning medium` is the safe default: some providers (Nemotron) reject
-  effort levels they do not implement and answer HTTP 400.
+- Reasoning level is provider-specific: some providers reject effort levels they
+  do not implement and answer HTTP 400. Measured on this install: `medium` is
+  rejected, `high` works — check the level with one short request before a long
+  run instead of trusting a default.
 - `--yolo` auto-approves the agent's own tool calls; it never closes a factory
   gate.
-- Measured on `s00_intake`: ~28 s and ~162k tokens for one step, because the
-  agent re-sends its context on every tool turn. The `nano` budget (400k) covers
-  roughly two such steps; raise the mode budget for a full real run.
+- Measured on a full `nano-todo` run: 13 steps, 1 780 308 total / 336 980
+  billable tokens, 10.5 minutes, `verify` OK. The `nano` budget (2.5M) is sized
+  from that measurement; raise it only for a more expensive model.
 
 ## Capabilities
 

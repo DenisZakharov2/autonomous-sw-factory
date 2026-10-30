@@ -504,6 +504,27 @@ def run_loop(
         if action not in {"produce", "verify"}:
             return finish("unsupported", STOP, f"work order action {action!r} is not executable")
 
+        if (
+            action == "produce"
+            and not order.get("task_id")
+            and not order.get("pending_artifacts")
+            and not evidence
+        ):
+            # Nothing on the stage is missing or invalid: its tasks already
+            # produced every declared artifact.  Running a model step with an
+            # empty "allowed to write" list only invites it to rewrite files
+            # that were accepted earlier, which the integrity check then
+            # reports as tampering.  Record the stage submission and move on.
+            state = load_state(run_dir)
+            submitted = _submit_order(
+                run_id, order, run_dir, root, state, role=order.get("next_role")
+            )
+            if not submitted:
+                evidence = [
+                    "стадия не имеет незакрытых артефактов, но и сдавать нечего"
+                ]
+            continue
+
         before = Fingerprint.capture(run_dir)
         state = load_state(run_dir)
         task = state["tasks"].get(str(order.get("task_id"))) if order.get("task_id") else None

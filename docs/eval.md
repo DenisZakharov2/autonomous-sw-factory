@@ -133,6 +133,50 @@ FACTORY_ROOT="$PWD/runs/nano-todo-20261030-120000" factory verify \
 factory eval --cases eval/cases --executor hermes --budget-minutes 60
 ```
 
+## Прогон на реальном Hermes
+
+CI остаётся на `fake`. Реальные числа снимаются отдельной сессией и отдельным
+эталоном `eval/baseline-hermes.json`; смешивать их с fake-эталоном нельзя —
+шаги и токены другие, получится ложная регрессия.
+
+```bash
+export FACTORY_RUNS_ROOT="$PWD/runs"
+factory eval --cases "$PWD/runs/hermes-cases" --executor hermes \
+  --executor-model <model-id> --executor-tools auto --reasoning high \
+  --timeout 900 --yolo --budget-tokens 3000000 --budget-minutes 120 \
+  --update-baseline eval/baseline-hermes.json --json
+```
+
+`--cases` указывает на каталог с одним скопированным кейсом: `factory eval`
+гоняет весь каталог, а два реальных кейса удваивают счёт. Песочница остаётся
+включённой; `--sandbox-rw` — только install Hermes, `~/.hermes/cache` и
+`~/.hermes/logs`.
+
+Измерено 30.10.2026 на `nano-todo`, одна модель
+`deepseek-ai/DeepSeek-V4.1-Flash-1017`, `--reasoning high`:
+
+| Метрика | Значение |
+| :--- | ---: |
+| steps / loop_steps / events | 13 / 29 / 33 |
+| rework_events | 0 |
+| pass@1 | 1.0 |
+| verification_coverage | 1.0 |
+| tokens total | 1 780 308 |
+| tokens billable (in+out) | 336 980 |
+| api_calls | 85 |
+| секунды исполнителя / wall | 606 / 629 |
+| product tests | 14 passed |
+
+`usd` в записи — `0.0`, потому что провайдер отдаёт `estimated_cost_usd: 0.0`
+при `cost_status: unknown`. Это не измеренная цена; бюджет `--budget-usd` не
+проверяется, а `cost_per_artifact_usd` остаётся `null`. Сравнивайте прогоны
+по `tokens_billable`.
+
+`total` в 5 раз больше billable: Hermes повторно считает кешированный префикс
+на каждом API-вызове. Потолок `nano` в `pipeline.yaml` — 2.5M / 120 минут по
+этому замеру (три прогона дали 1.78–1.96M); флаги `--budget-*` нужны, только
+если модель дороже измеренной.
+
 ## CI
 
 Eval в CI работает на `fake`: без сети, без `bwrap` и укладывается в минуты.

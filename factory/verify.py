@@ -224,6 +224,7 @@ def _check_recorded_artifacts(
     entries: list[dict[str, Any]],
     label: str,
     root_paths: list[str] | None = None,
+    latest: dict[str, dict[str, Any]] | None = None,
 ) -> list[str]:
     errors: list[str] = []
     if root_paths is None:
@@ -234,6 +235,12 @@ def _check_recorded_artifacts(
         ]
     for entry in entries:
         recorded = str(entry.get("path", ""))
+        if latest is not None and recorded and latest.get(recorded) is not None:
+            # A later submission of the same path supersedes this record: a
+            # dependent task may legitimately rewrite a file its predecessor
+            # submitted.  Only the newest recorded hash binds the file.
+            if latest[recorded] is not entry:
+                continue
         expected = str(entry.get("sha256", ""))
         target = resolve_recorded_path(run_dir, recorded, root_paths=root_paths)
         if not target.exists():
@@ -290,17 +297,18 @@ def artifact_integrity_errors(
     root_paths = [
         str(spec["path"]) for spec in load_artifacts()["artifacts"].values() if spec.get("root")
     ]
+    groups: list[tuple[str, list[dict[str, Any]]]] = []
     for stage, status in state["stage_status"].items():
         if stage_id and stage != stage_id:
             continue
         if status == "accepted":
             entries = approved.get(stage) or list(submitted.get(stage, {}).values())
-            if entries:
-                errors.extend(_check_recorded_artifacts(run_dir, entries, f"stage {stage}", root_paths))
         elif status == "review":
             entries = list(submitted.get(stage, {}).values())
-            if entries:
-                errors.extend(_check_recorded_artifacts(run_dir, entries, f"stage {stage}", root_paths))
+        else:
+            entries = []
+        if entries:
+            groups.append((f"stage {stage}", entries))
     for task_id, task in state["tasks"].items():
         if stage_id and task.get("stage") != stage_id:
             continue
@@ -311,7 +319,26 @@ def artifact_integrity_errors(
         else:
             entries = []
         if entries:
-            errors.extend(_check_recorded_artifacts(run_dir, entries, f"task {task_id}", root_paths))
+            groups.append((f"task {task_id}", entries))
+
+    # `nano` shares `product/src/todo.py` between dependent tasks, so the same
+    # path is recorded several times across the run.  Only the newest recorded
+    # hash binds the file; older records are history, not a second witness.
+    # The newest record is chosen among the entries checked in this call, so a
+    # file left behind by a rejected task still fails against its accepted
+    # predecessor.
+    checked = {id(entry) for _, entries in groups for entry in entries}
+    latest: dict[str, dict[str, Any]] = {}
+    for event in events:
+        artifacts = event.get("artifacts") or []
+        if not isinstance(artifacts, list):
+            continue
+        for item in artifacts:
+            if id(item) in checked:
+                latest[str(item.get("path", ""))] = item
+
+    for label, entries in groups:
+        errors.extend(_check_recorded_artifacts(run_dir, entries, label, root_paths, latest))
     return errors
 
 

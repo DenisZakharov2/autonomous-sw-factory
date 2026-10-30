@@ -123,7 +123,8 @@ def test_budget_command_reports_engine_limits(tmp_path):
     data = json.loads(result.stdout)
     assert data["default_max_attempts"] == 3
     assert data["mode"] == "nano"
-    assert data["mode_budget"]["minutes"] == 90
+    assert data["mode_budget"]["minutes"] == 120
+    assert data["mode_budget"]["tokens"] == 2_500_000
     assert data["enforced_by_engine"] == ["attempts", "veto_retries"]
     assert data["runtime_responsibility"] == ["minutes", "tokens", "usd"]
     assert data["attempts_used"] == {"gates": {}, "tasks": {}}

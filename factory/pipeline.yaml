@@ -9,7 +9,7 @@ modes:
   nano:
     description: "One interviewer/spec author, one fullstack builder, one verifier, one orchestrator."
     roles: ["00-orchestrator", "01-smart-interviewer", "12-fullstack-developer", "02-independent-verifier"]
-    budget: { tokens: 400000, minutes: 90, usd: 6 }
+    budget: { tokens: 2500000, minutes: 120, usd: 6 }
     stage_roles:
       s_in: ["00-orchestrator", "01-smart-interviewer", "02-independent-verifier"]
       s00_intake: ["00-orchestrator", "01-smart-interviewer", "02-independent-verifier"]

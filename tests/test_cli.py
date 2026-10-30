@@ -129,6 +129,17 @@ def test_budget_command_reports_engine_limits(tmp_path):
     assert data["runtime_responsibility"] == ["minutes", "tokens", "usd"]
     assert data["attempts_used"] == {"gates": {}, "tasks": {}}
 
+    assert (
+        cli("init", "--run-id", "demo-standard", "--mode", "standard", runs_root=tmp_path).returncode
+        == 0
+    )
+    standard = json.loads(
+        cli("budget", "--run-id", "demo-standard", runs_root=tmp_path).stdout
+    )
+    assert standard["mode"] == "standard"
+    assert standard["mode_budget"]["minutes"] == 120
+    assert standard["mode_budget"]["tokens"] == 2_500_000
+
 
 def test_brownfield_starts_at_s_in(tmp_path):
     assert cli("init", "--run-id", "legacy", "--mode", "brownfield", runs_root=tmp_path).returncode == 0

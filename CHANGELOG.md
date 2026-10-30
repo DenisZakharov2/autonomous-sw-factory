@@ -3,6 +3,26 @@
 All notable changes are recorded here. The project follows a simple
 `0.MINOR.PATCH` scheme until `1.0.0`.
 
+## [Unreleased]
+
+### Added
+
+- **зелёный прогон `standard-mini` на реальном Hermes:** одна модель
+  (`deepseek-ai/DeepSeek-V4.1-Flash-1017`), `--reasoning high`,
+  `--executor-tools auto`, `bwrap`; 15 шагов, 35 событий, 2 задачи,
+  `pass@1 = 1.0`, `verification_coverage = 1.0`, 1 978 597 total /
+  363 237 billable, 97 API-вызовов, 10.9 минуты, 11 product tests. Рамки
+  `constraints.md` удержаны: три `REQ`, две задачи, `s1_spec` сдали
+  `05-business-analyst` и `06-system-analyst` раздельно. Запись добавлена в
+  `eval/baseline-hermes.json` рядом с `nano-todo`.
+
+### Changed
+
+- **бюджет `standard` поднят с 1.5M / 360 минут до 2.5M / 120 минут** по
+  замеру: 1 978 597 total + 26 % запаса. Прежние 1.5M остановили бы прогон
+  на `s6_security` (1 553 552 после шага 12). USD-потолок $25 не менялся —
+  цена провайдером не измеряется.
+
 ## [0.3.0] — 2026-10-30
 
 ### Added

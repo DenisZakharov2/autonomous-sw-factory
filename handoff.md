@@ -1,8 +1,9 @@
 # Handoff — 0.3.0
 
-Состояние на 30 октября 2026. Ветка `main`, версия `0.3.0`, 221 тест.
-Eval-набор зелёный на реальном Hermes: `eval/baseline-hermes.json` записан
-из прогона `runs/nano-todo-20261030-191409`. Fake-эталон CI
+Состояние на 30 октября 2026. Ветка `main`, версия `0.3.0`, 224 теста.
+Eval-набор зелёный на реальном Hermes: `eval/baseline-hermes.json` хранит
+две записи — `nano-todo` (`runs/nano-todo-20261030-191409`) и
+`standard-mini` (`runs/standard-mini-standard-real`). Fake-эталон CI
 (`eval/baseline.json`) не менялся и проходит.
 
 ## Что вошло в 0.3.0
@@ -122,6 +123,62 @@ factory eval --cases "$PWD/runs/hermes-cases" --executor hermes \
 различаться в 2.6 раза (`s9_learn` 249k → 382k). Один прогон не доказывает
 улучшение; для сравнения нужны baseline и `factory compare`.
 
+## standard-mini на реальном Hermes
+
+Тот же профиль, что у `nano-todo`: одна модель, `--reasoning high`,
+`--executor-tools auto`, `bwrap`, `--yolo`; бюджет замера 4M / 240 минут
+(дефолт `standard` после пересчёта — 2.5M / 120 минут).
+
+```bash
+factory eval --cases "$PWD/runs/hermes-cases" --executor hermes \
+  --executor-model deepseek-ai/DeepSeek-V4.1-Flash-1017 \
+  --executor-tools auto --reasoning high --timeout 900 --yolo \
+  --budget-tokens 4000000 --budget-minutes 240 --stamp standard-real --json
+```
+
+Итог: `run_dir = runs/standard-mini-standard-real`, `status=complete`,
+`verify` — OK, все 12 гейтов закрыты как `human:eval`.
+
+| Метрика | Значение |
+| :--- | ---: |
+| steps / loop_steps / events | 15 / 31 / 35 |
+| tasks / accepted | 2 / 2 |
+| pass@1 | 1.0 |
+| verification_coverage / traceability_coverage | 1.0 / 1.0 |
+| tokens total | 1 978 597 |
+| tokens billable | 363 237 |
+| api_calls | 97 |
+| секунды исполнителя / wall | 653 / 673 (11,2 мин) |
+| prompt_chars | 139 753 |
+| product tests | 11 passed |
+| usd | 0.0 — не цена (`cost_status: unknown`) |
+
+Расход: `s4_build` 748 589 (37,8 %, задачи 325k и 424k), `s6_security`
+229 834 (две роли), `s9_learn` 168 982, `s7_release` 152 320,
+`s5_acceptance` 146 650, `s2_architecture` 146 133.
+
+Рамки `constraints.md` удержаны: в `spec.md` и `spec-human.md` ровно
+`REQ-001/002/003`, в плане и `tasks/` ровно `TASK-001` и `TASK-002`,
+`traceability.json` ссылается только на них, `s1_spec` сдали две роли
+раздельно (`05` — spec/spec-human/traceability, `06` — domain-model/
+access-matrix). Секция «Ограничения кейса» есть в каждом записанном промпте.
+
+Пилот на трёх шагах (`runs/standard-mini-20261030-204101`) дал 2 модельных
+шага: 61 101 total / 21 933 billable, 5 API-вызовов, 46 с. Экстраполяция по
+профилю `nano` (137–151k на шаг) предсказала 2,05–2,26M на 15 шагов; факт —
+1,98M.
+
+`factory compare standard-mini-fake-compare standard-mini-standard-real`:
+шаги и события совпадают постадийно (15/15, 35/35), токены только у реального
+прогона — 363 237 billable. `only_left` в хешах (`product/src/todo.py`,
+`screens/cli.md`) — фикстура `FakeExecutor` от `nano`, а не продукт `standard`.
+
+Побочно: закоммиченный fake-эталон `eval/baseline.json` записан до фикса
+«стадия без pending не зовёт модель» (`f1895da`) и хранит 14/33 и 16/35,
+тогда как текущий fake даёт 13/33 и 15/35. Тест этого не ловит: падение шагов
+не считается регрессией. Перегенерация — отдельная задача, fake-эталон здесь
+не менялся.
+
 ## Что исправлено, чтобы гейт `s4_build` проходил
 
 ### 1. `factory/verify.py`: последняя запись на путь, а не все исторические
@@ -194,9 +251,9 @@ pytest собирает тоже, поэтому fake-эталон не изме
    модель дороже измеренной. USD-потолок $6 номинальный: цена не измеряется.
 2. **USD не измеряется.** `estimated_cost_usd = 0.0` при `cost_status:
    unknown`; в baseline стоит 0.0, а не `null`, но ценой это не является.
-3. **`standard` и `brownfield` на реальном Hermes не гонялись.** Зелёный
-   только `nano-todo`; `standard-mini` проверен на `fake` (16 шагов,
-   35 событий, мультиролевая `s1_spec`).
+3. **`brownfield` на реальном Hermes не гонялся.** Зелёные `nano-todo`
+   (13 шагов) и `standard-mini` (15 шагов); гейты `standard` закрыты
+   eval-харнессом (`human:eval`), живого ревью ролей `05`/`06`/`08` не было.
 4. **Артефакт, принятый на гейте, заморожен.** Легального способа обновить
    его на более поздней стадии нет: единственный путь — объявить его
    артефактом этой стадии заранее. Для `traceability` это решено правилом
@@ -216,9 +273,10 @@ pytest собирает тоже, поэтому fake-эталон не изме
 
 ## Что дальше
 
-- Прогнать `standard` на реальном Hermes: там 16 шагов на fake и
-  мультиролевая `s1_spec`; 1.5M в `pipeline.yaml` — расчёт, а не замер,
-  поэтому после прогона его нужно пересчитать.
+- Перегенерировать fake-эталон `eval/baseline.json`: в нём 14/33 и 16/35,
+  текущий fake даёт 13/33 и 15/35. Шаги упали после фикса «стадия без
+  pending не зовёт модель» (`f1895da`), но падение шагов не считается
+  регрессией, поэтому тест молчит.
 - Следить за потолком `nano` 2.5M: если законный прогон подойдёт к нему ближе
   чем на 10 %, поднимать по новому замеру, а не на глаз.
 - Добавить `re-record` для легитимного обновления принятого артефакта, если
@@ -229,5 +287,5 @@ pytest собирает тоже, поэтому fake-эталон не изме
 ## Решение по релизу
 
 Потолки `nano` подняты до 2.5M / 120 минут по измерению (1.78–1.96M на трёх
-прогонах), после чего `0.3.0` публикуется. Следующая ревизия бюджета — после
-первого реального `standard`: 1.5M там расчёт, а не замер.
+прогонах), после чего `0.3.0` публикуется. Потолок `standard` пересчитан по
+первому реальному прогону: 1 978 597 total + 26 % → 2.5M / 120 минут.

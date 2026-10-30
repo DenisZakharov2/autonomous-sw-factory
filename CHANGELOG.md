@@ -3,6 +3,47 @@
 All notable changes are recorded here. The project follows a simple
 `0.MINOR.PATCH` scheme until `1.0.0`.
 
+## [Unreleased]
+
+### Security
+
+- **граница доверия стала границей, а не детектором:** `hermes` и `opencode`
+  запускаются в `bwrap` по умолчанию; `--no-sandbox` — явный отладочный флаг
+  с предупреждением. Отсутствие `bwrap` — `RuntimeFailure`, а не тихий запуск
+  без изоляции;
+- **управляющая плоскость read-only:** каталог прогона монтируется
+  `--ro-bind`; на запись открыты только объявленные ордером каталоги
+  артефактов и `runtime/agent/` для usage-файла Hermes. `state.json`,
+  `blackbox.jsonl`, `blackbox.lock`, `idea.md`, `runtime/usage.jsonl` и
+  `runtime/evidence/` агенту недоступны. `factory gate approve` внутри
+  песочницы падает на `blackbox.lock` с `EROFS`, состояние и журнал не
+  меняются;
+- **root-артефакт больше не открывает весь проект:** `s15` монтирует один
+  `skills-lock.json`, а не `project_root`; путь, содержащий `factory/`,
+  отклоняется и в `--sandbox-rw`;
+- **очистка окружения:** потомок не получает `FACTORY_*` и `PYTHONPATH`;
+- **symlink-safe запись рантайма:** `safe_write_text` использует `O_NOFOLLOW`,
+  `path_in_runtime` не пишет через симлинк и не выходит из прогона;
+- **бюджет и evidence:** `runtime/usage.jsonl` добавлен в tripwire; `main`
+  печатает `OSError` (включая `EROFS` из песочницы) без traceback.
+
+### Changed
+
+- `factory run` для реальных исполнителей по умолчанию включает песочницу;
+  `--sandbox` больше не обязателен, `--no-sandbox` выключает границу;
+- `HermesExecutor` пишет usage в `runtime/agent/usage-<seq>.json`;
+- `RunContext` получил `path_in_executor`; `extra_read_write` теперь содержит
+  вычисленные пути, а не корень проекта.
+
+### Verified
+
+- 181 тест, включая `tests/test_runtime_trust_boundary.py` на реальном
+  `bwrap`: запись в управляющую плоскость и `factory gate approve` изнутри
+  песочницы блокируются, объявленные артефакты пишутся;
+- реальный шаг Hermes `s00_intake` в песочнице: 49.5 с, 79 208 токенов,
+  `factory verify --stage s00_intake` — OK;
+- полный `nano` на `FakeExecutor` — без изменений (33 события).
+
 ## [0.2.1] — 2026-10-30
 
 ### Fixed

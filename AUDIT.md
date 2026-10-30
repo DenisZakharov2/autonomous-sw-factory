@@ -122,3 +122,31 @@ FACTORY_ROOT="$PWD/examples/nano-todo" FACTORY_RUNS_ROOT="$PWD/examples" \
 | Root-артефакт подменялся копией в прогоне | модель записала `skills-lock.json` и в каталог прогона, и в корень проекта; `submit` падал с «not declared», а integrity-проверка могла захешировать не тот файл | `collect_artifact_entries` и `resolve_recorded_path` сначала проверяют объявленные root-пути; тест `test_root_artifact_ignores_a_stray_copy_inside_the_run` |
 | План ссылался на неактивную роль | `s3_plan` записал `TASK-001` за `01-smart-interviewer`, а `s4_build` в nano исполняет `12`; `gate_approve` падал, рантайм останавливался | промпт `s3_plan` перечисляет роли, допустимые в колонке задачи; неудачный `gate_approve` роли теперь превращается в `gate_reject` с текстом ошибки |
 | Агент закрыл верификаторский гейт сам | на реальном прогоне Hermes выполнил `factory gate approve --gate gate_s3`, потому что ордер говорил «then submit them», а CLI не отличает рантайм от агента; tripwire остановил прогон с `tampered`, но гейт уже был закрыт | промпт больше не повторяет «submit» и запрещает `factory ...`; в документации зафиксировано, что это детектор, а не граница безопасности; настоящая граница — отдельный пользователь/сервис |
+
+## Граница доверия 30.10.2026 (после 0.2.1)
+
+Проверялось поведение, а не текст: `bwrap 0.11.1`, реальный CLI
+`factory gate approve` внутри песочницы и реальный шаг Hermes.
+
+| Находка | Как проявлялась | Исправление |
+| :--- | :--- | :--- |
+| Каталог прогона монтировался на запись целиком | агент мог переписать `state.json`, `blackbox.jsonl`, `runtime/usage.jsonl` и evidence без всякого CLI | `--ro-bind run_dir`; точечно открыты только объявленные каталоги артефактов и `runtime/agent/`; тесты на каждый защищённый файл |
+| Root-артефакт открывал весь `project_root` | на `s15_quarantine` агент мог переписать `factory/`, `pipeline.yaml` и тесты, а не только `skills-lock.json` | root-артефакт монтируется одним файлом (или объявленным каталогом); путь, содержащий пакет `factory/`, отклоняется |
+| `factory gate approve` агента доходил до записи | тот самый инцидент: гейт закрывался, tripwire фиксировал `tampered` уже после | `run_lock` внутри песочницы падает на `blackbox.lock` с `EROFS`; состояние и журнал не меняются; `main` ловит `OSError` и печатает ошибку без traceback |
+| Песочница была необязательным флагом | по умолчанию реальный исполнитель работал без границы | `hermes`/`opencode` по умолчанию в `bwrap`; `--no-sandbox` — явный флаг с предупреждением; отсутствие `bwrap` — `RuntimeFailure`, а не тихий запуск |
+| `runtime/usage.jsonl` не входил в tripwire | агент мог обнулить бюджет, а evidence — подделать | ledger и `runtime/evidence/` read-only в песочнице; `usage.jsonl` добавлен в `guard.PROTECTED_FILES` |
+| Родитель писал по симлинкам агента | агент мог заранее положить `runtime/ev-*.log` или `prompt.md` симлинкой на файл вне прогона, и `write_text` рантайма писал бы туда | `safe_write_text` с `O_NOFOLLOW`; `path_in_runtime` проверяет, что каталог не симлинк и не выходит из прогона; usage-файл пишется в `runtime/agent/` |
+| Окружение наследовало `FACTORY_*` | случайный или намеренный `factory ...` получал корень и каталог прогонов | `sandbox_env()` удаляет все `FACTORY_*` и `PYTHONPATH` у потомка |
+| `--sandbox-rw` мог отменить границу | путь `~` или корень проекта повторно открывал управляющую плоскость на запись | bind отклоняется, если путь содержит каталог прогона или пакет `factory/`, либо совпадает с защищённым файлом |
+
+Проверка:
+
+```bash
+.venv/bin/python -m pytest -q                         # 181 тест
+.venv/bin/python -m pytest -q tests/test_runtime_trust_boundary.py
+```
+
+Реальный шаг Hermes в песочнице: `s00_intake`, 49.5 с, 79 208 токенов,
+артефакты валидны, `factory verify --stage s00_intake` — OK. Попытка
+`factory gate approve` внутри песочницы: exit 1, `Read-only file system:
+.../blackbox.lock`, хеш `state.json` не изменился.

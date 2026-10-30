@@ -13,7 +13,13 @@ from pathlib import Path
 
 from ..journal import sha256_file
 
-PROTECTED_FILES = ("state.json", "blackbox.jsonl", "blackbox.lock", "idea.md")
+PROTECTED_FILES = (
+    "state.json",
+    "blackbox.jsonl",
+    "blackbox.lock",
+    "idea.md",
+    "runtime/usage.jsonl",
+)
 
 
 @dataclass(frozen=True)

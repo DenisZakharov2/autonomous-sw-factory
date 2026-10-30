@@ -123,6 +123,16 @@ def _build_executor(args: argparse.Namespace):
         from .runtime.fake import FakeExecutor
 
         return FakeExecutor(scenario=args.fake_scenario)
+    # A real CLI is untrusted code: the sandbox is the trust boundary and is on
+    # unless the operator explicitly turns it off.
+    sandbox = True if args.sandbox is None else bool(args.sandbox)
+    if not sandbox:
+        print(
+            "WARNING: --no-sandbox disables the trust boundary; the executor can "
+            "write state.json and close its own gates (tripwire detects it, but "
+            "after the fact).",
+            file=sys.stderr,
+        )
     if args.executor == "opencode":
         from .runtime.opencode import OpenCodeExecutor
 
@@ -130,7 +140,7 @@ def _build_executor(args: argparse.Namespace):
             model=args.executor_model,
             mode=args.opencode_mode,
             timeout=args.timeout,
-            sandbox=args.sandbox,
+            sandbox=sandbox,
             read_write=tuple(args.sandbox_rw or ()),
         )
     from .runtime.hermes import HermesExecutor
@@ -139,7 +149,7 @@ def _build_executor(args: argparse.Namespace):
         model=args.executor_model,
         reasoning=args.reasoning,
         timeout=args.timeout,
-        sandbox=args.sandbox,
+        sandbox=sandbox,
         read_write=tuple(args.sandbox_rw or ()),
         yolo=args.yolo,
     )
@@ -492,7 +502,20 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--budget-tokens", type=int, help="override the mode token budget for this run")
     run.add_argument("--budget-minutes", type=float, help="override the mode minute budget")
     run.add_argument("--budget-usd", type=float, help="override the mode usd budget")
-    run.add_argument("--sandbox", action="store_true", help="wrap the executor in a bubblewrap read-only root")
+    sandbox = run.add_mutually_exclusive_group()
+    sandbox.add_argument(
+        "--sandbox",
+        dest="sandbox",
+        action="store_true",
+        default=None,
+        help="wrap the executor in bubblewrap (default for hermes/opencode)",
+    )
+    sandbox.add_argument(
+        "--no-sandbox",
+        dest="sandbox",
+        action="store_false",
+        help="run the executor without the trust boundary (debugging only)",
+    )
     run.add_argument("--sandbox-rw", action="append", help="extra path the sandboxed executor may write (repeatable)")
     run.add_argument("--yolo", action="store_true", help="pass --yolo to hermes")
     run.add_argument("--reasoning", default="medium", help="reasoning effort passed to hermes")
@@ -616,6 +639,11 @@ def main(argv: list[str] | None = None) -> int:
     except FactoryError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return exc.exit_code
+    except OSError as exc:
+        # A sandboxed caller hits EROFS/EPERM on state.json or blackbox.lock;
+        # that is the boundary working, not a crash worth a traceback.
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
     except KeyboardInterrupt:
         print("interrupted", file=sys.stderr)
         return 130

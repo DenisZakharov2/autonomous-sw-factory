@@ -169,25 +169,32 @@ def test_sandbox_wraps_with_a_narrow_view(tmp_path):
     assert cmd[cmd.index("--ro-bind") + 1 : cmd.index("--ro-bind") + 3] == ["/", "/"]
     assert "--unshare-pid" in cmd
     assert "--new-session" in cmd
-    assert cmd[cmd.index("--bind") + 1 : cmd.index("--bind") + 3] == [
-        str(tmp_path.resolve()),
-        str(tmp_path.resolve()),
+    run = str(tmp_path.resolve())
+    ro_binds = [
+        (cmd[index + 1], cmd[index + 2])
+        for index, item in enumerate(cmd)
+        if item == "--ro-bind"
     ]
-    assert cmd[cmd.index("--chdir") + 1] == str(tmp_path.resolve())
+    assert (run, run) in ro_binds
+    assert cmd[cmd.index("--chdir") + 1] == run
     assert cmd[-2:] == ["--", "true"]
     assert sandbox_command(["true"], tmp_path, enabled=False) == ["true"]
     with pytest.raises(Exception):
         sandbox_command(["true"], tmp_path, backend="systemd")
+    with pytest.raises(Exception):
+        sandbox_command(["true"], tmp_path, read_write=(str(tmp_path),))
 
 
 @pytest.mark.skipif(not sandbox_available(), reason="bubblewrap is not installed")
 def test_sandbox_binds_context_read_write_paths(tmp_path, context):
     usage = tmp_path / "usage.json"
+    extra = tmp_path / "agent-state"
+    extra.mkdir()
     cmd = HermesExecutor(sandbox=True).command(
-        "prompt", context.run_dir, usage, extra_read_write=(str(tmp_path),)
+        "prompt", context.run_dir, usage, extra_read_write=(str(extra),)
     )
     assert cmd[0] == "bwrap"
-    assert str(tmp_path.resolve()) in cmd
+    assert str(extra.resolve()) in cmd
     binds = [cmd[index + 1] for index, item in enumerate(cmd) if item == "--bind"]
-    assert str(context.run_dir.resolve()) in binds
-    assert str(tmp_path.resolve()) in binds
+    assert str(context.run_dir.resolve()) not in binds
+    assert str(extra.resolve()) in binds

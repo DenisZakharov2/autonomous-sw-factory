@@ -4,6 +4,7 @@
 
 | Version | Supported |
 | :--- | :--- |
+| `0.2.x` | yes |
 | `0.1.x` | yes |
 | older | no |
 
@@ -29,7 +30,9 @@ In scope:
 - journal forgery, truncation or `PASS` spoofing;
 - quarantine bypass (incomplete scan installed, lock hash bypass);
 - secret leakage into artifacts or logs;
-- command injection through artifact paths or run ids.
+- command injection through artifact paths or run ids;
+- writing the control plane from inside a runtime executor despite the
+  `bwrap` sandbox.
 
 Out of scope:
 
@@ -40,7 +43,7 @@ Out of scope:
 - the unsiged hash chain being rewritable by a writer who recomputes it — this
   is a documented limitation, not a surprise.
 
-## Controls in `0.2.1`
+## Controls in `0.2.x`
 
 - strict run-id regex and resolved-path checks;
 - `fcntl.flock` around journal writes;
@@ -51,15 +54,22 @@ Out of scope:
 - stage submits checked against the declared artifact owner;
 - fail-closed SkillSpector gate and directory hash lock;
 - `.gitignore` excludes `runs/`, `.env`, keys and quarantine;
-- no secrets are read by the engine.
+- no secrets are read by the engine;
+- real executors run in `bwrap` by default: the run directory is read-only,
+  only declared artifact directories and `runtime/agent/` are writable, so
+  `state.json`, the journal, the lock and evidence cannot be changed from
+  inside a step; `FACTORY_*`/`PYTHONPATH` are removed from the child
+  environment and runtime-owned files are written with `O_NOFOLLOW`.
 
 ### What the role checks are not
 
 `--role` and `--approver` are strings typed on the command line. Owner,
 approver and `allowed_files` checks enforce the protocol and catch mistakes;
 they are not authentication and not RBAC. A caller who can run `factory` can
-type any role name. Real isolation needs a trusted runner that resolves the
-role from its own context, plus a signed checkpoint outside `runs/`.
+type any role name. In the default runtime that caller is the sandboxed
+executor and cannot write the control plane, but a local user outside the
+sandbox still can: real authentication needs a trusted runner or a signed
+checkpoint outside `runs/`.
 
 ## Residual risk
 

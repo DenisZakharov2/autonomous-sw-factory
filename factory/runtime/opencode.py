@@ -18,8 +18,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .base import ExecutionResult, RunContext
-from .sandbox import sandbox_command
+from .base import ExecutionResult, RunContext, safe_write_text
+from .sandbox import sandbox_command, sandbox_env
 
 
 def _parse_usage(stdout: str) -> dict[str, Any]:
@@ -124,6 +124,7 @@ class OpenCodeExecutor:
             completed = subprocess.run(
                 cmd,
                 cwd=str(context.run_dir),
+                env=sandbox_env(),
                 capture_output=True,
                 text=True,
                 timeout=self.timeout,
@@ -133,10 +134,10 @@ class OpenCodeExecutor:
             elapsed = time.monotonic() - started
             stdout = exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
             stderr = exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
-            transcript.write_text(
+            safe_write_text(
+                transcript,
                 f"# opencode timeout after {elapsed:.1f}s\n\n## stdout\n{stdout[-20000:]}"
                 f"\n\n## stderr\n{stderr[-20000:]}\n",
-                encoding="utf-8",
             )
             return ExecutionResult(
                 exit_code=124,
@@ -163,11 +164,11 @@ class OpenCodeExecutor:
         last_line = ""
         if completed.stdout.strip():
             last_line = completed.stdout.strip().splitlines()[-1][:500]
-        transcript.write_text(
+        safe_write_text(
+            transcript,
             f"# opencode ({self.mode}) step {context.step} — {context.role} @ {context.stage}\n"
             f"exit_code: {exit_code}\ncommand: {' '.join(display)}\n\n"
             f"## stdout\n{completed.stdout[-40000:]}\n\n## stderr\n{completed.stderr[-20000:]}\n",
-            encoding="utf-8",
         )
         summary = error or last_line or f"opencode exited with {exit_code}"
         return ExecutionResult(

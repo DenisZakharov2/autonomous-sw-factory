@@ -6,6 +6,7 @@ executor in tests and a real one on a workstation.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -17,6 +18,25 @@ class RuntimeFailure(FactoryError):
     """The runtime cannot continue without a human or a configuration fix."""
 
     exit_code = 3
+
+
+def safe_write_text(path: Path, text: str) -> None:
+    """Write a runtime-owned file without following a symlink.
+
+    The executor owns the run directory between steps.  A transcript path or
+    `prompt.md` could have been replaced by a symlink to a host file; a plain
+    `write_text` would then write outside the sandbox as the invoking user.
+    `O_NOFOLLOW` turns that into an error instead of a write.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_symlink():
+        path.unlink()
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags, 0o644)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        handle.write(text)
 
 
 @dataclass(slots=True)
@@ -74,10 +94,29 @@ class RunContext:
         marker = self.sequence or self.step
         return f"ev-{marker:04d}-{stage}-{role}.{suffix}"
 
+    def _safe_base(self) -> Path:
+        """Runtime directory, refusing a symlinked or escaping path."""
+        base = Path(self.runtime_dir or (self.run_dir / "runtime"))
+        run = self.run_dir.resolve()
+        if base.is_symlink():
+            raise RuntimeFailure(f"runtime directory is a symlink: {base}")
+        resolved = base.resolve()
+        if resolved != run and run not in resolved.parents:
+            raise RuntimeFailure(f"runtime directory escapes the run: {resolved}")
+        resolved.mkdir(parents=True, exist_ok=True)
+        return resolved
+
     def path_in_runtime(self, suffix: str = "log") -> Path:
-        base = self.runtime_dir or (self.run_dir / "runtime")
+        return self._safe_base() / self.log_stem(suffix)
+
+    def path_in_executor(self, name: str = "usage.json") -> Path:
+        """A path under `runtime/agent`, the only runtime subtree an adapter
+        (and therefore the sandbox) may write to."""
+        base = self._safe_base() / "agent"
+        if base.is_symlink():
+            raise RuntimeFailure(f"executor output directory is a symlink: {base}")
         base.mkdir(parents=True, exist_ok=True)
-        return base / self.log_stem(suffix)
+        return base / name
 
 
 @runtime_checkable

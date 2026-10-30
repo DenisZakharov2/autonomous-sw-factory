@@ -7,12 +7,11 @@ deadlocked task graph) is a stop with exit code 3, not a retry forever.
 """
 from __future__ import annotations
 
+import hashlib
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
-
-import hashlib
 
 from ..artifacts import resolve_recorded_path, sha256_dir, validate_artifact
 from ..config import load_artifacts, load_budget, load_pipeline, project_root
@@ -22,7 +21,7 @@ from ..journal import sha256_file
 from ..paths import run_dir as safe_run_dir
 from ..state import load_state
 from ..verify import verify_run
-from .base import Executor, RunContext
+from .base import Executor, RunContext, RuntimeFailure, safe_write_text
 from .evidence import EvidenceStore
 from .guard import Fingerprint
 from .prompt import build_prompt
@@ -84,6 +83,99 @@ def _artifact_digest(order: dict[str, Any], run_dir: Path, task: dict[str, Any] 
             value = "unreadable"
         digest.update(f"{entry['path']}:{value}\n".encode("utf-8"))
     return digest.hexdigest()
+
+
+def _collect_writable_paths(
+    order: dict[str, Any], run_dir: Path, task: dict[str, Any] | None
+) -> dict[Path, bool]:
+    """Paths the executor may write, derived from the order, never the run root.
+
+    A file artifact is exposed through its parent directory (so an editor can
+    write atomically); a directory artifact and a task directory are exposed
+    directly.  Root artifacts are exposed one file at a time: the project root
+    as a whole is never mounted writable, otherwise `s15_quarantine` could
+    rewrite `factory/` itself.
+    """
+    run = run_dir.resolve()
+    project = project_root().resolve()
+    entries: dict[Path, bool] = {}
+
+    def add(candidate: Path, is_dir: bool, *, root: bool = False) -> None:
+        resolved = candidate.resolve()
+        if not root:
+            if resolved != run and run not in resolved.parents:
+                raise RuntimeFailure(f"writable path escapes the run: {resolved}")
+            if resolved == run:
+                raise RuntimeFailure("refusing to expose the run directory writable")
+        else:
+            if project not in resolved.parents:
+                raise RuntimeFailure(f"root artifact escapes the project: {resolved}")
+        entries[resolved] = entries.get(resolved, False) or is_dir
+
+    for spec in order.get("artifacts") or []:
+        raw = str(spec.get("resolved_path") or spec.get("path") or "")
+        if not raw or "{" in raw:
+            continue
+        is_root = bool(spec.get("root"))
+        candidate = Path(raw) if Path(raw).is_absolute() else (project if is_root else run) / raw
+        if spec.get("directory"):
+            add(candidate, True, root=is_root)
+        elif candidate.parent == (project if is_root else run):
+            add(candidate, False, root=is_root)
+        else:
+            add(candidate.parent, True, root=is_root)
+
+    if task is not None:
+        for entry in task.get("allowed_files") or []:
+            raw = str(entry)
+            candidate = Path(raw) if Path(raw).is_absolute() else run / raw
+            if raw.endswith("/"):
+                add(candidate, True)
+            elif candidate.parent == run:
+                add(candidate, False)
+            else:
+                add(candidate.parent, True)
+
+    # The Hermes adapter writes its usage file here; everything else under
+    # `runtime/` (ledger, evidence) stays read-only for the executor.
+    add(run / "runtime" / "agent", True)
+    return entries
+
+
+def _prepare_writable_paths(entries: dict[Path, bool]) -> tuple[list[str], list[Path]]:
+    created: list[Path] = []
+    for path in sorted(entries):
+        is_dir = entries[path]
+        if path.is_symlink():
+            raise RuntimeFailure(f"refusing to expose a symlink to the executor: {path}")
+        if is_dir:
+            if path.exists() and not path.is_dir():
+                raise RuntimeFailure(f"expected a directory for the executor: {path}")
+            path.mkdir(parents=True, exist_ok=True)
+            continue
+        if path.exists():
+            if not path.is_file():
+                raise RuntimeFailure(f"expected a file for the executor: {path}")
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+        created.append(path)
+    return [str(path) for path in sorted(entries)], created
+
+
+def _cleanup_placeholders(paths: list[Path]) -> None:
+    """Remove placeholder files the executor never wrote.
+
+    A pre-created empty artifact would otherwise look "populated" to
+    `work_order_submit_plan` and be submitted as if the executor had produced
+    it.
+    """
+    for path in paths:
+        try:
+            if path.is_file() and not path.is_symlink() and path.stat().st_size == 0:
+                path.unlink()
+        except OSError:
+            continue
 
 
 def _submit_order(
@@ -283,6 +375,9 @@ def run_loop(
 
         before = Fingerprint.capture(run_dir)
         state = load_state(run_dir)
+        task = state["tasks"].get(str(order.get("task_id"))) if order.get("task_id") else None
+        writable_entries = _collect_writable_paths(order, run_dir, task)
+        writable, placeholders = _prepare_writable_paths(writable_entries)
         prompt = build_prompt(
             order, run_dir=run_dir, role=order.get("next_role"), evidence=evidence, max_chars=prompt_limit
         )
@@ -297,23 +392,21 @@ def run_loop(
             evidence=list(evidence),
             runtime_dir=run_dir / "runtime",
             sequence=int(state["event_count"]),
-            extra_read_write=(
-                (str(project_root()),)
-                if any(spec.get("root") for spec in order.get("artifacts") or [])
-                else ()
-            ),
+            extra_read_write=tuple(writable),
         )
-        context.path_in_runtime("prompt.md").write_text(prompt, encoding="utf-8")
+        safe_write_text(context.path_in_runtime("prompt.md"), prompt)
         started = time.monotonic()
         try:
             result = executor.execute(order, context)
         except Exception as exc:  # noqa: BLE001 - an adapter crash is a stop, not a traceback
+            _cleanup_placeholders(placeholders)
             path = evidence_store.write_step(
                 step, order, {"status": "executor_crash", "error": repr(exc), "prompt": prompt}
             )
             stop = finish("executor_failed", STOP, f"{type(exc).__name__}: {exc}", stage_id)
             stop.evidence_path = str(path)
             return stop
+        _cleanup_placeholders(placeholders)
         elapsed = time.monotonic() - started
 
         after = Fingerprint.capture(run_dir)

@@ -61,10 +61,15 @@ factory run --run-id my-first --executor fake --max-steps 60
 `fake` — детерминированный исполнитель на эталонных артефактах: он доказывает цикл и не вызывает модель. С реальным исполнителем:
 
 ```bash
-factory run --run-id live --executor hermes --yolo --timeout 900
+factory run --run-id live --executor hermes --yolo --timeout 900 \
+  --sandbox-rw ~/.hermes --sandbox-rw ~/.local/state --sandbox-rw ~/.cache
 # или
 factory run --run-id live --executor opencode --executor-model provider/model
 ```
+
+Реальные исполнители запускаются в `bwrap` по умолчанию; управляющая плоскость
+(`state.json`, журнал, lock, usage, evidence) смонтирована read-only, поэтому
+агент не может закрыть свой гейт командой `factory gate approve`.
 
 `factory run` останавливается на первом человеческом гейте с кодом `2` и печатает точную команду для человека; `0` — прогон завершён, `3` — эскалация. Токены, секунды и цена пишутся в `runs/<id>/runtime/usage.jsonl`, доказательства — в `runs/<id>/runtime/evidence/`. Подробности: [`runtime.md`](runtime.md).
 

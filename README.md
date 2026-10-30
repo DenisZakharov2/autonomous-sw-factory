@@ -13,7 +13,7 @@
 - **22 ролевые карты** с восемью разделами: назначение, входы, процедура, выходы, Definition of Done, вето, запреты, эскалация.
 - **13 стадий** от `s_in`/`s00_intake` до `s9_learn` с явными гейтами.
 - **Исполнимый Python-движок**: `init`, `next`, `submit`, `gate`, `verify`, `task`, `quarantine`, `trace`, `metrics`, `doctor`.
-- **Рантайм `factory run`**: work order → исполнитель → проверка → сдача → гейт; `pending_artifacts` и `next_role` в каждом ордере, `usage.jsonl`, evidence и три стоп-гарда (подмена состояния, запись вне прогона, бюджет). Адаптеры: `fake` (без модели), `hermes`, `opencode`; см. [`docs/runtime.md`](docs/runtime.md).
+- **Рантайм `factory run`**: work order → исполнитель → проверка → сдача → гейт; `pending_artifacts` и `next_role` в каждом ордере, `usage.jsonl`, evidence и стоп-гарды (подмена состояния, запись вне прогона, бюджет). Адаптеры: `fake` (без модели), `hermes`, `opencode`; реальные CLI запускаются в `bwrap` по умолчанию, управляющая плоскость read-only — см. [`docs/runtime.md`](docs/runtime.md).
 - **Журнал с хеш-цепочкой** SHA-256, блокировкой записи, state-якорем и семантической проверкой `PASS`.
 - **Независимый верификатор**: `PASS` может поставить только `02-independent-verifier`; человек может принять риск отдельным событием.
 - **Карантин скиллов**: адаптер `NVIDIA/SkillSpector 2.12.0` с fail-closed и локом хешей.
@@ -53,7 +53,8 @@ factory run --run-id demo-01 --executor fake --max-steps 60
 С реальным исполнителем:
 
 ```bash
-factory run --run-id live-01 --executor hermes --yolo --max-steps 60 --timeout 900
+factory run --run-id live-01 --executor hermes --yolo --max-steps 60 --timeout 900 \
+  --sandbox-rw ~/.hermes --sandbox-rw ~/.local/state --sandbox-rw ~/.cache
 factory run --run-id live-01 --executor opencode --executor-model provider/model
 ```
 
@@ -189,7 +190,7 @@ factory/                 # движок и конфиги
     fake.py              # детерминированный исполнитель
     opencode.py          # адаптер OpenCode
     hermes.py            # адаптер Hermes
-    sandbox.py           # bwrap: read-only корень
+    sandbox.py           # bwrap: read-only корень и управляющая плоскость
     fixtures/nano/       # эталонные артефакты для fake
   roles/                 # 22 карточки
   schemas/               # 9 JSON-схем

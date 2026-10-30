@@ -19,16 +19,16 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .base import ExecutionResult, RunContext
-from .sandbox import sandbox_command
+from .base import ExecutionResult, RunContext, safe_write_text
+from .sandbox import sandbox_command, sandbox_env
 
 
 def _read_usage(path: Path) -> dict[str, Any]:
-    if not path.is_file():
+    if path.is_symlink() or not path.is_file():
         return {}
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, OSError):
         return {}
 
 
@@ -73,7 +73,7 @@ class HermesExecutor:
 
     def execute(self, order: dict[str, Any], context: RunContext) -> ExecutionResult:
         transcript = context.path_in_runtime()
-        usage_path = context.path_in_runtime("usage.json")
+        usage_path = context.path_in_executor(f"usage-{context.sequence or context.step}.json")
         cmd = self.command(
             context.prompt, context.run_dir, usage_path, extra_read_write=context.extra_read_write
         )
@@ -82,6 +82,7 @@ class HermesExecutor:
             completed = subprocess.run(
                 cmd,
                 cwd=str(context.run_dir),
+                env=sandbox_env(),
                 capture_output=True,
                 text=True,
                 timeout=self.timeout,
@@ -91,10 +92,10 @@ class HermesExecutor:
             elapsed = time.monotonic() - started
             stdout = exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
             stderr = exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
-            transcript.write_text(
+            safe_write_text(
+                transcript,
                 f"# hermes timeout after {elapsed:.1f}s\n\n## stdout\n{stdout[-20000:]}"
                 f"\n\n## stderr\n{stderr[-20000:]}\n",
-                encoding="utf-8",
             )
             return ExecutionResult(
                 exit_code=124,
@@ -126,12 +127,12 @@ class HermesExecutor:
             "model": usage_raw.get("model"),
         }
         display = [("<prompt>" if item == context.prompt else item) for item in cmd]
-        transcript.write_text(
+        safe_write_text(
+            transcript,
             f"# hermes step {context.step} — {context.role} @ {context.stage}\n"
             f"exit_code: {exit_code}\ncommand: {' '.join(display)}\n\n"
             f"## usage\n{json.dumps(usage, ensure_ascii=False, indent=2)}\n\n"
             f"## stdout\n{completed.stdout[-40000:]}\n\n## stderr\n{completed.stderr[-20000:]}\n",
-            encoding="utf-8",
         )
         summary = (completed.stdout or "").strip()[-2000:] or (completed.stderr or "").strip()[-2000:]
         return ExecutionResult(

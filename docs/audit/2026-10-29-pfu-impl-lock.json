@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0.0",
+  "skills": [
+    {
+      "name": "pfu-impl",
+      "pack": "hermes-local",
+      "commit": "local",
+      "path": "pfu-impl",
+      "sha256": "0bbef52c87e334a43457b5ea2ae9c72df54f46212193c2b0d63b13d6c63a3fde",
+      "license": "MIT",
+      "model_invocable": true,
+      "scanner": {
+        "name": "skillspector",
+        "version": "2.12.0",
+        "severity": "CRITICAL",
+        "recommendation": "DO_NOT_INSTALL",
+        "is_complete": false,
+        "coverage_percent": 85.7,
+        "scanned_at": "2026-10-29T15:56:55Z"
+      },
+      "approved_by": "human:denis"
+    }
+  ]
+}

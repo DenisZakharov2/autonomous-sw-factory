@@ -8,7 +8,7 @@ from typing import Any
 import jsonschema
 import yaml
 
-from .artifacts import validate_stage, validate_templates
+from .artifacts import resolve_recorded_path, sha256_dir, validate_stage, validate_templates
 from .config import (
     PACKAGE_ROOT,
     SCHEMA_DIR,
@@ -18,8 +18,8 @@ from .config import (
     load_pipeline,
 )
 from .errors import ConfigError, FactoryError, RunError
-from .journal import verify_chain
-from .pipeline import role_ids, validate_pipeline
+from .journal import read_events, sha256_file, verify_chain
+from .pipeline import effective_roles, role_ids, validate_pipeline
 from .state import current_stage, find_stage, load_state, stage_list
 
 ROLE_SECTIONS = [
@@ -120,16 +120,38 @@ def validate_roles() -> list[str]:
     if len(paths) != 22:
         errors.append(f"expected 22 role cards, found {len(paths)}")
     hashes: dict[str, str] = {}
+    cards: dict[str, set[str]] = {}
     for path in paths:
         errors.extend(validate_role_card(path, pipeline, models))
         try:
-            _, body = parse_role(path)
+            frontmatter, body = parse_role(path)
         except ConfigError:
             continue
+        cards[str(frontmatter.get("role_id"))] = set(frontmatter.get("active_stages", []))
         digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
         if digest in hashes:
             errors.append(f"{path.name}: body duplicates {hashes[digest]}")
         hashes[digest] = path.name
+    # Bidirectional sync: pipeline and role cards must agree, per mode.
+    used: dict[str, set[str]] = {stage["id"]: set() for stage in pipeline["stages"]}
+    for mode in pipeline["modes"]:
+        for stage in pipeline["stages"]:
+            for role in effective_roles(pipeline, mode, stage):
+                used[stage["id"]].add(role)
+                active = cards.get(role)
+                if active is not None and stage["id"] not in active:
+                    errors.append(
+                        f"{role}: assigned to {stage['id']} in mode {mode} "
+                        "but missing from active_stages"
+                    )
+    for role, active in cards.items():
+        if role == "00-orchestrator":
+            continue
+        for stage_id in sorted(active):
+            if role not in used.get(stage_id, set()):
+                errors.append(
+                    f"{role}: declares {stage_id} in active_stages but no mode uses the role there"
+                )
     return errors
 
 
@@ -183,6 +205,99 @@ def check_state_consistency(run_dir: Path, state: dict[str, Any], pipeline: dict
     expected_current = stage["id"] if stage else None
     if state["current_stage"] != expected_current:
         errors.append(f"state.current_stage {state['current_stage']!r} should be {expected_current!r}")
+    for item in pipeline["stages"]:
+        status = state["stage_status"].get(item["id"])
+        gate = state["gate_status"].get(item["gate"]["id"], {})
+        if gate.get("status") == "approved" and status != "accepted":
+            errors.append(f"stage {item['id']}: gate approved but stage is {status!r}")
+        if status == "accepted" and gate.get("status") != "approved":
+            errors.append(
+                f"stage {item['id']}: accepted while gate is {gate.get('status', 'missing')!r}"
+            )
+    return errors
+
+
+def _check_recorded_artifacts(
+    run_dir: Path, entries: list[dict[str, Any]], label: str
+) -> list[str]:
+    errors: list[str] = []
+    for entry in entries:
+        recorded = str(entry.get("path", ""))
+        expected = str(entry.get("sha256", ""))
+        target = resolve_recorded_path(run_dir, recorded)
+        if not target.exists():
+            errors.append(f"{label}: artifact is missing: {recorded}")
+            continue
+        try:
+            actual = sha256_dir(target) if recorded.endswith("/") else sha256_file(target)
+        except (OSError, ConfigError) as exc:
+            errors.append(f"{label}: cannot hash {recorded}: {exc}")
+            continue
+        if actual != expected:
+            errors.append(f"{label}: artifact tampered after submission/approval: {recorded}")
+    return errors
+
+
+def artifact_integrity_errors(
+    run_dir: Path,
+    state: dict[str, Any],
+    events: list[dict[str, Any]],
+    stage_id: str | None = None,
+) -> list[str]:
+    """Re-hash every recorded artifact and compare it with the journal.
+
+    The journal is the source of truth: `GATE_DECISION` and `TASK_DONE` carry
+    the hashes of what was approved, `ARTIFACT_SUBMIT` the hashes of what was
+    submitted.  This is what turns the flight recorder from a log into a
+    tamper-evident artifact store.
+    """
+    approved: dict[str, list[dict[str, Any]]] = {}
+    submitted: dict[str, dict[str, dict[str, Any]]] = {}
+    task_done: dict[str, list[dict[str, Any]]] = {}
+    task_submitted: dict[str, dict[str, dict[str, Any]]] = {}
+    for event in events:
+        artifacts = event.get("artifacts") or []
+        if not isinstance(artifacts, list) or not artifacts:
+            continue
+        verdict = (event.get("verdict") or {}).get("status")
+        stage = str(event.get("stage") or "")
+        task = event.get("task_id")
+        if event.get("event_type") == "GATE_DECISION" and verdict in {"PASS", "ACCEPTED_RISK"} and not task:
+            approved[stage] = artifacts
+        elif event.get("event_type") == "TASK_DONE" and task:
+            task_done[str(task)] = artifacts
+        elif event.get("event_type") == "ARTIFACT_SUBMIT" and task:
+            task_submitted.setdefault(str(task), {}).update(
+                {str(item.get("path")): item for item in artifacts}
+            )
+        elif event.get("event_type") == "ARTIFACT_SUBMIT" and stage:
+            submitted.setdefault(stage, {}).update(
+                {str(item.get("path")): item for item in artifacts}
+            )
+
+    errors: list[str] = []
+    for stage, status in state["stage_status"].items():
+        if stage_id and stage != stage_id:
+            continue
+        if status == "accepted":
+            entries = approved.get(stage) or list(submitted.get(stage, {}).values())
+            if entries:
+                errors.extend(_check_recorded_artifacts(run_dir, entries, f"stage {stage}"))
+        elif status == "review":
+            entries = list(submitted.get(stage, {}).values())
+            if entries:
+                errors.extend(_check_recorded_artifacts(run_dir, entries, f"stage {stage}"))
+    for task_id, task in state["tasks"].items():
+        if stage_id and task.get("stage") != stage_id:
+            continue
+        if task.get("status") == "accepted":
+            entries = task_done.get(task_id) or list(task_submitted.get(task_id, {}).values())
+        elif task.get("status") == "review":
+            entries = list(task_submitted.get(task_id, {}).values())
+        else:
+            entries = []
+        if entries:
+            errors.extend(_check_recorded_artifacts(run_dir, entries, f"task {task_id}"))
     return errors
 
 
@@ -200,6 +315,12 @@ def verify_run(run_dir: Path, stage_id: str | None = None, require_gate: bool = 
         return errors + [str(exc)]
     errors.extend(check_state_consistency(run_dir, state, pipeline))
     errors.extend(verify_chain(run_dir / "blackbox.jsonl", run_dir / "state.json"))
+    try:
+        events = read_events(run_dir / "blackbox.jsonl")
+    except FactoryError as exc:
+        events = []
+        errors.append(str(exc))
+    errors.extend(artifact_integrity_errors(run_dir, state, events, stage_id))
     if stage_id:
         try:
             stage = find_stage(pipeline, stage_id)

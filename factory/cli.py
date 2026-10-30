@@ -8,25 +8,29 @@ from pathlib import Path
 
 from . import __version__
 from .config import (
+    PACKAGE_ROOT,
     load_artifacts,
     load_budget,
     load_pipeline,
-    project_root,
     resolve_model,
 )
 from .engine import (
+    accept_risk,
     gate_approve,
     gate_reject,
     import_plan,
     init_run,
     model_for,
     next_action,
+    stage_reset,
     status_summary,
     submit_work,
     task_accept,
     task_claim,
     task_reject,
+    task_reset,
     task_submit,
+    veto,
 )
 from .errors import FactoryError
 from .journal import append_event, read_events, verify_chain
@@ -58,12 +62,14 @@ def _runs_root(args: argparse.Namespace) -> Path | None:
 def cmd_doctor(args: argparse.Namespace) -> int:
     report = doctor_report()
     errors = list(report["errors"])
-    version_file = project_root() / "VERSION"
-    if version_file.exists() and version_file.read_text(encoding="utf-8").strip() != __version__:
-        errors.append("VERSION does not match factory.__version__")
-    license_file = project_root() / "LICENSE"
-    if license_file.exists() and "Permission is hereby granted" not in license_file.read_text(encoding="utf-8"):
-        errors.append("LICENSE is missing the MIT grant text")
+    repo_root = PACKAGE_ROOT.parent
+    if (repo_root / "pyproject.toml").exists():
+        version_file = repo_root / "VERSION"
+        if version_file.exists() and version_file.read_text(encoding="utf-8").strip() != __version__:
+            errors.append("VERSION does not match factory.__version__")
+        license_file = repo_root / "LICENSE"
+        if license_file.exists() and "Permission is hereby granted" not in license_file.read_text(encoding="utf-8"):
+            errors.append("LICENSE is missing the MIT grant text")
     report["errors"] = errors
     if args.json:
         _print_json(report)
@@ -138,22 +144,52 @@ def cmd_task(args: argparse.Namespace) -> int:
         event = task_accept(args.run_id, args.task_id, root=_runs_root(args))
     elif args.task_command == "reject":
         event = task_reject(args.run_id, args.task_id, args.reason, root=_runs_root(args))
+    elif args.task_command == "reset":
+        event = task_reset(
+            args.run_id, task_id=args.task_id, approver=args.approver or "",
+            reason=args.reason, root=_runs_root(args),
+        )
     else:
         raise FactoryError(f"unknown task command: {args.task_command}")
     print(f"{event['event_type']} {event['event_id']} task={args.task_id}")
     return 0
 
 
+def cmd_stage(args: argparse.Namespace) -> int:
+    event = stage_reset(
+        args.run_id, stage_id=args.stage, approver=args.approver,
+        reason=args.reason, root=_runs_root(args),
+    )
+    print(f"{event['event_type']} {event['event_id']} stage={args.stage}")
+    return 0
+
+
+def cmd_veto(args: argparse.Namespace) -> int:
+    event = veto(
+        args.run_id, stage_id=args.stage, role=args.role, code=args.code,
+        evidence=args.evidence or [], root=_runs_root(args),
+    )
+    print(f"{event['verdict']['status']} {event['event_id']} veto={args.code} stage={args.stage}")
+    return 0
+
+
 def cmd_gate(args: argparse.Namespace) -> int:
+    token = getattr(args, "approval_token", None)
     if args.gate_command == "approve":
         event = gate_approve(
             args.run_id, gate_id=args.gate, approver=args.approver,
-            evidence=args.evidence or [], root=_runs_root(args),
+            evidence=args.evidence or [], root=_runs_root(args), approval_token=token,
+        )
+    elif args.gate_command == "accept-risk":
+        event = accept_risk(
+            args.run_id, gate_id=args.gate, approver=args.approver,
+            risk=args.risk or "", mitigation=args.mitigation or "",
+            expires=args.expires, root=_runs_root(args), approval_token=token,
         )
     else:
         event = gate_reject(
             args.run_id, gate_id=args.gate, approver=args.approver,
-            evidence=args.evidence or [], root=_runs_root(args),
+            evidence=args.evidence or [], root=_runs_root(args), approval_token=token,
         )
     print(f"{event['verdict']['status']} {event['event_id']} gate={args.gate} by={args.approver}")
     return 0
@@ -205,7 +241,8 @@ def cmd_quarantine(args: argparse.Namespace) -> int:
         license=args.license, lock_path=Path(args.lock), approved_by=args.approved_by,
         scanner=args.scanner, min_coverage=args.min_coverage, no_llm=args.no_llm,
     )
-    print(f"{action}: {args.name} recommendation={result.recommendation} severity={result.severity} "
+    display = args.name or result.skill_name or Path(args.path).name
+    print(f"{action}: {display} recommendation={result.recommendation} severity={result.severity} "
           f"complete={result.is_complete} coverage={result.coverage_percent}")
     if result.failed_analyzers:
         print("failed analyzers: " + ", ".join(result.failed_analyzers))
@@ -222,7 +259,7 @@ def cmd_quarantine(args: argparse.Namespace) -> int:
                 event_type="SKILL_INSTALL",
                 why="Quarantine scan auto-allowed the skill",
                 for_what=f"Install {args.name}",
-                action=f"Installed {args.name} sha256={entry['sha256'][:12]}",
+                action=f"Installed {display} sha256={entry['sha256'][:12]}",
                 verdict_status="DRAFT",
                 verified_by="00-orchestrator",
                 evidence=[f"lock: {args.lock}", f"scan: {result.recommendation}/{result.severity}"],
@@ -353,23 +390,46 @@ def build_parser() -> argparse.ArgumentParser:
     submit.set_defaults(func=cmd_submit)
 
     task = sub.add_parser("task", help="task commands")
-    task.add_argument("task_command", choices=["import", "list", "claim", "submit", "accept", "reject"])
+    task.add_argument("task_command", choices=["import", "list", "claim", "submit", "accept", "reject", "reset"])
     task.add_argument("--run-id", required=True)
     task.add_argument("--task-id")
     task.add_argument("--role")
     task.add_argument("--artifact", action="append")
     task.add_argument("--reason", default="verification failed")
+    task.add_argument("--approver", help="human:<id> for reset")
     task.add_argument("--runs-root")
     task.set_defaults(func=cmd_task)
 
-    gate = sub.add_parser("gate", help="approve or reject a gate")
-    gate.add_argument("gate_command", choices=["approve", "reject"])
+    gate = sub.add_parser("gate", help="approve, reject or accept risk on a gate")
+    gate.add_argument("gate_command", choices=["approve", "reject", "accept-risk"])
     gate.add_argument("--run-id", required=True)
     gate.add_argument("--gate", required=True)
     gate.add_argument("--approver", required=True, help="human:<id> or the role that owns the gate")
     gate.add_argument("--evidence", action="append")
+    gate.add_argument("--risk", help="risk description for accept-risk")
+    gate.add_argument("--mitigation", help="mitigation for accept-risk")
+    gate.add_argument("--expires", help="risk acceptance expiry date")
+    gate.add_argument("--approval-token", help="HMAC token required when FACTORY_APPROVAL_KEY is set")
     gate.add_argument("--runs-root")
     gate.set_defaults(func=cmd_gate)
+
+    stage = sub.add_parser("stage", help="stage recovery commands")
+    stage.add_argument("stage_command", choices=["reset"])
+    stage.add_argument("--run-id", required=True)
+    stage.add_argument("--stage", required=True)
+    stage.add_argument("--approver", required=True, help="human:<id>")
+    stage.add_argument("--reason", required=True)
+    stage.add_argument("--runs-root")
+    stage.set_defaults(func=cmd_stage)
+
+    veto = sub.add_parser("veto", help="blocking veto by a role")
+    veto.add_argument("--run-id", required=True)
+    veto.add_argument("--stage", required=True)
+    veto.add_argument("--role", required=True)
+    veto.add_argument("--code", required=True, help="veto code, e.g. VETO-SEC-01")
+    veto.add_argument("--evidence", action="append", required=True)
+    veto.add_argument("--runs-root")
+    veto.set_defaults(func=cmd_veto)
 
     verify = sub.add_parser("verify", help="deterministic run verification")
     verify.add_argument("--run-id", required=True)

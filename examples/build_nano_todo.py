@@ -24,7 +24,10 @@ from factory.engine import (
     task_claim,
     task_submit,
 )
+from factory.artifacts import artifact_path, pattern_paths
+from factory.config import load_artifacts, load_pipeline
 from factory.metrics import write_metrics
+from factory.pipeline import stage_artifacts as declared_artifacts
 from factory.verify import verify_run
 
 EXAMPLE = ROOT / "examples" / "nano-todo"
@@ -415,8 +418,29 @@ if __name__ == "__main__":
     )
 
 
+def stage_paths(stage_id: str) -> list[str]:
+    """Every declared artifact that exists on disk for this stage."""
+    pipeline = load_pipeline()
+    registry = load_artifacts()
+    stage = next(item for item in pipeline["stages"] if item["id"] == stage_id)
+    paths: list[str] = []
+    for spec in declared_artifacts(pipeline, registry, "nano", stage, run_dir=EXAMPLE):
+        if spec.get("per_task"):
+            continue
+        if spec.get("per_pattern"):
+            paths.extend(str(path) for path in pattern_paths(EXAMPLE, spec) if path.exists())
+            continue
+        candidate = artifact_path(EXAMPLE, spec)
+        if candidate.exists():
+            paths.append(str(candidate))
+    return paths
+
+
 def submit_and_gate(stage: str, role: str, gate: str, approver: str, evidence: str) -> None:
-    submit_work(RUN_ID, stage_id=stage, role=role, artifacts=[], root=RUNS)
+    artifacts = stage_paths(stage)
+    if not artifacts:
+        raise SystemExit(f"stage {stage} has no artifacts to submit")
+    submit_work(RUN_ID, stage_id=stage, role=role, artifacts=artifacts, root=RUNS)
     gate_approve(RUN_ID, gate_id=gate, approver=approver, evidence=[evidence], root=RUNS)
 
 
@@ -466,12 +490,10 @@ def main() -> int:
     submit_and_gate("s7_release", "12-fullstack-developer", "gate_s7", "human:example", "rollback drill passed")
     submit_and_gate("s8_docs", "12-fullstack-developer", "gate_s8", "02-independent-verifier", "commands verified")
 
+    # Metrics are an s9 artifact: compute them after s8, submit them, and never
+    # rewrite the file after the gate has recorded its hash.
     write_metrics(EXAMPLE)
     submit_and_gate("s9_learn", "00-orchestrator", "gate_s9", "human:example", "patch queued for human review")
-
-    # Metrics count approved gates, so they are recomputed after gate_s9 closes:
-    # computing them before the final gate understates verification_coverage.
-    write_metrics(EXAMPLE)
 
     errors = verify_run(EXAMPLE, "s9_learn", require_gate=True)
     if errors:

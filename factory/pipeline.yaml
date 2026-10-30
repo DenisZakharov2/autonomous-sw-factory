@@ -11,7 +11,7 @@ modes:
     roles: ["00-orchestrator", "01-smart-interviewer", "12-fullstack-developer", "02-independent-verifier"]
     budget: { tokens: 400000, minutes: 90, usd: 6 }
     stage_roles:
-      s_in: ["00-orchestrator", "01-smart-interviewer", "12-fullstack-developer", "02-independent-verifier"]
+      s_in: ["00-orchestrator", "01-smart-interviewer", "02-independent-verifier"]
       s00_intake: ["00-orchestrator", "01-smart-interviewer", "02-independent-verifier"]
       s0_vision: ["01-smart-interviewer", "02-independent-verifier"]
       s1_spec: ["01-smart-interviewer", "02-independent-verifier"]
@@ -222,7 +222,7 @@ stages:
     title: "Acceptance testing"
     entry: ["s4_build.exit"]
     exit: ["every REQ PASS", "zero Critical/High defects", "three clean test runs"]
-    roles: ["14-qa-engineer", "15-qa-automation-engineer", "02-independent-verifier"]
+    roles: ["14-qa-engineer", "15-qa-automation-engineer", "09-ai-engineer", "02-independent-verifier"]
     artifacts: ["test_report", "acceptance"]
     gate:
       id: gate_s5
@@ -237,7 +237,7 @@ stages:
     title: "Application security and data review"
     entry: ["s5_acceptance.exit"]
     exit: ["no Critical/High issue", "migrations reversible", "pipeline idempotent"]
-    roles: ["16-security-engineer", "17-dba", "18-data-engineer", "11-backend-developer", "12-fullstack-developer", "02-independent-verifier"]
+    roles: ["16-security-engineer", "17-dba", "18-data-engineer", "09-ai-engineer", "11-backend-developer", "12-fullstack-developer", "02-independent-verifier"]
     artifacts: ["security_review_app", "db_report", "data_pipeline"]
     gate:
       id: gate_s6

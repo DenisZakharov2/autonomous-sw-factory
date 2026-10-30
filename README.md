@@ -1,6 +1,6 @@
 # Autonomous Software Factory
 
-**Версия 0.1.1.** Это исполнимый kit для стадийной разработки ПО с независимой проверкой, а не «полностью автономная фабрика из 22 думающих агентов». Движок выдаёт work orders, проверяет артефакты и ведёт журнал; роли исполняет хост-рантайм (Hermes, Claude Code, OpenCode, Cursor) или человек.
+**Версия 0.1.2.** Это исполнимый kit для стадийной разработки ПО с независимой проверкой, а не «полностью автономная фабрика из 22 думающих агентов». Движок выдаёт work orders, проверяет артефакты и ведёт журнал; роли исполняет хост-рантайм (Hermes, Claude Code, OpenCode, Cursor) или человек.
 
 [![CI](https://github.com/DenisZakharov2/autonomous-sw-factory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/DenisZakharov2/autonomous-sw-factory/actions/workflows/ci.yml) · [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -105,8 +105,10 @@ python -m unittest discover -s examples/nano-todo/product/tests -v
 | `factory next --run-id ID` | Выдать следующий work order в JSON |
 | `factory submit --run-id ID --stage S --role R --artifact P` | Сдать артефакты продюсера |
 | `factory verify --run-id ID [--stage S] [--require-gate]` | Детерминированная проверка |
-| `factory gate approve|reject --gate G --approver human:ID` | Записать решение гейта |
-| `factory task import|list|claim|submit|accept|reject` | Задачи `s4_build` |
+| `factory gate approve|reject|accept-risk --gate G --approver human:ID` | Решение гейта; `accept-risk` закрывает эскалацию с записью риска |
+| `factory stage reset --run-id ID --stage S --approver human:ID --reason T` | Сбросить эскалированную стадию |
+| `factory veto --run-id ID --stage S --role R --code C --evidence E` | Блокирующее вето роли |
+| `factory task import|list|claim|submit|accept|reject|reset` | Задачи `s4_build` |
 | `factory quarantine scan PATH --lock skills-lock.json` | Прогнать SkillSpector и записать лок |
 | `factory quarantine verify-lock --lock skills-lock.json` | Обнаружить подмену скилла |
 | `factory trace --run-id ID` | Матрица `REQ → task → test → acceptance` |
@@ -122,6 +124,7 @@ python -m unittest discover -s examples/nano-todo/product/tests -v
 
 - запись идёт под `fcntl.flock`, поэтому параллельные роли не ломают цепочку;
 - `state.json` хранит последний хеш и число событий, поэтому удаление хвоста журнала обнаруживается;
+- `submit`, `gate approve` и `task accept` фиксируют SHA-256 всех артефактов, а `factory verify` перехеширует файлы на диске: подмена после сдачи или приёмки ловится как `artifact tampered`;
 - `PASS` от продюсера отклоняется и при записи, и при проверке;
 - `AUDIT_TRAIL.md` генерируется из JSONL и экранирует `|` и переводы строк;
 - хеш-цепочка **не подписана**. Она защищает от случайной правки и наивной подмены, но не от злонамеренного пересчёта всей цепочки. Для сильной модели угроз добавьте HMAC/Ed25519-контрольную точку вне `runs/`.

@@ -1,0 +1,18 @@
+include VERSION
+include NOTICE
+include LICENSE
+include README.md
+include README.en.md
+include CHANGELOG.md
+include AUDIT.md
+include DESIGN.md
+include PIPELINE.md
+include ROSTER.md
+include AGENTS.md
+include SECURITY.md
+include CONTRIBUTING.md
+recursive-include docs *
+recursive-include examples *
+recursive-include tests *.py
+recursive-include factory *.yaml *.md *.json *.tmpl
+global-exclude __pycache__ *.py[cod]

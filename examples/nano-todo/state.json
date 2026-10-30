@@ -23,7 +23,7 @@
       "status": "approved",
       "approver": "system",
       "decided_by": "system:greenfield",
-      "decided_at": "2026-10-29T15:44:51Z",
+      "decided_at": "2026-10-30T06:36:30Z",
       "evidence": [
         "greenfield mode: s_in not applicable"
       ],
@@ -33,7 +33,7 @@
       "status": "approved",
       "approver": "human",
       "decided_by": "human:example",
-      "decided_at": "2026-10-29T15:44:53Z",
+      "decided_at": "2026-10-30T06:36:31Z",
       "evidence": [
         "interview accepted"
       ],
@@ -43,7 +43,7 @@
       "status": "approved",
       "approver": "human",
       "decided_by": "human:example",
-      "decided_at": "2026-10-29T15:44:55Z",
+      "decided_at": "2026-10-30T06:36:33Z",
       "evidence": [
         "vision accepted"
       ],
@@ -53,7 +53,7 @@
       "status": "approved",
       "approver": "human",
       "decided_by": "human:example",
-      "decided_at": "2026-10-29T15:44:56Z",
+      "decided_at": "2026-10-30T06:36:34Z",
       "evidence": [
         "spec-human approved"
       ],
@@ -63,7 +63,7 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-29T15:44:57Z",
+      "decided_at": "2026-10-30T06:36:35Z",
       "evidence": [
         "no external skills"
       ],
@@ -73,7 +73,7 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-29T15:44:59Z",
+      "decided_at": "2026-10-30T06:36:37Z",
       "evidence": [
         "architecture frozen"
       ],
@@ -83,7 +83,7 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-29T15:45:00Z",
+      "decided_at": "2026-10-30T06:36:39Z",
       "evidence": [
         "plan imported"
       ],
@@ -93,7 +93,7 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-29T15:45:03Z",
+      "decided_at": "2026-10-30T06:36:42Z",
       "evidence": [
         "all tasks accepted"
       ],
@@ -103,7 +103,7 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-29T15:45:05Z",
+      "decided_at": "2026-10-30T06:36:44Z",
       "evidence": [
         "100% PASS"
       ],
@@ -113,7 +113,7 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-29T15:45:07Z",
+      "decided_at": "2026-10-30T06:36:46Z",
       "evidence": [
         "no Critical/High"
       ],
@@ -123,7 +123,7 @@
       "status": "approved",
       "approver": "human",
       "decided_by": "human:example",
-      "decided_at": "2026-10-29T15:45:09Z",
+      "decided_at": "2026-10-30T06:36:48Z",
       "evidence": [
         "rollback drill passed"
       ],
@@ -133,7 +133,7 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-29T15:45:11Z",
+      "decided_at": "2026-10-30T06:36:50Z",
       "evidence": [
         "commands verified"
       ],
@@ -143,7 +143,7 @@
       "status": "approved",
       "approver": "human",
       "decided_by": "human:example",
-      "decided_at": "2026-10-29T15:45:13Z",
+      "decided_at": "2026-10-30T06:36:53Z",
       "evidence": [
         "patch queued for human review"
       ],
@@ -159,11 +159,11 @@
         "REQ-001",
         "REQ-002"
       ],
+      "deps": [],
       "allowed_files": [
         "product/src/todo.py",
         "product/tests/test_todo.py"
       ],
-      "deps": [],
       "status": "accepted",
       "attempts": 0,
       "artifacts": [
@@ -179,12 +179,12 @@
       "reqs": [
         "REQ-003"
       ],
+      "deps": [
+        "TASK-001"
+      ],
       "allowed_files": [
         "product/src/todo.py",
         "product/tests/test_todo.py"
-      ],
-      "deps": [
-        "TASK-001"
       ],
       "status": "accepted",
       "attempts": 0,
@@ -198,8 +198,8 @@
   "veto_counters": {},
   "human_spec_approved": true,
   "restore_drill_passed": true,
-  "last_event_hash": "bcd62182912746cba1c24a56e0b1190a85fda46bd1c7766e012dbb99a775ca1b",
+  "last_event_hash": "d330cc6b866067c9b3558a8a7e041ac899db7d28d32206fa9a1b7186c7e83889",
   "event_count": 33,
-  "created_at": "2026-10-29T15:44:51Z",
-  "updated_at": "2026-10-29T15:45:13Z"
+  "created_at": "2026-10-30T06:36:30Z",
+  "updated_at": "2026-10-30T06:36:53Z"
 }

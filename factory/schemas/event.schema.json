@@ -13,7 +13,7 @@
     "stage": {"type": "string", "enum": ["init", "s_in", "s00_intake", "s0_vision", "s1_spec", "s15_quarantine", "s2_architecture", "s3_plan", "s4_build", "s5_acceptance", "s6_security", "s7_release", "s8_docs", "s9_learn"]},
     "task_id": {"type": ["string", "null"], "pattern": "^TASK-[A-Z0-9-]+$"},
     "role": {"type": "string", "pattern": "^[0-9]{2}-[a-z0-9-]+$"},
-    "event_type": {"type": "string", "enum": ["INIT", "STAGE_ENTER", "STAGE_EXIT", "TASK_ADD", "TASK_CLAIM", "TASK_DONE", "ARTIFACT_SUBMIT", "VERIFY", "GATE_DECISION", "REWORK", "ESCALATION", "RISK_ACCEPTANCE", "SKILL_INSTALL", "SELF_IMPROVEMENT"]},
+    "event_type": {"type": "string", "enum": ["INIT", "STAGE_RESET", "TASK_ADD", "TASK_CLAIM", "TASK_DONE", "TASK_RESET", "ARTIFACT_SUBMIT", "GATE_DECISION", "VETO", "REWORK", "RISK_ACCEPTANCE", "SKILL_INSTALL"]},
     "model": {
       "type": "object",
       "additionalProperties": false,

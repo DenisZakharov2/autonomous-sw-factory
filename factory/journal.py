@@ -32,9 +32,9 @@ except ImportError:  # pragma: no cover - Windows fallback
 
 GENESIS_PREV_HASH = "0" * 64
 EVENT_TYPES = {
-    "INIT", "STAGE_ENTER", "STAGE_EXIT", "TASK_ADD", "TASK_CLAIM", "TASK_DONE",
-    "ARTIFACT_SUBMIT", "VERIFY", "GATE_DECISION", "REWORK", "ESCALATION",
-    "RISK_ACCEPTANCE", "SKILL_INSTALL", "SELF_IMPROVEMENT",
+    "INIT", "STAGE_RESET", "TASK_ADD", "TASK_CLAIM", "TASK_DONE", "TASK_RESET",
+    "ARTIFACT_SUBMIT", "GATE_DECISION", "VETO", "REWORK", "RISK_ACCEPTANCE",
+    "SKILL_INSTALL",
 }
 VERDICTS = {"INIT_OK", "DRAFT", "PASS", "FAIL", "NEEDS_HUMAN", "ACCEPTED_RISK", "BLOCKED"}
 HUMAN_EXEMPT = {"GATE_DECISION", "RISK_ACCEPTANCE"}
@@ -72,6 +72,21 @@ def _locked(lock_path: Path):
         finally:
             if fcntl is not None:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def run_lock(run_dir: Path):
+    """The single transaction lock for one run.
+
+    Every state mutation must run inside this lock.  `record_event` writes the
+    journal line and updates the in-memory state anchor, but never saves the
+    state itself; the caller saves after the journal write succeeded.  A crash
+    therefore leaves a journal entry that the state has not acknowledged
+    (`verify` reports it) instead of a state that claims an event which was
+    never written.
+    """
+    with _locked(run_dir / "blackbox.lock"):
+        yield
 
 
 def read_events(log_path: Path) -> list[dict[str, Any]]:
@@ -140,17 +155,103 @@ def _check_semantics(event_type: str, role: str, verdict: str, verified_by: str,
         raise JournalError(f"{verdict} requires at least one evidence reference")
 
 
-def _update_state(run_dir: Path, event: dict[str, Any]) -> None:
-    state_path = run_dir / "state.json"
-    if not state_path.exists():
-        return
-    state = json.loads(state_path.read_text(encoding="utf-8"))
-    state["last_event_hash"] = event["hash"]
-    state["event_count"] = event["seq"]
-    state["updated_at"] = event["timestamp_utc"]
-    tmp = state_path.with_name(f".{state_path.name}.{os.getpid()}.tmp")
+def _load_state_file(run_dir: Path) -> dict[str, Any] | None:
+    path = run_dir / "state.json"
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise JournalError(f"state.json: invalid JSON: {exc}") from exc
+    return data if isinstance(data, dict) else None
+
+
+def _save_state_file(run_dir: Path, state: dict[str, Any]) -> None:
+    path = run_dir / "state.json"
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    os.replace(tmp, state_path)
+    os.replace(tmp, path)
+
+
+def record_event(
+    run_dir: Path,
+    state: dict[str, Any] | None,
+    *,
+    stage: str,
+    task_id: str | None,
+    role: str,
+    event_type: str,
+    why: str,
+    for_what: str,
+    action: str,
+    verdict_status: str,
+    verified_by: str,
+    artifacts: Iterable[str | dict[str, Any]] = (),
+    model_tier: str = "tier-2-balanced",
+    model_id: str = "runtime-default",
+    reasoning_effort: str = "medium",
+    reason_code: str = "",
+    evidence: Iterable[str] = (),
+    parent_event_id: str | None = None,
+) -> dict[str, Any]:
+    """Append one event while the caller holds `run_lock`.
+
+    The log line is written first; the in-memory state anchor is updated
+    afterwards.  The caller must persist the state only after this returns.
+    """
+    run_dir = run_dir.resolve()
+    log_path = run_dir / "blackbox.jsonl"
+    evidence_list = [str(x) for x in evidence]
+    _check_semantics(event_type, role, verdict_status, verified_by, evidence_list)
+    prepared_artifacts = _normalise_artifacts(run_dir, artifacts)
+
+    events = read_events(log_path)
+    seq = len(events) + 1
+    prev_hash = events[-1]["hash"] if events else GENESIS_PREV_HASH
+    payload: dict[str, Any] = {
+        "event_id": f"EVT-{seq:06d}",
+        "run_id": run_dir.name,
+        "seq": seq,
+        "timestamp_utc": utc_now(),
+        "stage": stage,
+        "task_id": task_id,
+        "role": role,
+        "event_type": event_type,
+        "model": {
+            "tier": model_tier,
+            "model_id": model_id,
+            "effort": reasoning_effort,
+        },
+        "why": why,
+        "for_what": for_what,
+        "action": action,
+        "artifacts": prepared_artifacts,
+        "verdict": {
+            "status": verdict_status,
+            "verified_by": verified_by,
+            **({"reason_code": reason_code} if reason_code else {}),
+            **({"evidence": evidence_list} if evidence_list else {}),
+        },
+        "parent_event_id": parent_event_id,
+        "prev_hash": prev_hash,
+    }
+    event_hash = compute_event_hash(prev_hash, payload)
+    event = {**payload, "hash": event_hash}
+    validate_against_schema(event, "event.schema.json", f"event {event['event_id']}")
+
+    line = canonical_json(event) + "\n"
+    fd = os.open(log_path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o644)
+    try:
+        os.write(fd, line.encode("utf-8"))
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    if state is not None:
+        state["last_event_hash"] = event_hash
+        state["event_count"] = seq
+        state["updated_at"] = event["timestamp_utc"]
+    write_audit_trail(run_dir)
+    return event
 
 
 def append_event(
@@ -173,57 +274,37 @@ def append_event(
     evidence: Iterable[str] = (),
     parent_event_id: str | None = None,
 ) -> dict[str, Any]:
+    """Standalone append for callers that do not own a transaction.
+
+    Engine mutations must use `run_lock` + `record_event`; this wrapper exists
+    for one-off writers (quarantine installs) and keeps the old behaviour.
+    """
     run_dir = run_dir.resolve()
     run_dir.mkdir(parents=True, exist_ok=True)
-    log_path = run_dir / "blackbox.jsonl"
-    evidence_list = [str(x) for x in evidence]
-    _check_semantics(event_type, role, verdict_status, verified_by, evidence_list)
-    prepared_artifacts = _normalise_artifacts(run_dir, artifacts)
-
-    with _locked(run_dir / "blackbox.lock"):
-        events = read_events(log_path)
-        seq = len(events) + 1
-        prev_hash = events[-1]["hash"] if events else GENESIS_PREV_HASH
-        payload: dict[str, Any] = {
-            "event_id": f"EVT-{seq:06d}",
-            "run_id": run_dir.name,
-            "seq": seq,
-            "timestamp_utc": utc_now(),
-            "stage": stage,
-            "task_id": task_id,
-            "role": role,
-            "event_type": event_type,
-            "model": {
-                "tier": model_tier,
-                "model_id": model_id,
-                "effort": reasoning_effort,
-            },
-            "why": why,
-            "for_what": for_what,
-            "action": action,
-            "artifacts": prepared_artifacts,
-            "verdict": {
-                "status": verdict_status,
-                "verified_by": verified_by,
-                **({"reason_code": reason_code} if reason_code else {}),
-                **({"evidence": evidence_list} if evidence_list else {}),
-            },
-            "parent_event_id": parent_event_id,
-            "prev_hash": prev_hash,
-        }
-        event_hash = compute_event_hash(prev_hash, payload)
-        event = {**payload, "hash": event_hash}
-        validate_against_schema(event, "event.schema.json", f"event {event['event_id']}")
-
-        line = canonical_json(event) + "\n"
-        fd = os.open(log_path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o644)
-        try:
-            os.write(fd, line.encode("utf-8"))
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        _update_state(run_dir, event)
-        write_audit_trail(run_dir)
+    with run_lock(run_dir):
+        state = _load_state_file(run_dir)
+        event = record_event(
+            run_dir,
+            state,
+            stage=stage,
+            task_id=task_id,
+            role=role,
+            event_type=event_type,
+            why=why,
+            for_what=for_what,
+            action=action,
+            verdict_status=verdict_status,
+            verified_by=verified_by,
+            artifacts=artifacts,
+            model_tier=model_tier,
+            model_id=model_id,
+            reasoning_effort=reasoning_effort,
+            reason_code=reason_code,
+            evidence=evidence,
+            parent_event_id=parent_event_id,
+        )
+        if state is not None:
+            _save_state_file(run_dir, state)
         return event
 
 

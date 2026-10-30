@@ -56,3 +56,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install build
           python -m build
+      - name: Test the built sdist in a clean environment
+        run: |
+          python -m venv /tmp/sdist-venv
+          /tmp/sdist-venv/bin/pip install --upgrade pip pytest
+          /tmp/sdist-venv/bin/pip install dist/*.tar.gz
+          mkdir -p /tmp/sdist-src
+          tar -xzf dist/*.tar.gz -C /tmp/sdist-src --strip-components=1
+          cd /tmp/sdist-src
+          /tmp/sdist-venv/bin/python -m pytest -q

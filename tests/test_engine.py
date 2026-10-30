@@ -38,6 +38,27 @@ def _file(run, relative, text="x\n"):
     return path
 
 
+ACCEPTED_BEFORE_BUILD = [
+    "s00_intake", "s0_vision", "s1_spec", "s15_quarantine", "s2_architecture", "s3_plan",
+]
+
+
+def _advance_to(run, target):
+    """Mark every earlier stage accepted so the target becomes current."""
+    from factory.config import load_pipeline
+
+    pipeline = load_pipeline()
+    order = {stage["id"]: stage["order"] for stage in pipeline["stages"]}
+    state = load_state(run)
+    for stage in pipeline["stages"]:
+        if stage["order"] < order[target]:
+            state["stage_status"][stage["id"]] = "accepted"
+            state["gate_status"][stage["gate"]["id"]]["status"] = "approved"
+    state["stage_status"][target] = "in_progress"
+    state["current_stage"] = target
+    save_state(run, state)
+
+
 def test_gate_reject_rejects_foreign_approver(nano_run):
     run, _, _ = nano_run
     with pytest.raises(RunError, match="requires a human approver"):
@@ -59,6 +80,7 @@ def test_gate_reject_accepts_declared_human(nano_run):
 
 def test_role_gate_reject_requires_the_declared_role(nano_run):
     run, _, _ = nano_run
+    _advance_to(run, "s2_architecture")
     with pytest.raises(RunError, match="must be decided by 02-independent-verifier"):
         gate_reject("run-01", gate_id="gate_s2", approver="12-fullstack-developer",
                     evidence=["rogue"], root=run.parent)
@@ -69,6 +91,7 @@ def test_role_gate_reject_requires_the_declared_role(nano_run):
 def test_task_submit_rejects_foreign_owner(nano_run):
     run, _, _ = nano_run
     _plan_run(run)
+    _advance_to(run, "s4_build")
     _file(run, "product/src/todo.py")
     task_claim("run-01", "TASK-001", "12-fullstack-developer", root=run.parent)
     with pytest.raises(RunError, match="is owned by 12-fullstack-developer"):
@@ -80,6 +103,7 @@ def test_task_submit_rejects_foreign_owner(nano_run):
 def test_task_submit_rejects_file_outside_allowed_files(nano_run):
     run, _, _ = nano_run
     _plan_run(run)
+    _advance_to(run, "s4_build")
     _file(run, "artifacts/rogue.md")
     task_claim("run-01", "TASK-001", "12-fullstack-developer", root=run.parent)
     with pytest.raises(RunError, match="outside allowed_files"):
@@ -91,6 +115,7 @@ def test_task_submit_rejects_file_outside_allowed_files(nano_run):
 def test_task_submit_accepts_allowed_file_and_deliverable(nano_run):
     run, _, _ = nano_run
     _plan_run(run)
+    _advance_to(run, "s4_build")
     _file(run, "product/src/todo.py")
     _file(run, "tasks/TASK-001/deliverable.md")
     task_claim("run-01", "TASK-001", "12-fullstack-developer", root=run.parent)
@@ -112,9 +137,12 @@ def test_submit_work_rejects_artifact_of_another_role(nano_run):
 
 def test_submit_work_accepts_owned_artifact(nano_run):
     run, _, _ = nano_run
-    _file(run, "artifacts/interview-brief.md")
+    _file(run, "artifacts/interview-brief.md",
+          "## 1. Цель (JTBD)\n\nЦель.\n## 2. Out-of-Scope\n\nНет.\n"
+          "## 3. Требования\n\nТребование.\n## 4. Профиль\n\nПрофиль.\n")
+    _file(run, "artifacts/GLOSSARY.md", "## Термины\n\nТермин.\n")
     submit_work("run-01", stage_id="s00_intake", role="01-smart-interviewer",
-                artifacts=["artifacts/interview-brief.md"], root=run.parent)
+                artifacts=["artifacts/interview-brief.md", "artifacts/GLOSSARY.md"], root=run.parent)
     assert load_state(run)["stage_status"]["s00_intake"] == "review"
 
 
@@ -138,6 +166,7 @@ def test_task_commands_validate_task_id(nano_run, task_id):
 def test_task_reject_records_reason(nano_run):
     run, _, _ = nano_run
     _plan_run(run)
+    _advance_to(run, "s4_build")
     _file(run, "product/src/todo.py")
     task_claim("run-01", "TASK-001", "12-fullstack-developer", root=run.parent)
     task_submit("run-01", "TASK-001", "12-fullstack-developer", ["product/src/todo.py"],
@@ -147,11 +176,6 @@ def test_task_reject_records_reason(nano_run):
     assert task["status"] == "pending"
     assert task["reject_reasons"] == ["test missing"]
     json.dumps(task)  # the state schema accepts the recorded reason list
-
-
-ACCEPTED_BEFORE_BUILD = [
-    "s00_intake", "s0_vision", "s1_spec", "s15_quarantine", "s2_architecture", "s3_plan",
-]
 
 
 def test_gate_reject_returns_to_rework_stage(nano_run):
@@ -207,12 +231,13 @@ def test_gate_reject_escalates_after_max_attempts(nano_run):
     assert order["action"] == "blocked"
     assert order["stage"] == "s00_intake"
     assert "escalated" in order["instructions"]
-    assert order["next_command"].startswith("factory status")
+    assert order["next_command"].startswith("factory gate accept-risk")
 
 
 def test_escalated_task_blocks_the_build_stage(nano_run):
     run, _, _ = nano_run
     _plan_run(run)
+    _advance_to(run, "s4_build")
     _file(run, "product/src/todo.py")
     for attempt in range(3):
         task_claim("run-01", "TASK-001", "12-fullstack-developer", root=run.parent)

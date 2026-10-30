@@ -126,11 +126,21 @@ def scan_skill(
 
 
 def hash_skill_dir(path: Path) -> str:
-    """Hash relative paths plus file bytes; order is deterministic."""
+    """Hash relative paths plus file bytes; order is deterministic.
+
+    Symlinks are refused: a skill must be a self-contained directory, and a
+    link could point at ~/.ssh or any file outside the quarantine.
+    """
     import hashlib
 
     digest = hashlib.sha256()
-    files = sorted(p for p in path.rglob("*") if p.is_file())
+    files = []
+    for item in path.rglob("*"):
+        if item.is_symlink():
+            raise QuarantineError(f"symlink forbidden in skill directory: {item}")
+        if item.is_file() and "__pycache__" not in item.parts:
+            files.append(item)
+    files.sort()
     if not files:
         raise QuarantineError(f"skill directory is empty: {path}")
     for file in files:
@@ -231,6 +241,28 @@ def verify_lock(path: Path, skills_root: Path | None = None) -> list[str]:
     return errors
 
 
+def remove_lock_entry(path: Path, name: str) -> None:
+    if not path.exists():
+        return
+    data = load_lock(path)
+    remaining = [item for item in data.get("skills", []) if item.get("name") != name]
+    if len(remaining) == len(data.get("skills", [])):
+        return
+    data["skills"] = remaining
+    write_lock(path, data)
+
+
+def purge_quarantined_skill(skill_dir: Path) -> bool:
+    """Delete a rejected skill only when it lives inside the quarantine area."""
+    parts = set(skill_dir.resolve().parts)
+    if ".quarantine" not in parts:
+        return False
+    import shutil
+
+    shutil.rmtree(skill_dir, ignore_errors=True)
+    return True
+
+
 def quarantine_skill(
     skill_dir: Path,
     *,
@@ -249,6 +281,7 @@ def quarantine_skill(
         skill_dir, scanner=scanner, min_coverage=min_coverage, no_llm=no_llm, runner=runner
     )
     action = decide(exit_code, result, min_coverage)
+    effective_name = name or result.skill_name or skill_dir.name
     entry = None
     if action == AUTO_ALLOW:
         try:
@@ -256,8 +289,11 @@ def quarantine_skill(
         except ValueError:
             relative = Path(skill_dir)
         entry = make_lock_entry(
-            name=name, pack=pack, commit=commit, path=str(relative), skill_dir=skill_dir,
+            name=effective_name, pack=pack, commit=commit, path=str(relative), skill_dir=skill_dir,
             license=license, model_invocable=True, result=result, approved_by=approved_by,
         )
         add_lock_entry(lock_path, entry)
+    elif action == REJECT_AND_PURGE:
+        remove_lock_entry(lock_path, effective_name)
+        purge_quarantined_skill(skill_dir)
     return action, result, entry

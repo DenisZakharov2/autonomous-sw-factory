@@ -20,8 +20,14 @@ def markdown_files() -> list[Path]:
 
 def test_version_is_single_source():
     assert (ROOT / "VERSION").read_text(encoding="utf-8").strip() == __version__
-    assert __version__ in (ROOT / "README.md").read_text(encoding="utf-8")
-    assert __version__ in (ROOT / "README.en.md").read_text(encoding="utf-8")
+    for name in ("README.md", "README.en.md", "DESIGN.md", "docs/quickstart.md"):
+        assert __version__ in (ROOT / name).read_text(encoding="utf-8"), name
+
+
+def test_docs_do_not_claim_an_older_current_version():
+    for name in ("DESIGN.md", "docs/metrics.md", "docs/threat-model.md"):
+        text = (ROOT / name).read_text(encoding="utf-8")
+        assert "0.1.0" not in text, f"{name} still calls 0.1.0 current"
 
 
 def test_license_is_complete_mit():

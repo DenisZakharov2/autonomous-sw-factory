@@ -203,7 +203,7 @@ factory/                 # движок и конфиги
   budget.yaml            # лимиты и поведение
 tests/                   # инварианты, CLI, конкурентность, схемы, рантайм
 examples/nano-todo/      # эталонный прогон
-docs/                    # quickstart, runtime, checkpoints, threat model, metrics, adapters
+docs/                    # quickstart, runtime, checkpoints, eval-plan, threat model, metrics, adapters
 ```
 
 ## Ограничения

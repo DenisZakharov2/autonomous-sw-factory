@@ -10,6 +10,7 @@ include PIPELINE.md
 include ROSTER.md
 include AGENTS.md
 include SECURITY.md
+include skills-lock.json
 include CONTRIBUTING.md
 recursive-include docs *
 recursive-include examples *

@@ -27,13 +27,13 @@ eval/cases/<case-id>/
 закрытые гейты, запускаемые тесты продукта. Текст сравнивать нельзя — он
 зависит от модели.
 
-## Команды
+## Команды (появятся в 0.3.0; сейчас их в CLI нет)
 
-```bash
-factory eval --cases eval/cases --executor fake --json
-factory eval --cases eval/cases --update-baseline eval/baseline.json
-factory compare --left run-a --right run-b [--json]
-```
+| Команда | Назначение |
+| :--- | :--- |
+| `factory eval --cases eval/cases --executor fake --json` | Прогнать кейсы, сравнить с baseline, вернуть код 1 при регрессии |
+| `factory eval --cases eval/cases --update-baseline eval/baseline.json` | Перезаписать эталон после осознанного изменения |
+| `factory compare --left run-a --right run-b [--json]` | Дельта двух прогонов: стадии, шаги, токены, стоимость, хеши артефактов |
 
 `factory eval` прогоняет каждый кейс в отдельном `runs/<case-id>-<stamp>/`,
 считает метрики и сверяет с baseline. Порог регрессии по умолчанию: шаги не

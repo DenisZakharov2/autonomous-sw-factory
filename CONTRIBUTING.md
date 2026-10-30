@@ -67,6 +67,14 @@ PR.
 - [ ] No secrets, `.env`, `runs/` or generated caches in the diff.
 - [ ] Docs updated if a command, stage, role or artifact changed.
 
+## Documentation
+
+`tests/test_docs.py` reads every fenced code block and treats a line starting
+with `factory <subcommand>` as a documented command that must exist in the CLI
+parser. A plan or roadmap that names a future command inside a fence fails the
+suite; describe planned commands in a table or as inline code until the parser
+learns them.
+
 ## Style
 
 - Python 3.10+, stdlib where reasonable; `PyYAML` and `jsonschema` are the only

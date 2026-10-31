@@ -14,7 +14,8 @@ def test_reference_run_is_complete(monkeypatch):
 
 def test_reference_run_state_is_closed(monkeypatch):
     state = json.loads((EXAMPLE / "state.json").read_text(encoding="utf-8"))
-    assert state["event_count"] == 33
+    # 33 before the verifier step; +9 VERIFY and +7 report submissions.
+    assert state["event_count"] == 49
     assert all(status == "accepted" for status in state["stage_status"].values())
     assert all(gate["status"] == "approved" for gate in state["gate_status"].values())
     assert state["human_spec_approved"] is True

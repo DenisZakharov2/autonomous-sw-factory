@@ -2,6 +2,7 @@
   "schema_version": "1.0.0",
   "run_id": "nano-todo",
   "mode": "nano",
+  "verification_policy": "role",
   "current_stage": null,
   "stage_status": {
     "s_in": "accepted",
@@ -23,7 +24,7 @@
       "status": "approved",
       "approver": "system",
       "decided_by": "system:greenfield",
-      "decided_at": "2026-10-30T06:36:30Z",
+      "decided_at": "2026-10-31T21:57:58Z",
       "evidence": [
         "greenfield mode: s_in not applicable"
       ],
@@ -33,7 +34,7 @@
       "status": "approved",
       "approver": "human",
       "decided_by": "human:example",
-      "decided_at": "2026-10-30T06:36:31Z",
+      "decided_at": "2026-10-31T21:58:00Z",
       "evidence": [
         "interview accepted"
       ],
@@ -43,7 +44,7 @@
       "status": "approved",
       "approver": "human",
       "decided_by": "human:example",
-      "decided_at": "2026-10-30T06:36:33Z",
+      "decided_at": "2026-10-31T21:58:01Z",
       "evidence": [
         "vision accepted"
       ],
@@ -53,7 +54,7 @@
       "status": "approved",
       "approver": "human",
       "decided_by": "human:example",
-      "decided_at": "2026-10-30T06:36:34Z",
+      "decided_at": "2026-10-31T21:58:02Z",
       "evidence": [
         "spec-human approved"
       ],
@@ -63,9 +64,10 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-30T06:36:35Z",
+      "decided_at": "2026-10-31T21:58:03Z",
       "evidence": [
-        "no external skills"
+        "no external skills",
+        "VERIFY EVT-000010"
       ],
       "attempts": 0
     },
@@ -73,9 +75,10 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-30T06:36:37Z",
+      "decided_at": "2026-10-31T21:58:05Z",
       "evidence": [
-        "architecture frozen"
+        "architecture frozen",
+        "VERIFY EVT-000014"
       ],
       "attempts": 0
     },
@@ -83,9 +86,10 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-30T06:36:39Z",
+      "decided_at": "2026-10-31T21:58:07Z",
       "evidence": [
-        "plan imported"
+        "plan imported",
+        "VERIFY EVT-000018"
       ],
       "attempts": 0
     },
@@ -93,9 +97,10 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-30T06:36:42Z",
+      "decided_at": "2026-10-31T21:58:10Z",
       "evidence": [
-        "all tasks accepted"
+        "all tasks accepted",
+        "VERIFY EVT-000032"
       ],
       "attempts": 0
     },
@@ -103,9 +108,10 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-30T06:36:44Z",
+      "decided_at": "2026-10-31T21:58:12Z",
       "evidence": [
-        "100% PASS"
+        "100% PASS",
+        "VERIFY EVT-000036"
       ],
       "attempts": 0
     },
@@ -113,9 +119,10 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-30T06:36:46Z",
+      "decided_at": "2026-10-31T21:58:13Z",
       "evidence": [
-        "no Critical/High"
+        "no Critical/High",
+        "VERIFY EVT-000040"
       ],
       "attempts": 0
     },
@@ -123,7 +130,7 @@
       "status": "approved",
       "approver": "human",
       "decided_by": "human:example",
-      "decided_at": "2026-10-30T06:36:48Z",
+      "decided_at": "2026-10-31T21:58:15Z",
       "evidence": [
         "rollback drill passed"
       ],
@@ -133,9 +140,10 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-30T06:36:50Z",
+      "decided_at": "2026-10-31T21:58:16Z",
       "evidence": [
-        "commands verified"
+        "commands verified",
+        "VERIFY EVT-000046"
       ],
       "attempts": 0
     },
@@ -143,7 +151,7 @@
       "status": "approved",
       "approver": "human",
       "decided_by": "human:example",
-      "decided_at": "2026-10-30T06:36:53Z",
+      "decided_at": "2026-10-31T21:58:18Z",
       "evidence": [
         "patch queued for human review"
       ],
@@ -198,8 +206,8 @@
   "veto_counters": {},
   "human_spec_approved": true,
   "restore_drill_passed": true,
-  "last_event_hash": "d330cc6b866067c9b3558a8a7e041ac899db7d28d32206fa9a1b7186c7e83889",
-  "event_count": 33,
-  "created_at": "2026-10-30T06:36:30Z",
-  "updated_at": "2026-10-30T06:36:53Z"
+  "last_event_hash": "b14254f77d7841b7d64f9afaeed8d57179eb27b90703539af7d649b10e43ae05",
+  "event_count": 49,
+  "created_at": "2026-10-31T21:57:58Z",
+  "updated_at": "2026-10-31T21:58:18Z"
 }

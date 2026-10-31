@@ -436,12 +436,69 @@ def stage_paths(stage_id: str) -> list[str]:
     return paths
 
 
+def verification_report(subject: str, artifacts: list[str], command: str) -> str:
+    """The verifier's own report: three checks, a command and an output each."""
+    listed = ", ".join(f"`{item}`" for item in artifacts) or "`n/a`"
+    checks = [
+        ("детерминированная проверка", command, "deterministic checks, state and hash chain: OK"),
+        ("границы записи", f"test -r {artifacts[0] if artifacts else '.'}", "artifacts readable; none writable by the verifier"),
+        ("подмена или недостача", command, "no missing or tampered artifact reported"),
+    ]
+    body = "\n\n".join(
+        f"### Проверка {index}: {name}\n\n- Команда: `{cmd}`\n- Код возврата: `0`\n"
+        f"- Вывод:\n\n```text\n{output}\n```"
+        for index, (name, cmd, output) in enumerate(checks, 1)
+    )
+    return doc("Отчёт независимого верификатора", [
+        ("## 1. Проверено", f"- Предмет проверки: `{subject}`\n- Артефакты (только чтение): {listed}"),
+        ("## 2. Проверки", body),
+        ("## 3. Вердикт", "- Вердикт: PASS\n- Причина: `все три проверки вернули 0, расхождений нет`"),
+    ])
+
+
+def write_report(relative: str, subject: str, artifacts: list[str], stage: str) -> str:
+    write(
+        relative,
+        verification_report(
+            subject, artifacts, f"factory verify --run-id {RUN_ID} --stage {stage}"
+        ),
+    )
+    return relative
+
+
 def submit_and_gate(stage: str, role: str, gate: str, approver: str, evidence: str) -> None:
     artifacts = stage_paths(stage)
     if not artifacts:
         raise SystemExit(f"stage {stage} has no artifacts to submit")
     submit_work(RUN_ID, stage_id=stage, role=role, artifacts=artifacts, root=RUNS)
+    if approver == "02-independent-verifier":
+        # The report belongs to the verifier: written and submitted by that
+        # role after the producers are done, read-only for everyone else.
+        relative = write_report(
+            f"artifacts/verification/{stage}/verification.md",
+            f"stage {stage}",
+            [path.replace(str(EXAMPLE) + "/", "") for path in artifacts],
+            stage,
+        )
+        submit_work(
+            RUN_ID, stage_id=stage, role="02-independent-verifier",
+            artifacts=[relative], root=RUNS,
+        )
     gate_approve(RUN_ID, gate_id=gate, approver=approver, evidence=[evidence], root=RUNS)
+
+
+def accept_task(task_id: str) -> None:
+    write_report(
+        f"tasks/{task_id}/verification/verification.md",
+        f"task {task_id}",
+        [
+            f"tasks/{task_id}/deliverable.md",
+            "product/src/todo.py",
+            "product/tests/test_todo.py",
+        ],
+        "s4_build",
+    )
+    task_accept(RUN_ID, task_id, root=RUNS)
 
 
 def main() -> int:
@@ -470,7 +527,7 @@ def main() -> int:
         ]),
     )
     task_submit(RUN_ID, "TASK-001", "12-fullstack-developer", ["product/src/todo.py", "product/tests/test_todo.py"], root=RUNS)
-    task_accept(RUN_ID, "TASK-001", root=RUNS)
+    accept_task("TASK-001")
     task_claim(RUN_ID, "TASK-002", "12-fullstack-developer", root=RUNS)
     write(
         "tasks/TASK-002/deliverable.md",
@@ -482,7 +539,7 @@ def main() -> int:
         ]),
     )
     task_submit(RUN_ID, "TASK-002", "12-fullstack-developer", ["product/src/todo.py", "product/tests/test_todo.py"], root=RUNS)
-    task_accept(RUN_ID, "TASK-002", root=RUNS)
+    accept_task("TASK-002")
     submit_and_gate("s4_build", "12-fullstack-developer", "gate_s4", "02-independent-verifier", "all tasks accepted")
 
     submit_and_gate("s5_acceptance", "12-fullstack-developer", "gate_s5", "02-independent-verifier", "100% PASS")

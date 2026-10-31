@@ -122,10 +122,36 @@ def test_a_new_run_opts_into_role_verification(quarantine_run):
 
 
 def test_a_historical_run_without_the_policy_still_verifies(tmp_path, monkeypatch):
-    """`examples/nano-todo` was recorded before the verifier step existed."""
+    """A run recorded before the verifier step keeps verifying untouched.
+
+    The committed example now demonstrates the new flow, so the historical
+    shape is rebuilt from it: no policy, no reports, no VERIFY events, and a
+    journal re-chained without them.
+    """
     target = tmp_path / "nano-todo"
     shutil.copytree(EXAMPLE, target)
     monkeypatch.setenv("FACTORY_ROOT", str(target))
+    state = json.loads((target / "state.json").read_text(encoding="utf-8"))
+    state.pop("verification_policy", None)
+    (target / "state.json").write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    for report in target.rglob("verification/verification.md"):
+        report.unlink()
+    events = [
+        event
+        for event in read_events(target / "blackbox.jsonl")
+        if event["event_type"] != "VERIFY"
+        and not (
+            event["event_type"] == "ARTIFACT_SUBMIT"
+            and event["role"] == VERIFIER
+        )
+    ]
+    for event in events:
+        event["artifacts"] = [
+            item
+            for item in event.get("artifacts") or []
+            if not str(item.get("path", "")).endswith("verification/verification.md")
+        ]
+    _rechain(target, events)
     assert "verification_policy" not in json.loads(
         (target / "state.json").read_text(encoding="utf-8")
     )

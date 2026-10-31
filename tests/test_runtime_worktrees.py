@@ -134,7 +134,7 @@ def test_two_tasks_build_in_separate_worktrees_and_merge(build_env):
     for task_id, paths in executor.extras.items():
         worktree = executor.worktrees[task_id]
         for path in paths:
-            assert path.startswith(worktree) or path.endswith("runtime/agent"), (task_id, path)
+            assert path.startswith(worktree) or Path(path).as_posix().endswith("runtime/agent"), (task_id, path)
         assert str(run_dir) not in paths
     assert (run_dir / "tasks" / "TASK-A" / "deliverable.md").is_file()
     state = load_state(run_dir)

@@ -17,6 +17,7 @@ import copy
 import hashlib
 import os
 import shutil
+import stat
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -199,6 +200,22 @@ class ParallelBatch:
         return any(item.ok for item in self.outcomes)
 
 
+def _force_rmtree(path: Path) -> None:
+    """Remove a tree even when git marked files read-only (Windows)."""
+
+    def onerror(func, target, exc_info):
+        try:
+            os.chmod(target, stat.S_IWRITE)
+        except OSError:
+            pass
+        try:
+            func(target)
+        except OSError:
+            pass
+
+    shutil.rmtree(path, onerror=onerror)
+
+
 class WorktreeWorkspace:
     """A seed repository plus one detached worktree per task."""
 
@@ -228,7 +245,7 @@ class WorktreeWorkspace:
         path = self.trees / task_id
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists():
-            shutil.rmtree(path)
+            _force_rmtree(path)
         _git(self.seed, "worktree", "add", "--detach", str(path), self.commit)
         self._created.append(path)
         return path
@@ -342,9 +359,10 @@ class WorktreeWorkspace:
             if path == self.base and self.seed.is_dir():
                 # Keep the seed when a caller wants to inspect evidence; the
                 # next prepare() removes it.
-                shutil.rmtree(path, ignore_errors=True)
+                _force_rmtree(path)
                 break
-            shutil.rmtree(path, ignore_errors=True)
+            if path.exists():
+                _force_rmtree(path)
         self._created.clear()
 
 

@@ -786,6 +786,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows consoles default to a legacy code page (cp1252); the CLI prints
+    # Russian text and JSON with non-ASCII, so pin UTF-8 on the streams.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8")
+            except (OSError, ValueError):  # pragma: no cover - exotic stream
+                pass
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

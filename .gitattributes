@@ -1,0 +1,6 @@
+# Keep the committed reference run byte-identical on Windows: its journal
+# hashes the files, and Git's autocrlf would turn LF into CRLF on checkout.
+* text=auto eol=lf
+*.tar.gz binary
+*.png binary
+*.ico binary

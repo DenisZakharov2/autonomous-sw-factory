@@ -431,10 +431,11 @@ def validate_artifact(
     tasks = tasks or {}
     if spec.get("directory"):
         path = artifact_path(run_dir, spec)
+        relative = path.relative_to(run_dir).as_posix() if _within(path, run_dir) else path.name
         if not path.exists() or not path.is_dir():
-            errors.append(f"missing directory: {path}")
+            errors.append(f"missing directory: {relative}")
         elif not any(item.is_file() for item in path.rglob("*")):
-            errors.append(f"directory is empty: {path}")
+            errors.append(f"directory is empty: {relative}")
         return errors
     if spec.get("per_task"):
         owners = [task for task in tasks.values() if task.get("stage") == spec.get("stage")]

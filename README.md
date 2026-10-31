@@ -89,7 +89,7 @@ factory verify --run-id nano-todo --stage s9_learn --require-gate
 
 - **22 ролевые карты** с восемью разделами: назначение, входы, процедура, выходы, Definition of Done, вето, запреты, эскалация.
 - **13 стадий** от `s_in`/`s00_intake` до `s9_learn` с явными гейтами.
-- **Исполнимый Python-движок**: `init`, `next`, `submit`, `gate`, `verify`, `task`, `quarantine`, `trace`, `metrics`, `doctor`.
+- **Исполнимый Python-движок**: `init`, `next`, `submit`, `gate`, `verify`, `task`, `quarantine`, `trace`, `metrics`, `usage`, `doctor`.
 - **Рантайм `factory run`**: задание → исполнитель → проверка → сдача → гейт; `pending_artifacts` и `next_role` в каждом задании, `usage.jsonl` с разбивкой токенов, evidence и стоп-гарды (подмена состояния, запись вне прогона, бюджет). Подключения: `fake` (без модели), `hermes`, `opencode`; реальные CLI запускаются в `bwrap` по умолчанию, управляющая плоскость read-only. `--parallel-tasks N` собирает независимые задачи `s4_build` в отдельных git worktree — см. [`docs/runtime.md`](docs/runtime.md).
 - **Подписанные контрольные точки**: `factory sign` кладёт HMAC-SHA256 головы журнала в store вне `runs/`; `factory verify` отличает `stale` от `rolled_back` и `diverged`, то есть усечение журнала и пересчёт всей цепочки — см. [`docs/checkpoints.md`](docs/checkpoints.md).
 - **Внешний eval-набор и сравнение прогонов**: `factory eval` гоняет фиксированные кейсы (`nano-todo`, `nano-product-mini`, `standard-mini`, `brownfield-proxy-mini`, `product-mini`), сверяет инварианты и числа с baseline и падает при росте шагов, падении событий или росте токенов больше чем на 10 %; `factory compare` показывает дельту стадий, стоимости и хешей артефактов двух прогонов — см. [`docs/eval.md`](docs/eval.md).
@@ -154,6 +154,7 @@ factory verify --run-id nano-todo --stage s9_learn --require-gate
 | `factory eval --cases eval/cases [--executor fake] [--json]` | Прогнать eval-кейсы, сверить инварианты и baseline; код `1` при регрессии |
 | `factory eval --cases eval/cases --update-baseline eval/baseline.json` | Перезаписать эталон (только для зелёных кейсов) |
 | `factory compare --left ID --right ID [--json]` | Дельта двух прогонов: стадии, шаги, токены, стоимость, хеши артефактов |
+| `factory usage --run-id ID [--by stage\|task\|role] [--json]` | Расход из `runtime/usage.jsonl` по стадиям, задачам или ролям; `null` не превращается в ноль |
 | `factory budget [--run-id ID]` | Лимиты попыток, режимный бюджет, израсходованные попытки |
 | `factory artifacts` | Реестр артефактов |
 

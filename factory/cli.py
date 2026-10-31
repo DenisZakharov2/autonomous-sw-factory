@@ -537,6 +537,21 @@ def cmd_compare(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_usage(args: argparse.Namespace) -> int:
+    from .usage_report import build_usage_report, format_usage
+
+    report, warning = build_usage_report(
+        args.run_id, group_by=args.group_by, root=_runs_root(args)
+    )
+    if warning:
+        print(warning, file=sys.stderr)
+    if args.json:
+        _print_json(report)
+    else:
+        print(format_usage(report))
+    return 0
+
+
 def cmd_artifacts(args: argparse.Namespace) -> int:
     registry = load_artifacts()["artifacts"]
     rows = []
@@ -711,6 +726,21 @@ def build_parser() -> argparse.ArgumentParser:
     compare.add_argument("--runs-root")
     compare.add_argument("--json", action="store_true")
     compare.set_defaults(func=cmd_compare)
+
+    usage = sub.add_parser(
+        "usage", help="read-only spend report from a run's runtime/usage.jsonl"
+    )
+    usage.add_argument("--run-id", required=True)
+    usage.add_argument("--runs-root")
+    usage.add_argument(
+        "--by",
+        dest="group_by",
+        default="stage",
+        choices=["stage", "task", "role"],
+        help="group by pipeline stage (default), task id or role",
+    )
+    usage.add_argument("--json", action="store_true")
+    usage.set_defaults(func=cmd_usage)
 
     submit = sub.add_parser("submit", help="submit artifacts for a stage")
     submit.add_argument("--run-id", required=True)

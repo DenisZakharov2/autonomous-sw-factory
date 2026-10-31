@@ -3,6 +3,30 @@
 All notable changes are recorded here. From `1.0.0` the project follows
 Semantic Versioning.
 
+## [Unreleased]
+
+### Added
+
+- **`factory usage --run-id ID [--by stage|task|role] [--json]`** — read-only
+  отчёт по `runs/<id>/runtime/usage.jsonl`. Поля: `steps`, `api_calls`,
+  `prompt_chars`, `tokens_in`, `cache_read`, `tokens_out`, `tokens`,
+  `tokens_billable`, `seconds`, `usd`. Стадии идут в порядке `pipeline.yaml`,
+  `--by task` кладёт строки без задачи в `-`, `--by role` сортирует роли.
+  `null` не превращается в ноль: если запись не содержит поле, итог поля —
+  `null`. Битая строка JSONL пропускается; пустой или отсутствующий ledger
+  даёт нули и предупреждение в stderr; неизвестный `run_id` — код `1`.
+  `usd` при `0.0`/`null` подписан «usd не измерен», а не выдаётся за цену.
+  Документация — `docs/runtime.md` §5.8 и `docs/metrics.md`.
+
+### Changed
+
+- **Зафиксирована дельта brownfield `fake2` → `real2`.** `factory compare`:
+  шаги 17/17, события 38/38, артефакты 173 same / 44 changed / 1 only left /
+  175 only right. Разбор стоимости по стадиям и задачам, топ-5 драйверов и
+  три кандидата на удешевление — в `handoff.md`, раздел «Стоимость
+  brownfield». Промпты в этой сессии не менялись: эффект удешевления без
+  реального прогона не доказан.
+
 ## [1.0.1] — 2026-10-31
 
 ### Added

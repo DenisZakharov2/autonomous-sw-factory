@@ -225,7 +225,8 @@ next_action ─┬─ complete ────────────────�
 - **Цена в USD остаётся `null`.** `models.yaml` не содержит вендорских цен;
   `estimated_cost_usd` provider'а в этих прогонах — 0.0 при
   `cost_status: unknown`, поэтому USD-бюджет не проверяется, а не считается
-  нулевым.
+  нулевым. Разрез того же журнала по стадиям, задачам и ролям — команда
+  `factory usage` (§5.8).
 
 ### 5.4 Evidence для гейта
 
@@ -310,6 +311,49 @@ re-records: 1 artifact record(s) changed after acceptance (s1_spec: 1)
 каталога) и файлы задачами (`TASK_DONE`). Если менялся файл внутри такого
 каталога, `verify` назовёт каталог, пока не будет перезаписан и он: обе
 записи — отдельные события, и обе видны аудитору.
+
+### 5.8 Отчёт о расходе: `factory usage`
+
+`runtime/usage.jsonl` — единственный источник команды; журнал, `state.json` и
+артефакты она не читает и не меняет.
+
+```bash
+factory usage --run-id ID [--by stage|task|role] [--json]
+```
+
+Поля группы и итога: `steps`, `api_calls`, `prompt_chars`, `tokens_in`,
+`cache_read`, `tokens_out`, `tokens` (провайдерский `tokens_total`),
+`tokens_billable` (`tokens_in + tokens_out`), `seconds`, `usd`.
+
+- по умолчанию группы — стадии в порядке `pipeline.yaml`; стадии, которых нет
+  в конфиге, идут после них по алфавиту;
+- `--by task` группирует по `task_id`, строки без задачи попадают в `-`;
+- `--by role` сортирует роли по алфавиту.
+
+`null` означает «не измерено» и не превращается в ноль: если хотя бы одна
+запись группы не содержит поле, итог этого поля — `null`. `0` — измеренный
+ноль. Битая строка JSONL пропускается; пустой или отсутствующий
+`usage.jsonl` даёт нули и предупреждение в stderr, а не traceback. Неизвестный
+`run_id` — обычная ошибка CLI с кодом `1`, как у `factory metrics`.
+
+`usd` пишется провайдером; в замерах `estimated_cost_usd = 0.0` при
+`cost_status: unknown`, поэтому текстовая таблица подписывает такие нули
+«usd не измерен». Это не цена.
+
+```text
+run: brownfield-proxy-mini-brownfield-real2  group_by: stage
+KEY              STEPS  API  PROMPT      IN    CACHE     OUT   TOKENS  BILLABLE      SEC   USD
+s_in                 2   18   20613   44809   274944   10473   330226     55282    90.13  0.00
+...
+TOTAL               17  155  194916  410959  3032064  117768  3560791    528727  1032.62  0.00
+usd не измерен: 0.0 или null — это не цена
+```
+
+`--json` отдаёт стабильную схему
+`{"run_id", "group_by", "totals", "groups": [{"key", ...}]}` с теми же десятью
+полями и без NaN. `tokens` и `tokens_billable` — разные числа: первое
+включает повторное чтение кешированного префикса на каждом API-вызове,
+второе — только вход и выход (см. [`docs/metrics.md`](metrics.md)).
 
 ## 6. Безопасность
 

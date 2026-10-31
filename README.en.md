@@ -89,7 +89,7 @@ Expected: `VERIFY OK`. The reference run has 33 events and 3/3 requirements cove
 
 - **22 role cards** with eight sections: purpose, inputs, procedure, outputs, definition of done, veto, prohibitions, escalation.
 - **13 stages** from `s_in`/`s00_intake` to `s9_learn`, each with an explicit gate.
-- **A Python engine**: `init`, `next`, `submit`, `gate`, `verify`, `task`, `quarantine`, `trace`, `metrics`, `doctor`.
+- **A Python engine**: `init`, `next`, `submit`, `gate`, `verify`, `task`, `quarantine`, `trace`, `metrics`, `usage`, `doctor`.
 - **The `factory run` runtime**: order → executor → verify → submit → gate; `pending_artifacts` and `next_role` in every order, `usage.jsonl` with token breakdown, evidence and stop-guards (state substitution, writes outside the run, budget). Adapters: `fake` (no model), `hermes`, `opencode`; real CLIs run in `bwrap` by default with a read-only control plane. `--parallel-tasks N` builds independent `s4_build` tasks in separate git worktrees — see [`docs/runtime.md`](docs/runtime.md).
 - **Signed checkpoints**: `factory sign` stores an HMAC-SHA256 anchor of the journal head outside `runs/`; `factory verify` tells `stale` from `rolled_back` and `diverged` — see [`docs/checkpoints.md`](docs/checkpoints.md).
 - **An external eval set and run comparison**: `factory eval` drives fixed cases (`nano-todo`, `nano-product-mini`, `standard-mini`, `brownfield-proxy-mini`, `product-mini`) on `fake` or a real executor, checks invariants and numeric baselines, and fails on extra steps, fewer events or more than 10 % token growth; `factory compare` shows the stage, cost and artifact-hash delta of two runs — see [`docs/eval.md`](docs/eval.md).
@@ -154,6 +154,7 @@ In `nano`, role `01-smart-interviewer` also writes `spec.md`, `spec-human.md`, `
 | `factory eval --cases eval/cases [--executor fake] [--json]` | Run eval cases, check invariants and baseline; exit `1` on regression |
 | `factory eval --cases eval/cases --update-baseline eval/baseline.json` | Rewrite the baseline (green cases only) |
 | `factory compare --left ID --right ID [--json]` | Delta of two runs: stages, steps, tokens, cost, artifact hashes |
+| `factory usage --run-id ID [--by stage\|task\|role] [--json]` | Spend from `runtime/usage.jsonl` by stage, task or role; `null` is not turned into zero |
 | `factory budget [--run-id ID]` | Attempt limits, mode budget, used attempts |
 | `factory artifacts` | Artifact registry |
 

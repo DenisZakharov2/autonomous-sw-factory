@@ -1,6 +1,7 @@
 # Handoff — 1.0.1
 
-Состояние на 31 октября 2026. Ветка `main`, версия `1.0.1`, 274 теста.
+Состояние на 31 октября 2026. Ветка `main`, версия `1.0.1`; в рабочем дереве
+добавлена команда `factory usage` (274 теста в 1.0.1 + 8 новых = 282).
 Eval-набор зелёный на реальном Hermes: `eval/baseline-hermes.json` хранит
 пять записей — `nano-todo` (`runs/nano-todo-20261030-191409`),
 `standard-mini` (`runs/standard-mini-standard-real`),
@@ -311,6 +312,112 @@ factory eval --cases "$PWD/runs/hermes-cases-brownfield" --executor hermes \
 поэтому прогретый `CARGO_TARGET_DIR` передаётся и агенту (`--sandbox-rw`), и
 `_product_tests`; `cargo clean` в задаче запрещён.
 
+## Стоимость brownfield
+
+Источник — `factory usage` (только `runtime/usage.jsonl`), прогон
+`brownfield-proxy-mini-brownfield-real2`. `usd` во всех записях `0.0` при
+`cost_status: unknown`, поэтому ниже он не приводится как цена: сравнение идёт
+по `tokens_billable`, а `tokens` показывает полный контекст с кешем.
+
+### По стадиям
+
+| stage | steps | api | prompt_chars | tokens | billable | cache_read | tokens_out | seconds |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `s_in` | 2 | 18 | 20 613 | 330 226 | 55 282 | 274 944 | 10 473 | 90.13 |
+| `s00_intake` | 1 | 2 | 10 630 | 23 852 | 13 356 | 10 496 | 2 801 | 27.56 |
+| `s0_vision` | 1 | 4 | 11 716 | 56 538 | 18 906 | 37 632 | 4 221 | 37.31 |
+| `s1_spec` | 2 | 10 | 22 441 | 146 547 | 36 211 | 110 336 | 8 674 | 73.47 |
+| `s15_quarantine` | 1 | 5 | 12 536 | 61 101 | 12 973 | 48 128 | 1 759 | 26.98 |
+| `s2_architecture` | 1 | 10 | 16 881 | 290 984 | 55 464 | 235 520 | 15 720 | 104.57 |
+| `s3_plan` | 1 | 3 | 11 808 | 38 679 | 12 567 | 26 112 | 3 140 | 30.10 |
+| `s4_build` | 2 | 45 | 21 431 | 1 312 413 | 109 469 | 1 202 944 | 25 977 | 293.02 |
+| `s5_acceptance` | 1 | 14 | 10 944 | 399 088 | 54 256 | 344 832 | 10 834 | 77.82 |
+| `s6_security` | 2 | 16 | 21 971 | 328 485 | 58 405 | 270 080 | 13 218 | 106.44 |
+| `s7_release` | 1 | 7 | 11 803 | 127 220 | 30 964 | 96 256 | 7 892 | 59.14 |
+| `s8_docs` | 1 | 13 | 10 757 | 284 204 | 36 396 | 247 808 | 6 289 | 53.06 |
+| `s9_learn` | 1 | 8 | 11 385 | 161 454 | 34 478 | 126 976 | 6 770 | 53.00 |
+| **TOTAL** | **17** | **155** | **194 916** | **3 560 791** | **528 727** | **3 032 064** | **117 768** | **1 032.62** |
+
+### По задачам
+
+| task | steps | api | prompt_chars | tokens | billable | cache_read | tokens_out | seconds |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `-` (без задачи) | 15 | 110 | 173 485 | 2 248 378 | 419 258 | 1 829 120 | 91 791 | 739.60 |
+| `TASK-001` | 1 | 17 | 10 797 | 488 901 | 50 629 | 438 272 | 10 454 | 135.62 |
+| `TASK-002` | 1 | 28 | 10 634 | 823 512 | 58 840 | 764 672 | 15 523 | 157.40 |
+| **TOTAL** | **17** | **155** | **194 916** | **3 560 791** | **528 727** | **3 032 064** | **117 768** | **1 032.62** |
+
+### Топ-5 драйверов
+
+По `tokens_billable`; `TASK-001` — шестой (50 629), но второй по `tokens`
+(488 901). Строки `s4_build` разложены по задачам, чтобы одна задача не
+пряталась за стадией.
+
+| # | драйвер | steps | api | tokens | billable | cache_read | tokens_out | seconds |
+| ---: | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | `s4_build / TASK-002` | 1 | 28 | 823 512 | 58 840 | 764 672 | 15 523 | 157.40 |
+| 2 | `s6_security` | 2 | 16 | 328 485 | 58 405 | 270 080 | 13 218 | 106.44 |
+| 3 | `s2_architecture` | 1 | 10 | 290 984 | 55 464 | 235 520 | 15 720 | 104.57 |
+| 4 | `s_in` | 2 | 18 | 330 226 | 55 282 | 274 944 | 10 473 | 90.13 |
+| 5 | `s5_acceptance` | 1 | 14 | 399 088 | 54 256 | 344 832 | 10 834 | 77.82 |
+
+`cache_read` — не отдельное чтение файла: это сумма кешированного префикса по
+всем API-вызовам шага. Контекст растёт с каждым результатом инструмента, и
+каждый следующий вызов снова читает его из кеша. Поэтому драйвер — число
+вызовов × объём накопленного контекста, а не размер промпта (у всех стадий
+10–22 тыс. символов).
+
+- **`TASK-002`** — 28 вызовов. Агент читал `app/src-tauri/src/config.rs`
+  целиком (после `TASK-001` в файле 2 380 строк), правил
+  `Config::warnings()` и гонял терминал: целевой
+  `cargo test --lib --manifest-path app/src-tauri/Cargo.toml config::tests::warns_on_unreachable_after_match`,
+  полный `cargo test --lib` (222 passed) и `cargo fmt --check`. Отсюда
+  764 672 cache и 15 523 output. Evidence: `runtime/ev-0022-*.log`,
+  `tasks/TASK-002/deliverable.md`.
+- **`s6_security`** — 16 вызовов, две роли. `16-security-engineer` статически
+  читал `config.rs` (`warnings()`), `artifacts/threat-model.md` и
+  `artifacts/access-matrix.md`; `12-fullstack-developer` проверял отсутствие
+  SQL/миграций (`0` совпадений `*.sql`/`CREATE TABLE`/`migrat*` в
+  `app/src-tauri/src/` и db-зависимостей в `Cargo.toml`) и писал
+  `db-report.md`/`data-pipeline.md`. 270 080 cache, 13 218 output.
+- **`s2_architecture`** — 10 вызовов и самый большой `tokens_out` в прогоне:
+  15 720 (чуть больше, чем 15 523 у `TASK-002`). За шаг создано девять
+  артефактов (`architecture.md`,
+  `api-contract.md`, `data-model.md`, `threat-model.md`, `ADR-001/002`,
+  `ux-flows.md`, `screens/rules-editor.md`, `ai-design.md`); каждый
+  записанный документ остаётся в контексте следующих вызовов, отсюда
+  235 520 cache. Evidence: `runtime/ev-0013-*.log`.
+- **`s_in`** — два шага, 18 вызовов. Команды `git bundle create --all`,
+  `git ls-files | tar`, `sha256sum -c`, `git bundle verify`, `git status` и
+  read-only скан продукта: 140 отслеживаемых файлов, 38 `*.rs`,
+  19 254 строки. 274 944 cache, 10 473 output. Evidence:
+  `runtime/ev-0001-*.log`, `runtime/ev-0002-*.log`.
+- **`s5_acceptance`** — 14 вызовов, инструментов только `file`. Статическое
+  чтение `config.rs:372-476`, `config.rs:2195-2379`, `lib.rs:7`,
+  `tasks/TASK-001|002/deliverable.md` и `verification.md`; записаны
+  `test-report.md` и `acceptance.md`. 344 832 cache, 10 834 output.
+  Evidence: `runtime/ev-0027-*.log`.
+
+`factory compare --left brownfield-proxy-mini-brownfield-fake2 --right
+brownfield-proxy-mini-brownfield-real2`: шаги **17/17**, события **38/38**,
+артефакты **173 same / 44 changed / 1 only left / 175 only right**. У fake
+токены `null` (адаптер их не измеряет), поэтому дельта токенов в compare —
+`-`; реальные числа выше даёт только `factory usage`. `only_left` —
+`artifacts/screens/cli.md`, фикстура `FakeExecutor`; `only_right` — реальные
+`adr/ADR-002.md`, два патча, `screens/rules-editor.md` и
+`backups/dirty-worktree.tar.gz`.
+
+### Кандидаты на удешевление
+
+Промпты в этой сессии **не менялись**: без реального прогона эффект не
+доказан. Кандидаты — гипотезы с ценой в текущем прогоне и метрикой проверки.
+
+| Кандидат | Эффект (текущая цена) | Риск | Что мерить |
+| :--- | :--- | :--- | :--- |
+| Читать в `TASK-002` только нужные участки `config.rs` (`Rule::parse`, `parse_policy`, `warnings`, тест-модуль), а не файл целиком | 764 672 cache, 28 вызовов, 823 512 tokens | пропущенный call site или тест → красная сборка | `cache_read`, `api_calls`, `tokens_billable` `TASK-002`; 222 теста и `verify` |
+| Передавать в `s6_security` сжатый пакет приёмки (`test-report.md` + цитаты `config.rs`) вместо повторного чтения кода | 270 080 cache, 16 вызовов, 328 485 tokens | security-ревью по пересказу, а не по исходнику | `cache_read`/`api_calls` `s6_security`; число дефектов и вердикт гейта |
+| Ограничить `s2_architecture` девятью документами: сначала контракт + ADR, остальное — по шаблону с короткими секциями | 15 720 output, 235 520 cache, 10 вызовов | больше шагов или формальные, пустые артефакты | `tokens_out`/`cache_read` `s2_architecture`, прохождение гейта `gate_s2`, полнота артефактов |
+
 ## product-mini на реальном Hermes
 
 Второй standard-кейс на том же продукте: крейт `pfu` из `proxy-for-ubuntu`
@@ -567,7 +674,10 @@ pytest собирает тоже, поэтому fake-эталон не изме
   **Сделано в 1.0.1:** `factory artifact re-record` + событие
   `ARTIFACT_RERECORD` (docs/runtime.md §5.7).
 - Сравнить зелёный brownfield с baseline через `factory compare` и
-  зафиксировать дельту в CHANGELOG следующей версии.
+  зафиксировать дельту в CHANGELOG следующей версии. **Сделано:** дельта
+  `fake2 → real2` — 17/17 шагов, 38/38 событий, 173 same / 44 changed /
+  1 only left / 175 only right; запись в `## [Unreleased]`, разбор — в
+  разделе «Стоимость brownfield».
 
 ## Решение по релизу
 

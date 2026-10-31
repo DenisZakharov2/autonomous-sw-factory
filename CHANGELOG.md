@@ -35,7 +35,9 @@ All notable changes are recorded here. The project follows a simple
 - **CI на трёх ОС:** `doctor` и `pytest` на ubuntu/macOS/Windows × Python
   3.10–3.13; лок журнала на Windows — `msvcrt.locking`, symlink/shell/
   POSIX-mode-bit проверки пропускаются по наличию примитива, а не удаляются.
-  Матрица проверена: run `41173606772`, 14/14 jobs зелёные.
+  Матрица проверена: run `41215104365` на `980a812`, 14/14 jobs зелёные
+  (первый прогон, `41214643319`, упал на windows-latest 3.11 в тесте
+  минутного бюджета — см. «Fixed»).
 - **зелёный прогон `standard-mini` на реальном Hermes:** одна модель
   (`deepseek-ai/DeepSeek-V4.1-Flash-1017`), `--reasoning high`,
   `--executor-tools auto`, `bwrap`; 15 шагов, 35 событий, 2 задачи,
@@ -76,6 +78,14 @@ All notable changes are recorded here. The project follows a simple
   total; худший +25 % → 2.9M. Прежние 1.5M остановили бы `standard-mini` на
   `s6_security` (1 553 552 после шага 12). USD-потолок $25 не менялся —
   цена провайдером не измеряется.
+
+### Fixed
+
+- **тест минутного бюджета на windows-latest 3.11:** шаг `FakeExecutor` в
+  10 мс округлялся до `0.000` с, бюджет не срабатывал, и цикл
+  останавливался на человеческом гейте (`human_gate` вместо `budget`).
+  Шаг поднят до 50 мс — с запасом выше грубого тика Windows, тест остаётся
+  быстрым (пять локальных прогонов — 0,8–1,1 с).
 
 ## [0.3.0] — 2026-10-30
 

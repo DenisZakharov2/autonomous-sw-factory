@@ -304,9 +304,13 @@ def test_executor_that_escapes_the_run_is_stopped(run_env):
 
 
 def test_budget_exhaustion_stops_the_loop(run_env):
+    # The loop's minute budget reads executor seconds, and Windows' timer
+    # rounds a 10 ms step to 0.000 in some runs, so the budget never trips and
+    # the loop stops on the next human gate instead.  50 ms is above the coarse
+    # tick by a wide margin and still keeps the test fast.
     result = run_loop(
         "run-01",
-        FakeExecutor(sleep_seconds=0.01),
+        FakeExecutor(sleep_seconds=0.05),
         max_steps=3,
         root=run_env,
         budget={"tokens": 1, "minutes": 0.0, "usd": 1},

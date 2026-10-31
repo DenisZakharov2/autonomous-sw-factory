@@ -13,7 +13,7 @@ def cli(*args, runs_root: Path):
     env["FACTORY_ROOT"] = str(runs_root.parent)
     return subprocess.run(
         [sys.executable, "-m", "factory.cli", *args],
-        cwd=ROOT, env=env, capture_output=True, text=True, check=False,
+        cwd=ROOT, env=env, capture_output=True, text=True, encoding="utf-8", check=False,
     )
 
 

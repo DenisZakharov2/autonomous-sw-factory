@@ -279,7 +279,7 @@ def test_executor_that_escapes_the_run_is_stopped(run_env):
 def test_budget_exhaustion_stops_the_loop(run_env):
     result = run_loop(
         "run-01",
-        FakeExecutor(),
+        FakeExecutor(sleep_seconds=0.01),
         max_steps=3,
         root=run_env,
         budget={"tokens": 1, "minutes": 0.0, "usd": 1},

@@ -49,6 +49,10 @@ def new_state(run_id: str, mode: str, pipeline: dict[str, Any]) -> dict[str, Any
         "schema_version": "1.0.0",
         "run_id": run_id,
         "mode": mode,
+        # New runs execute `02-independent-verifier` before every role gate
+        # and every TASK_DONE.  Historical runs have no such field, and their
+        # journals keep validating exactly as they were written.
+        "verification_policy": "role",
         "current_stage": start,
         "stage_status": stage_status,
         "gate_status": gate_status,

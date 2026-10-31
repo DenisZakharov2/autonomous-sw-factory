@@ -11,6 +11,7 @@ from .config import (
     mode_roles,
     project_root,
 )
+from .artifacts import policy_allows, substitute_path
 from .errors import ConfigError
 
 ROLE_DIR = PACKAGE_ROOT / "roles"
@@ -47,14 +48,17 @@ def effective_owner(pipeline: dict[str, Any], mode: str, artifact_id: str, defau
     return str(overrides.get(artifact_id, default))
 
 
-def resolve_path(run_dir: Path, artifact: dict[str, Any], *, task_id: str | None = None) -> Path:
+def resolve_path(
+    run_dir: Path,
+    artifact: dict[str, Any],
+    *,
+    task_id: str | None = None,
+    stage_id: str | None = None,
+) -> Path:
     path = str(artifact["path"])
     if artifact.get("root"):
         return (project_root() / path).resolve()
-    if "{task_id}" in path:
-        if not task_id:
-            raise ConfigError(f"artifact {artifact.get('id', path)} needs a task_id")
-        path = path.replace("{task_id}", task_id)
+    path = substitute_path(path, task_id=task_id, stage_id=stage_id)
     return (run_dir / path).resolve()
 
 
@@ -66,6 +70,7 @@ def stage_artifacts(
     *,
     task_id: str | None = None,
     run_dir: Path | None = None,
+    verification_policy: str | None = None,
 ) -> list[dict[str, Any]]:
     result = []
     for artifact_id in stage["artifacts"]:
@@ -73,13 +78,23 @@ def stage_artifacts(
             raise ConfigError(f"stage {stage['id']} references unknown artifact {artifact_id}")
         spec = dict(registry["artifacts"][artifact_id])
         spec["id"] = artifact_id
+        if not policy_allows(spec, verification_policy):
+            continue
         spec["owner"] = effective_owner(pipeline, mode, artifact_id, str(spec.get("owner", "")))
         if spec.get("per_task") and not task_id:
             continue
         if spec.get("per_task"):
-            spec["resolved_path"] = str(resolve_path(run_dir or Path("."), spec, task_id=task_id))
+            spec["resolved_path"] = str(
+                resolve_path(run_dir or Path("."), spec, task_id=task_id, stage_id=stage["id"])
+            )
         elif spec.get("root"):
             spec["resolved_path"] = str(resolve_path(run_dir or Path("."), spec))
+        elif "{" in str(spec["path"]):
+            # `{stage}` is resolved here so the runtime can open exactly the
+            # report's directory writable instead of a shared parent.
+            spec["resolved_path"] = str(
+                resolve_path(run_dir or Path("."), spec, stage_id=stage["id"])
+            )
         else:
             spec["resolved_path"] = str(spec["path"])
         result.append(spec)

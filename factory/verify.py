@@ -389,6 +389,48 @@ def rerecord_summary(run_dir: Path) -> list[dict[str, Any]]:
     return list(grouped.values())
 
 
+def verification_policy_errors(
+    state: dict[str, Any], events: list[dict[str, Any]]
+) -> list[str]:
+    """A role gate closes only after the verifier's PASS, in that order.
+
+    The check is journal-order, not "some VERIFY exists": a FAIL that a later
+    PASS replaced is fine, but a gate approved *before* any verdict is not.
+    Historical runs have no policy and are left exactly as they were written.
+    """
+    if str(state.get("verification_policy") or "") != "role":
+        return []
+    pipeline = load_pipeline()
+    approvers = {stage["id"]: str(stage["gate"]["approver"]) for stage in pipeline["stages"]}
+    errors: list[str] = []
+    last_stage: dict[str, str] = {}
+    last_task: dict[str, str] = {}
+    for event in events:
+        event_type = str(event.get("event_type") or "")
+        verdict = str((event.get("verdict") or {}).get("status") or "")
+        stage = str(event.get("stage") or "")
+        task = event.get("task_id")
+        if event_type == "VERIFY":
+            if task:
+                last_task[str(task)] = verdict
+            else:
+                last_stage[stage] = verdict
+            continue
+        if event_type == "GATE_DECISION" and verdict == "PASS" and not task:
+            if approvers.get(stage, "human") != "human" and last_stage.get(stage) != "PASS":
+                errors.append(
+                    f"stage {stage}: role gate approved without a preceding VERIFY PASS "
+                    f"(last verdict: {last_stage.get(stage, 'none')})"
+                )
+        if event_type == "TASK_DONE" and task:
+            if last_task.get(str(task)) != "PASS":
+                errors.append(
+                    f"task {task}: TASK_DONE without a preceding VERIFY PASS "
+                    f"(last verdict: {last_task.get(str(task), 'none')})"
+                )
+    return errors
+
+
 def verify_run(run_dir: Path, stage_id: str | None = None, require_gate: bool = False) -> list[str]:
     errors: list[str] = []
     pipeline = load_pipeline()
@@ -414,12 +456,18 @@ def verify_run(run_dir: Path, stage_id: str | None = None, require_gate: bool = 
         events = []
         errors.append(str(exc))
     errors.extend(artifact_integrity_errors(run_dir, state, events, stage_id))
+    errors.extend(verification_policy_errors(state, events))
+    policy = str(state.get("verification_policy") or "") or None
     if stage_id:
         try:
             stage = find_stage(pipeline, stage_id)
         except RunError as exc:
             return errors + [str(exc)]
-        errors.extend(validate_stage(run_dir, stage, registry, state["tasks"]))
+        errors.extend(
+            validate_stage(
+                run_dir, stage, registry, state["tasks"], verification_policy=policy
+            )
+        )
         if require_gate:
             gate = state["gate_status"].get(stage["gate"]["id"], {})
             if gate.get("status") != "approved":
@@ -431,13 +479,25 @@ def verify_run(run_dir: Path, stage_id: str | None = None, require_gate: bool = 
     else:
         stage = current_stage(state, pipeline)
         if stage:
-            errors.extend(validate_stage(run_dir, stage, registry, state["tasks"]))
+            errors.extend(
+                validate_stage(
+                    run_dir, stage, registry, state["tasks"], verification_policy=policy
+                )
+            )
         else:
             for accepted in stage_list(pipeline):
                 if accepted["id"] == "s_in" and state["mode"] != "brownfield":
                     continue
                 if state["stage_status"].get(accepted["id"]) == "accepted":
-                    errors.extend(validate_stage(run_dir, accepted, registry, state["tasks"]))
+                    errors.extend(
+                        validate_stage(
+                            run_dir,
+                            accepted,
+                            registry,
+                            state["tasks"],
+                            verification_policy=policy,
+                        )
+                    )
     return errors
 
 

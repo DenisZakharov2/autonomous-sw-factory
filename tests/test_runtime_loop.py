@@ -34,7 +34,7 @@ def _approve_human(run_id, result, runs):
     )
 
 
-def _run_to_completion(run_id, runs, executor, segments=20, max_steps=20):
+def _run_to_completion(run_id, runs, executor, segments=20, max_steps=30):
     result = None
     for _ in range(segments):
         result = run_loop(run_id, executor, max_steps=max_steps, root=runs)
@@ -160,8 +160,9 @@ def test_human_gate_stops_the_loop(run_env):
 
 def test_stage_with_nothing_pending_does_not_call_the_executor(tmp_path, monkeypatch):
     from factory.config import load_pipeline
-    from factory.engine import import_plan, task_accept, task_claim, task_submit
+    from factory.engine import import_plan, task_accept, task_claim, task_submit, submit_work
     from factory.state import save_state
+    from conftest import write_stage_verification, write_task_verification
 
     monkeypatch.setenv("FACTORY_ROOT", str(tmp_path))
     runs = tmp_path / "runs"
@@ -209,10 +210,23 @@ def test_stage_with_nothing_pending_does_not_call_the_executor(tmp_path, monkeyp
             "run-01", task_id, "12-fullstack-developer",
             ["product/src/todo.py", f"tasks/{task_id}/deliverable.md"], root=runs,
         )
+        write_task_verification(run_dir, task_id)
         task_accept("run-01", task_id, root=runs)
 
+    # Every task is verified; the stage itself still owes its own report, so
+    # the next order is the verifier's, not a producer's.
     order = next_action("run-01", root=runs)
-    assert order["action"] == "produce"
+    assert order["action"] == "verify"
+    assert order["next_role"] == "02-independent-verifier"
+    assert [item["id"] for item in order["artifacts"]] == ["verification"]
+
+    write_stage_verification(run_dir, "s4_build")
+    submit_work(
+        "run-01", stage_id="s4_build", role="02-independent-verifier",
+        artifacts=["artifacts/verification/s4_build/verification.md"], root=runs,
+    )
+    order = next_action("run-01", root=runs)
+    assert order["action"] == "gate"
     assert order["pending_artifacts"] == []
 
     class Recorder:

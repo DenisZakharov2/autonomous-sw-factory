@@ -13,9 +13,21 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from ..artifacts import resolve_recorded_path, sha256_dir, validate_artifact
+from ..artifacts import resolve_recorded_path, sha256_dir, validate_stage
 from ..config import load_artifacts, load_budget, load_pipeline, project_root
-from ..engine import gate_approve, gate_reject, next_action, submit_work, task_accept, task_claim, task_reject
+from ..engine import (
+    VERIFIER,
+    _task_deliverable_errors,
+    gate_approve,
+    gate_reject,
+    next_action,
+    submit_work,
+    task_accept,
+    task_claim,
+    task_reject,
+    verification_policy,
+    verification_report,
+)
 from ..errors import FactoryError, RunError
 from ..journal import sha256_file
 from ..paths import run_dir as safe_run_dir
@@ -31,6 +43,33 @@ from .usage import UsageLedger
 HUMAN_STOP = 2
 COMPLETE = 0
 STOP = 3
+
+
+def _is_verification_order(order: dict[str, Any]) -> bool:
+    """A verifier step carries the report and nothing else, and says so in data."""
+    specs = order.get("artifacts") or []
+    return bool(specs) and all(spec.get("report") == "verification" for spec in specs)
+
+
+def _report_verdict(
+    run_dir: Path, order: dict[str, Any], registry: dict[str, Any]
+) -> tuple[str | None, str]:
+    """`(verdict, reason)` of the report this order is about, or `(None, "")`."""
+    state = load_state(run_dir)
+    if verification_policy(state) != "role":
+        return None, ""
+    try:
+        _path, errors, verdict, reason = verification_report(
+            run_dir,
+            registry,
+            stage_id=str(order["stage"]),
+            task_id=str(order["task_id"]) if order.get("task_id") else None,
+        )
+    except FactoryError:
+        return None, ""
+    if errors:
+        return None, "; ".join(errors[:3])
+    return verdict, reason
 
 
 @dataclass(slots=True)
@@ -52,21 +91,6 @@ class LoopResult:
     @property
     def needs_human(self) -> bool:
         return self.code == HUMAN_STOP
-
-
-def _task_verification_errors(
-    run_dir: Path, task: dict[str, Any], registry: dict[str, Any]
-) -> list[str]:
-    errors: list[str] = []
-    spec = dict(registry["artifacts"]["deliverable"])
-    spec["id"] = "deliverable"
-    spec["stage"] = "s4_build"
-    errors.extend(validate_artifact(run_dir, spec, {str(task["task_id"]): task}))
-    for path in task.get("artifacts") or []:
-        candidate = run_dir / str(path)
-        if not candidate.exists():
-            errors.append(f"missing task artifact: {path}")
-    return errors
 
 
 def _artifact_digest(order: dict[str, Any], run_dir: Path, task: dict[str, Any] | None) -> str:
@@ -125,7 +149,10 @@ def _collect_writable_paths(
         else:
             add(candidate.parent, True, root=is_root)
 
-    if task is not None:
+    if task is not None and not _is_verification_order(order):
+        # A verifier reads the task's deliverable and allowed files; it must
+        # not get a writable mount for any of them.  Its only write scope is
+        # the report spec already added above.
         for entry in task.get("allowed_files") or []:
             raw = str(entry)
             candidate = Path(raw) if Path(raw).is_absolute() else run / raw
@@ -229,6 +256,52 @@ def _submit_order(
             why=f"Runtime submitted declared artifacts for {order['stage']}",
         )
     return [entry["path"] for entry in plan]
+
+
+def _complete_verification(
+    run_id: str,
+    order: dict[str, Any],
+    run_dir: Path,
+    root: str | Path | None,
+    registry: dict[str, Any],
+) -> str:
+    """Act on the verifier's report; return a note when the step did not land.
+
+    PASS closes the task or advances the stage to its gate.  FAIL is not a
+    crash and not an approval: the task or the stage goes back to rework with
+    the verifier's reason in the journal.
+    """
+    stage_id = str(order["stage"])
+    task_id = str(order["task_id"]) if order.get("task_id") else None
+    _path, errors, verdict, reason = verification_report(
+        run_dir, registry, stage_id=stage_id, task_id=task_id
+    )
+    if errors:
+        return "verification report is not valid: " + "; ".join(errors[:3])
+    if task_id:
+        if verdict == "FAIL":
+            task_reject(
+                run_id, task_id, reason or "the verifier's report says FAIL", root=root
+            )
+            return ""
+        try:
+            task_accept(run_id, task_id, root=root)
+        except FactoryError as exc:
+            return str(exc)
+        return ""
+    state = load_state(run_dir)
+    submitted = _submit_order(run_id, order, run_dir, root, state, role=VERIFIER)
+    if not submitted:
+        return "the verification report exists but was not submitted"
+    if verdict == "FAIL":
+        gate_reject(
+            run_id,
+            gate_id=str(order["gate"]["id"]),
+            approver=VERIFIER,
+            evidence=[f"verifier report FAIL: {reason or 'no reason given'}"],
+            root=root,
+        )
+    return ""
 
 
 def _ready_build_tasks(state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -450,6 +523,19 @@ def run_loop(
                 )
                 evidence = gate_errors[:5]
                 continue
+            verdict, reason = _report_verdict(run_dir, order, registry)
+            if verdict == "FAIL":
+                # The verifier said no.  The gate is not closed; the stage goes
+                # back to rework with the verifier's own words as evidence.
+                gate_reject(
+                    run_id,
+                    gate_id=str(order["gate"]["id"]),
+                    approver=approver,
+                    evidence=[f"verifier report FAIL: {reason or 'no reason given'}"],
+                    root=root,
+                )
+                evidence = [f"verifier report FAIL: {reason or 'no reason given'}"]
+                continue
             gate_evidence = evidence_store.gate_evidence(order)
             try:
                 gate_approve(
@@ -489,10 +575,12 @@ def run_loop(
             evidence = []
             continue
 
-        if action == "verify" and order.get("task_id"):
+        if action == "verify" and order.get("task_id") and verification_policy(load_state(run_dir)) != "role":
+            # Historical run without the verifier policy: keep the old
+            # behaviour so an interrupted pre-1.0.2 run can still be finished.
             state = load_state(run_dir)
             task = state["tasks"][str(order["task_id"])]
-            errors = _task_verification_errors(run_dir, task, registry)
+            errors = _task_deliverable_errors(run_dir, task, registry)
             if errors:
                 task_reject(run_id, str(order["task_id"]), "; ".join(errors[:3]), root=root)
                 evidence = errors[:2]
@@ -510,20 +598,30 @@ def run_loop(
             and not order.get("pending_artifacts")
             and not evidence
         ):
-            # Nothing on the stage is missing or invalid: its tasks already
-            # produced every declared artifact.  Running a model step with an
-            # empty "allowed to write" list only invites it to rewrite files
-            # that were accepted earlier, which the integrity check then
-            # reports as tampering.  Record the stage submission and move on.
-            state = load_state(run_dir)
-            submitted = _submit_order(
-                run_id, order, run_dir, root, state, role=order.get("next_role")
+            # Nothing is missing *by shape*, but the stage has rules of its own
+            # (acceptance rows, REQ parity, the plan and task graphs).  If one
+            # of them fails, a producer has work to do and the step must run;
+            # submitting the same files again would loop forever and mint an
+            # ARTIFACT_SUBMIT per iteration.
+            current = load_state(run_dir)
+            stage_errors = validate_stage(
+                run_dir,
+                find_stage(pipeline, str(stage_id)),
+                registry,
+                current["tasks"],
+                verification_policy=None,
             )
-            if not submitted:
-                evidence = [
-                    "стадия не имеет незакрытых артефактов, но и сдавать нечего"
-                ]
-            continue
+            if stage_errors:
+                evidence = stage_errors[:3]
+            else:
+                submitted = _submit_order(
+                    run_id, order, run_dir, root, current, role=order.get("next_role")
+                )
+                if not submitted:
+                    evidence = [
+                        "стадия не имеет незакрытых артефактов, но и сдавать нечего"
+                    ]
+                continue
 
         before = Fingerprint.capture(run_dir)
         state = load_state(run_dir)
@@ -630,9 +728,18 @@ def run_loop(
 
         state = load_state(run_dir)
         task = state["tasks"].get(str(order.get("task_id"))) if order.get("task_id") else None
-        submitted = _submit_order(
-            run_id, order, run_dir, root, state, role=order.get("next_role")
-        )
+        submit_note = ""
+        if _is_verification_order(order):
+            submit_note = _complete_verification(run_id, order, run_dir, root, registry)
+        else:
+            submitted = _submit_order(
+                run_id, order, run_dir, root, state, role=order.get("next_role")
+            )
+            if not submitted:
+                submit_note = (
+                    "исполнитель завершился успешно, но ни один объявленный артефакт "
+                    "не появился на диске"
+                )
         digest = _artifact_digest(order, run_dir, task)
         stage_now = load_state(run_dir)["stage_status"].get(str(order.get("stage")))
         if digest == last_digest and digest:
@@ -660,10 +767,8 @@ def run_loop(
             )
             stop.evidence_path = str(path)
             return stop
-        if not submitted:
-            evidence = [
-                "исполнитель завершился успешно, но ни один объявленный артефакт не появился на диске"
-            ]
+        if submit_note:
+            evidence = [submit_note]
             continue
         evidence = []
 

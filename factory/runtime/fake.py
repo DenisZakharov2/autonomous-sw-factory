@@ -23,8 +23,8 @@ from ..metrics import write_metrics
 from .base import ExecutionResult, RunContext
 
 FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "nano"
-PLACEHOLDER_RE = re.compile(r"\{\{[a-zA-Z0-9_.-]+\}\}")
-SCENARIOS = ("ok", "break-artifact", "write-state", "escape", "slow")
+PLACEHOLDER_RE = re.compile(r"\{\{([a-zA-Z0-9_.-]+)\}\}")
+SCENARIOS = ("ok", "break-artifact", "write-state", "escape", "slow", "verification-fail")
 
 
 def _within(path: Path, parent: Path) -> bool:
@@ -43,6 +43,53 @@ def _template_fill(spec: dict[str, Any]) -> str:
     text = path.read_text(encoding="utf-8")
     text = PLACEHOLDER_RE.sub("n/a", text)
     return text.rstrip() + "\n"
+
+
+def _verification_report(
+    spec: dict[str, Any],
+    order: dict[str, Any],
+    run_dir: Path,
+    registry_artifacts: list[dict[str, Any]],
+    verdict: str,
+) -> str:
+    """Render the verifier template with concrete values.
+
+    The fake has no model, so the "output" of each check is the fixture's own
+    deterministic claim.  The report still has to satisfy the real validator:
+    three checks, a command and an output each, and one verdict.
+    """
+    template = PATH_TEMPLATE_CACHE.get(str(spec.get("template")))
+    if template is None:
+        path = PACKAGE_ROOT / str(spec.get("template"))
+        template = path.read_text(encoding="utf-8")
+        PATH_TEMPLATE_CACHE[str(spec.get("template"))] = template
+    task_id = str(order.get("task_id") or "")
+    stage_id = str(order.get("stage") or "")
+    subject = f"task {task_id}" if task_id else f"stage {stage_id}"
+    readable = ", ".join(
+        str(item.get("path")) for item in registry_artifacts if item.get("report") != "verification"
+    ) or "n/a"
+    verify_command = f"factory verify --run-id {order.get('run_id')} --stage {stage_id}"
+    values = {
+        "report_path": str(spec.get("resolved_path") or spec.get("path") or "verification.md"),
+        "subject": subject,
+        "artifacts": readable,
+        "check_1_command": verify_command,
+        "check_1_exit": "0",
+        "check_1_output": "deterministic checks, state and hash chain: OK",
+        "check_2_command": f"test -r {readable.split(',')[0].strip('` ')}",
+        "check_2_exit": "0",
+        "check_2_output": "artifacts readable, none writable by the verifier",
+        "check_3_command": verify_command,
+        "check_3_exit": "0",
+        "check_3_output": "no missing or tampered artifact reported",
+        "reason": "all three checks returned 0",
+    }
+    text = PLACEHOLDER_RE.sub(lambda match: values.get(match.group(1), "n/a"), template)
+    return text.replace("PASS | FAIL", verdict).rstrip() + "\n"
+
+
+PATH_TEMPLATE_CACHE: dict[str, str] = {}
 
 
 def _deliverable(task: dict[str, Any]) -> str:
@@ -84,6 +131,7 @@ class FakeExecutor:
         self.fixture_root = fixture_root or FIXTURE_ROOT
         self.sleep_seconds = sleep_seconds
         self.respect_roles = respect_roles
+        self._failed_subjects: set[str] = set()
 
     # -- writing -------------------------------------------------------
     def _fixture(self, relative: str) -> str | None:
@@ -108,6 +156,21 @@ class FakeExecutor:
         if artifact_id == "metrics":
             write_metrics(run_dir)
             return ["artifacts/metrics.json"]
+
+        if spec.get("report") == "verification":
+            verdict = "PASS"
+            if self.scenario == "verification-fail":
+                # Fail the first report for each subject, then pass: the run
+                # must show a rework loop and still converge.
+                subject = f"{order.get('stage')}:{order.get('task_id') or '-'}"
+                if subject not in self._failed_subjects:
+                    self._failed_subjects.add(subject)
+                    verdict = "FAIL"
+            text = _verification_report(
+                spec, order, run_dir, list(order.get("artifacts") or []), verdict
+            )
+            raw = str(spec.get("resolved_path") or spec.get("path") or "")
+            return [self._write(Path(raw), text, run_dir)]
 
         if spec.get("per_task"):
             task_id = str(order.get("task_id") or "")

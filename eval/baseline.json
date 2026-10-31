@@ -1,12 +1,12 @@
 {
   "schema_version": "1.0.0",
-  "generated_at": "2026-10-31T06:37:08Z",
+  "generated_at": "2026-10-31T19:38:23Z",
   "cases": {
     "nano-todo": {
       "status": "complete",
-      "steps": 13,
-      "loop_steps": 29,
-      "events": 33,
+      "steps": 22,
+      "loop_steps": 35,
+      "events": 48,
       "rework_events": 0,
       "tasks": 2,
       "gates_closed": [
@@ -27,16 +27,16 @@
       "tokens": null,
       "tokens_billable": null,
       "usd": null,
-      "seconds": 0.238,
-      "prompt_chars": 121556,
+      "seconds": 0.34,
+      "prompt_chars": 208535,
       "verification_coverage": 1.0,
       "traceability_coverage": 1.0
     },
     "standard-mini": {
       "status": "complete",
-      "steps": 15,
-      "loop_steps": 31,
-      "events": 35,
+      "steps": 24,
+      "loop_steps": 37,
+      "events": 50,
       "rework_events": 0,
       "tasks": 2,
       "gates_closed": [
@@ -57,8 +57,8 @@
       "tokens": null,
       "tokens_billable": null,
       "usd": null,
-      "seconds": 0.283,
-      "prompt_chars": 134969,
+      "seconds": 0.355,
+      "prompt_chars": 223430,
       "verification_coverage": 1.0,
       "traceability_coverage": 1.0
     }

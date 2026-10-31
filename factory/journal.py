@@ -38,14 +38,14 @@ except ImportError:  # pragma: no cover - POSIX
 GENESIS_PREV_HASH = "0" * 64
 EVENT_TYPES = {
     "INIT", "STAGE_RESET", "TASK_ADD", "TASK_CLAIM", "TASK_DONE", "TASK_RESET",
-    "ARTIFACT_SUBMIT", "ARTIFACT_RERECORD", "GATE_DECISION", "VETO", "REWORK",
-    "RISK_ACCEPTANCE", "SKILL_INSTALL",
+    "ARTIFACT_SUBMIT", "ARTIFACT_RERECORD", "GATE_DECISION", "VERIFY", "VETO",
+    "REWORK", "RISK_ACCEPTANCE", "SKILL_INSTALL",
 }
 VERDICTS = {"INIT_OK", "DRAFT", "PASS", "FAIL", "NEEDS_HUMAN", "ACCEPTED_RISK", "BLOCKED"}
 HUMAN_EXEMPT = {"GATE_DECISION", "RISK_ACCEPTANCE"}
 # Events that bind the hash of an artifact to the file on disk.  `verify`
 # compares the newest of these per path with the file.
-ARTIFACT_RECORDS = {"GATE_DECISION", "TASK_DONE", "ARTIFACT_SUBMIT", "ARTIFACT_RERECORD"}
+ARTIFACT_RECORDS = {"GATE_DECISION", "TASK_DONE", "VERIFY", "ARTIFACT_SUBMIT", "ARTIFACT_RERECORD"}
 
 
 def utc_now() -> str:
@@ -183,6 +183,16 @@ def _check_rerecord_artifacts(event_type: str, artifacts: list[dict[str, Any]]) 
             )
 
 
+def _check_verify_artifacts(event_type: str, artifacts: list[dict[str, Any]]) -> None:
+    """A VERIFY event without the report it judged proves nothing."""
+    if event_type != "VERIFY":
+        return
+    if not artifacts:
+        raise JournalError("VERIFY requires the verification report artifact")
+    if not any(str(item.get("path", "")).endswith("verification.md") for item in artifacts):
+        raise JournalError("VERIFY must record the verification report path")
+
+
 def _check_semantics(
     event_type: str,
     role: str,
@@ -208,6 +218,15 @@ def _check_semantics(
             raise JournalError("ARTIFACT_RERECORD requires a non-empty reason")
         if not evidence:
             raise JournalError("ARTIFACT_RERECORD requires at least one evidence reference")
+    if event_type == "VERIFY":
+        # The independent verifier's verdict is a fact about a report, not a
+        # producer's opinion.  Only role 02 writes it, and only PASS or FAIL.
+        if role != "02-independent-verifier" or verified_by != role:
+            raise JournalError("VERIFY must be written by 02-independent-verifier")
+        if verdict not in {"PASS", "FAIL"}:
+            raise JournalError("VERIFY must use verdict PASS or FAIL")
+        if not evidence:
+            raise JournalError("VERIFY requires at least one evidence reference")
     if verdict == "PASS" and event_type not in HUMAN_EXEMPT:
         if role != "02-independent-verifier" or verified_by != role:
             raise JournalError(
@@ -272,6 +291,7 @@ def record_event(
     _check_semantics(event_type, role, verdict_status, verified_by, evidence_list, reason)
     prepared_artifacts = _normalise_artifacts(run_dir, artifacts)
     _check_rerecord_artifacts(event_type, prepared_artifacts)
+    _check_verify_artifacts(event_type, prepared_artifacts)
 
     events = read_events(log_path)
     seq = len(events) + 1
@@ -419,6 +439,10 @@ def verify_chain(log_path: Path, state_path: Path | None = None) -> list[str]:
                 str(event.get("reason") or ""),
             )
             _check_rerecord_artifacts(
+                str(event.get("event_type", "")),
+                [item for item in event.get("artifacts") or [] if isinstance(item, dict)],
+            )
+            _check_verify_artifacts(
                 str(event.get("event_type", "")),
                 [item for item in event.get("artifacts") or [] if isinstance(item, dict)],
             )

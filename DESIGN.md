@@ -83,7 +83,7 @@ pending -> in_progress -> review -> accepted
                          \-> escalated (3 отказа)
 ```
 
-Каждая задача имеет `owner`, `reqs`, `allowed_files`, `deps`, `attempts`, `lease`, `artifacts`. `task accept` пишет `TASK_DONE PASS` только от `02-independent-verifier`.
+Каждая задача имеет `owner`, `reqs`, `allowed_files`, `deps`, `attempts`, `lease`, `artifacts`. `task accept` пишет `TASK_DONE PASS` только от `02-independent-verifier` и только после события `VERIFY PASS` по валидному отчёту `tasks/<task_id>/verification/verification.md`.
 
 ## 4. Роли и вето
 

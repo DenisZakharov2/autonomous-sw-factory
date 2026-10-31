@@ -207,7 +207,13 @@ def build_prompt(
 
     stage_errors: list[str] = []
     if stage is not None:
-        stage_errors = validate_stage(run_dir, stage, registry, state["tasks"])
+        stage_errors = validate_stage(
+            run_dir,
+            stage,
+            registry,
+            state["tasks"],
+            verification_policy=str(state.get("verification_policy") or "") or None,
+        )
     if stage_errors:
         lines.append("# Детерминированная проверка стадии не проходит")
         lines.extend(f"- {error}" for error in stage_errors[:8])
@@ -308,7 +314,10 @@ def build_prompt(
             for spec in order.get("artifacts") or []
             if spec.get("path") and not spec.get("per_task")
         ]
-    if order.get("task_id"):
+    if order.get("task_id") and not (
+        order.get("artifacts")
+        and all(spec.get("report") == "verification" for spec in order["artifacts"])
+    ):
         task = state["tasks"].get(str(order["task_id"]), {})
         pending_paths.extend(str(item) for item in task.get("allowed_files") or [])
         pending_paths.append(f"tasks/{order['task_id']}/deliverable.md")

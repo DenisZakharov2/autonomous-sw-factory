@@ -38,7 +38,7 @@ def work_order_submit_plan(
     that other tasks also write into.
     """
     run_dir = run_dir.resolve()
-    if task is not None:
+    if task is not None and order.get("action") != "verify":
         owner = str(task["owner"])
         candidates = [f"tasks/{task['task_id']}/deliverable.md"]
         candidates.extend(str(item) for item in task.get("allowed_files") or [])

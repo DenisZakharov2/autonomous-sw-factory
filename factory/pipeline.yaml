@@ -9,7 +9,7 @@ modes:
   nano:
     description: "One interviewer/spec author, one fullstack builder, one verifier, one orchestrator."
     roles: ["00-orchestrator", "01-smart-interviewer", "12-fullstack-developer", "02-independent-verifier"]
-    budget: { tokens: 3100000, minutes: 120, usd: 6 }
+    budget: { tokens: 5200000, minutes: 120, usd: 6 }
     stage_roles:
       s_in: ["00-orchestrator", "01-smart-interviewer", "02-independent-verifier"]
       s00_intake: ["00-orchestrator", "01-smart-interviewer", "02-independent-verifier"]
@@ -167,7 +167,7 @@ stages:
     entry: ["s1_spec.exit"]
     exit: ["scanner complete", "lock has hashes", "no unsafe or incomplete skill installed"]
     roles: ["16-security-engineer", "00-orchestrator", "02-independent-verifier"]
-    artifacts: ["security_review_skills", "skills_lock"]
+    artifacts: ["security_review_skills", "skills_lock", "verification"]
     gate:
       id: gate_s15
       approver: "02-independent-verifier"
@@ -182,7 +182,7 @@ stages:
     entry: ["s15_quarantine.exit"]
     exit: ["every REQ mapped to a component", "api-contract frozen", "ADR recorded", "threat model exists"]
     roles: ["08-software-architect", "07-ux-ui-designer", "09-ai-engineer", "17-dba", "16-security-engineer", "02-independent-verifier"]
-    artifacts: ["architecture", "api_contract", "data_model", "threat_model", "adr", "ux_flows", "screens", "ai_design"]
+    artifacts: ["architecture", "api_contract", "data_model", "threat_model", "adr", "ux_flows", "screens", "ai_design", "verification"]
     gate:
       id: gate_s2
       approver: "02-independent-verifier"
@@ -197,7 +197,7 @@ stages:
     entry: ["s2_architecture.exit"]
     exit: ["100% REQ assigned", "Allowed Files do not overlap", "every task has a test command"]
     roles: ["04-team-lead", "02-independent-verifier"]
-    artifacts: ["plan", "technical_debt"]
+    artifacts: ["plan", "technical_debt", "verification"]
     gate:
       id: gate_s3
       approver: "02-independent-verifier"
@@ -212,7 +212,7 @@ stages:
     entry: ["s3_plan.exit"]
     exit: ["every task accepted", "build exit code 0", "tests pass in a clean checkout"]
     roles: ["09-ai-engineer", "10-frontend-developer", "11-backend-developer", "12-fullstack-developer", "13-mobile-developer", "15-qa-automation-engineer", "18-data-engineer", "04-team-lead", "02-independent-verifier"]
-    artifacts: ["deliverable", "product_src", "product_tests"]
+    artifacts: ["deliverable", "product_src", "product_tests", "task_verification", "verification"]
     gate:
       id: gate_s4
       approver: "02-independent-verifier"
@@ -228,7 +228,7 @@ stages:
     entry: ["s4_build.exit"]
     exit: ["every REQ PASS", "zero Critical/High defects", "three clean test runs"]
     roles: ["14-qa-engineer", "15-qa-automation-engineer", "09-ai-engineer", "02-independent-verifier"]
-    artifacts: ["test_report", "acceptance"]
+    artifacts: ["test_report", "acceptance", "verification"]
     gate:
       id: gate_s5
       approver: "02-independent-verifier"
@@ -243,7 +243,7 @@ stages:
     entry: ["s5_acceptance.exit"]
     exit: ["no Critical/High issue", "migrations reversible", "pipeline idempotent"]
     roles: ["16-security-engineer", "17-dba", "18-data-engineer", "09-ai-engineer", "11-backend-developer", "12-fullstack-developer", "02-independent-verifier"]
-    artifacts: ["security_review_app", "db_report", "data_pipeline"]
+    artifacts: ["security_review_app", "db_report", "data_pipeline", "verification"]
     gate:
       id: gate_s6
       approver: "02-independent-verifier"
@@ -273,7 +273,7 @@ stages:
     entry: ["s7_release.exit"]
     exit: ["quickstart works", "every command verified", "factory README untouched"]
     roles: ["21-technical-writer", "14-qa-engineer", "12-fullstack-developer", "02-independent-verifier"]
-    artifacts: ["product_readme", "user_guide"]
+    artifacts: ["product_readme", "user_guide", "verification"]
     gate:
       id: gate_s8
       approver: "02-independent-verifier"

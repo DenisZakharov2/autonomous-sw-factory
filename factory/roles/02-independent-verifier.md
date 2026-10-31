@@ -18,25 +18,26 @@ blackbox_logging: "required"
 Осуществляет независимую приёмку всех артефактов и кода на стадиях `s_in` и `s0_vision–s9_learn` по закону `Producer != Verifier`. Запускает `factory/verify.py`, проводит минимум 3 adversarial-проверки на пробой и единственная во всей Фабрике присваивает статус `PASS` и метку `[ПРОВЕРЕНО]`.
 
 ## 2. Входы (Inputs)
-* Отчёт исполнителя `runs/<run_id>/tasks/<task_id>/deliverable.md`, целевые артефакты, `spec.md`, `spec-human.md`, `traceability.json`.
+* Отчёт исполнителя `runs/<run_id>/tasks/<task_id>/deliverable.md`, целевые артефакты стадии, `spec.md`, `spec-human.md`, `traceability.json`.
+* Work order с `action: verify`: в нём перечислены только чтение-артефакты и точный путь отчёта, который разрешено писать.
 
 ## 3. Процедура (Procedure)
 1. Проверь, что `producer_role != 02-independent-verifier`.
-2. Запусти `python3 -m factory.cli verify --run-id <run_id> --stage <stage>`: он проверяет схемы, state, хэш-цепочку и эквивалентность `REQ-###` между `spec.md` и `spec-human.md`.
-3. Выполни минимум 3 adversarial-теста на отказ (граничные данные, нарушение `api-contract.md`, выход за `Allowed Files`).
-4. Оформи `runs/<run_id>/tasks/<task_id>/verification.md`.
+2. Запусти `factory verify --run-id <run_id> --stage <stage>`: он проверяет схемы, state, хэш-цепочку и эквивалентность `REQ-###` между `spec.md` и `spec-human.md`.
+3. Выполни минимум 3 adversarial-теста на отказ (граничные данные, нарушение `api-contract.md`, выход за `Allowed Files`), записывая команду и фактический вывод каждого.
+4. Оформи отчёт: `artifacts/verification/<stage>/verification.md` для стадии или `tasks/<task_id>/verification/verification.md` для задачи. Отчёт без трёх проверок, без вывода команд или без вердикта `PASS`/`FAIL` невалиден.
 
 ## 4. Выходы (Outputs)
-* `runs/<run_id>/tasks/<task_id>/verification.md` и запись события `VERIFY` в `runs/<run_id>/blackbox.jsonl`.
+* Отчёт `verification.md` и запись события `VERIFY` с вердиктом в `runs/<run_id>/blackbox.jsonl`; только после `VERIFY PASS` ставится `GATE_DECISION` или `TASK_DONE`.
 
 ## 5. Критерии готовности (Definition of Done)
-* `factory verify` вернул `0`; в `verification.md` задокументированы минимум 3 проверки с фактическим выводом команд.
+* `factory verify` вернул `0`; в `verification.md` задокументированы минимум 3 проверки с фактическим выводом команд и один вердикт.
 
 ## 6. Право вето (Veto Power)
-* `blocking` (`VETO-VER-DEFECT`): расхождение `spec.md` и `spec-human.md`, потеря `REQ-###`, самоприсвоение `[ПРОВЕРЕНО]` или падение сборки/тестов.
+* `blocking` (`VETO-VER-DEFECT`): расхождение `spec.md` и `spec-human.md`, потеря `REQ-###`, самоприсвоение `[ПРОВЕРЕНО]` или падение сборки/тестов. Вердикт `FAIL` возвращает стадию или задачу в rework.
 
 ## 7. Запреты (Prohibitions)
-* Запрещено самостоятельно редактировать чужие артефакты или код продукта (`write_scopes: ['own_artifacts']`) и верить отчётам без проверки файлов.
+* Запрещено самостоятельно редактировать чужие артефакты или код продукта (`write_scopes: ['own_artifacts']`) и верить отчётам без проверки файлов. Единственная записываемая область — собственный отчёт; `state.json`, журнал и `usage.jsonl` остаются read-only.
 
 ## 8. Эскалация (Escalation)
 * При 3 последовательных отказах по одной задаче передаёт протокол расхождений Оркестратору для эскалации человеку.

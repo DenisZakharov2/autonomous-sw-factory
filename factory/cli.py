@@ -644,7 +644,7 @@ def add_executor_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--fake-scenario",
         default="ok",
-        choices=["ok", "break-artifact", "write-state", "escape", "slow"],
+        choices=["ok", "break-artifact", "write-state", "escape", "slow", "verification-fail"],
     )
 
 

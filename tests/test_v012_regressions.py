@@ -28,6 +28,7 @@ from factory.errors import QuarantineError, RunError
 from factory.metrics import compute_metrics
 from factory.quarantine import hash_skill_dir
 from factory.state import load_state, save_state
+from conftest import write_stage_verification, write_task_verification
 from factory.trace import build_matrix
 from factory.verify import verify_run
 
@@ -177,6 +178,9 @@ def test_directory_artifact_is_hashed_and_tamper_detected(nano_run):
         _write(run, relative, text)
     paths = [path for path in specs if not path.startswith("artifacts/screens/")]
     paths.append("artifacts/screens")
+    # The verifier's report is part of the stage in a role-verified run: it
+    # must exist before the stage can reach `review`.
+    write_stage_verification(run, "s2_architecture")
     event = submit_work(
         "run-01", stage_id="s2_architecture", role="12-fullstack-developer",
         artifacts=paths, root=run.parent,
@@ -221,6 +225,7 @@ def test_task_dispatch_claim_submit_accept(nano_run):
     assert third["action"] == "verify"
     assert third["roles"] == ["02-independent-verifier"]
     assert third["next_command"].startswith("factory task accept")
+    write_task_verification(run, "TASK-001")
     task_accept("run-01", "TASK-001", root=run.parent)
 
 

@@ -7,6 +7,23 @@ Semantic Versioning.
 
 ### Added
 
+- **Независимый верификатор — реальный шаг, а не подпись.** Роль
+  `02-independent-verifier` теперь исполняется перед каждым из семи
+  role-гейтов (`s15_quarantine`, `s2_architecture`, `s3_plan`, `s4_build`,
+  `s5_acceptance`, `s6_security`, `s8_docs`) и перед каждым `TASK_DONE`.
+  Отчёт `artifacts/verification/<stage>/verification.md` (или
+  `tasks/<task_id>/verification/verification.md`) обязан содержать три
+  adversarial-проверки с командой и фактическим выводом и один вердикт
+  `PASS`/`FAIL`; выбор `PASS | FAIL` из шаблона считается невалидным.
+  Событие `VERIFY` пишет только `02`, `VERIFY` входит в `ARTIFACT_RECORDS`,
+  а `factory verify` требует последний `VERIFY PASS` перед `GATE_DECISION` и
+  `TASK_DONE`. Вердикт `FAIL` возвращает стадию или задачу в rework.
+- **`verification_policy: "role"` в `state.json`.** Новые прогоны включают
+  проверку; в схеме поле опционально. Исторические прогоны, включая
+  `examples/nano-todo`, не переписываются и проходят `factory verify`
+  как раньше. Для них артефакт отчёта не существует (`requires_policy`).
+- **`--fake-scenario verification-fail`** — первый отчёт по каждому предмету
+  получает `FAIL`, дальше `PASS`: проверка цикла rework без модели.
 - **`factory usage --run-id ID [--by stage|task|role] [--json]`** — read-only
   отчёт по `runs/<id>/runtime/usage.jsonl`. Поля: `steps`, `api_calls`,
   `prompt_chars`, `tokens_in`, `cache_read`, `tokens_out`, `tokens`,
@@ -20,6 +37,18 @@ Semantic Versioning.
 
 ### Changed
 
+- **`task_accept` больше не пишет заглушку `verification.md`** в новом
+  прогоне: без валидного отчёта с `PASS` он падает (`VerificationError`),
+  а `factory task accept` из CLI тоже. Legacy-заглушка осталась только для
+  прогонов без `verification_policy`.
+- **`gate_approve` от role-approver** проверяет отчёт и пишет `VERIFY` перед
+  `GATE_DECISION`; `FAIL` — отказ, гейт не закрывается.
+- **Fake-эталон перегенерирован:** `nano-todo` 13/33 → 22/48,
+  `standard-mini` 15/35 → 24/50 (шаги/события). `eval/baseline.json` обновлён
+  после зелёного fake-прогона; `eval/baseline-hermes.json` не тронут.
+- **Бюджет `nano` поднят по замеру:** 3 100 000 → 5 200 000 токенов
+  (худший зелёный реальный прогон 4 131 427 + 25 %, округлено вверх).
+  Остальные режимы не перемерялись и не менялись.
 - **Зафиксирована дельта brownfield `fake2` → `real2`.** `factory compare`:
   шаги 17/17, события 38/38, артефакты 173 same / 44 changed / 1 only left /
   175 only right. Разбор стоимости по стадиям и задачам, топ-5 драйверов и

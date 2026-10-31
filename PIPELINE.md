@@ -111,7 +111,7 @@ factory task accept --run-id <id> --task-id TASK-001
 factory task reject --run-id <id> --task-id TASK-001 --reason "test missing"
 ```
 
-`task accept` пишет `TASK_DONE` со статусом `PASS` от `02-independent-verifier` и evidence. `task reject` пишет `REWORK FAIL` и увеличивает `attempts`.
+`task accept` пишет `TASK_DONE` со статусом `PASS` от `02-independent-verifier` и evidence — только если в `tasks/<task_id>/verification/verification.md` есть три проверки с командой и выводом и вердикт `PASS`; событие `VERIFY` идёт перед `TASK_DONE`. `task reject` пишет `REWORK FAIL` и увеличивает `attempts`.
 
 ## 5. Гейты
 

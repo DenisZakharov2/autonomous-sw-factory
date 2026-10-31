@@ -147,6 +147,25 @@ artifacts:
     owner: "{task.owner}"
     per_task: true
     required_sections: ["## 1. Что сделано", "## 2. REQ", "## 3. Проверка", "## 4. Diff"]
+  # The independent verifier's report.  `report: verification` turns on the
+  # three-adversarial-check grammar and the "no pre-filled PASS" rule;
+  # `requires_policy: role` keeps the artifact invisible to historical runs,
+  # which never had this step.
+  verification:
+    path: artifacts/verification/{stage}/verification.md
+    template: templates/verification.tmpl
+    owner: "02-independent-verifier"
+    report: verification
+    requires_policy: role
+    required_sections: ["## 1. Проверено", "## 2. Проверки", "## 3. Вердикт"]
+  task_verification:
+    path: tasks/{task_id}/verification/verification.md
+    template: templates/verification.tmpl
+    owner: "02-independent-verifier"
+    per_task: true
+    report: verification
+    requires_policy: role
+    required_sections: ["## 1. Проверено", "## 2. Проверки", "## 3. Вердикт"]
   product_src:
     path: product/src/
     owner: "12-fullstack-developer"

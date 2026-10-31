@@ -15,10 +15,41 @@ REQ_RE = re.compile(r"\bREQ-[A-Z0-9][A-Z0-9-]*\b")
 PLACEHOLDER_RE = re.compile(r"\{\{[a-zA-Z0-9_.-]+\}\}")
 PLACEHOLDER_GUARD = re.compile(r"REQ-(?:###|NNN|\{)")
 MIN_SECTION_WORDS = 1
+REPORT_CHECKS_MIN = 3
+CHECK_HEADING_RE = re.compile(r"^###\s+Проверка\s+\d+\b.*$", re.MULTILINE)
+VERDICT_CHOICE_RE = re.compile(r"PASS\s*\|\s*FAIL")
+VERDICT_LINE_RE = re.compile(
+    r"^\s*(?:[-*]\s*)?(?:`?\s*Вердикт\s*:\s*)?`?\s*(PASS|FAIL)\s*`?\s*$", re.MULTILINE
+)
+VERDICT_SECTION = "## 3. Вердикт"
+CHECKS_SECTION = "## 2. Проверки"
 
 
 def extract_req_ids(text: str) -> set[str]:
     return {match for match in REQ_RE.findall(text) if not PLACEHOLDER_GUARD.match(match)}
+
+
+def policy_allows(spec: dict[str, Any], policy: str | None) -> bool:
+    """An artifact with `requires_policy` exists only in runs that opted in.
+
+    Historical runs predate the independent verifier, so their journals must
+    keep validating: without the policy the report is not part of the stage.
+    """
+    required = str(spec.get("requires_policy") or "")
+    return not required or required == str(policy or "")
+
+
+def substitute_path(path: str, *, task_id: str | None = None, stage_id: str | None = None) -> str:
+    if "{task_id}" in path:
+        if not task_id:
+            raise ConfigError(f"artifact path {path!r} needs a task_id")
+        path = path.replace("{task_id}", task_id)
+    if "{stage}" in path:
+        if not stage_id:
+            raise ConfigError(f"artifact path {path!r} needs a stage_id")
+        path = path.replace("{stage}", stage_id)
+    return path
+
 
 
 def _within(path: Path, parent: Path) -> bool:
@@ -33,17 +64,20 @@ def _reject_symlink(path: Path) -> None:
         raise RunError(f"symlink artifacts are forbidden: {path}")
 
 
-def artifact_path(run_dir: Path, spec: dict[str, Any], *, task_id: str | None = None) -> Path:
+def artifact_path(
+    run_dir: Path,
+    spec: dict[str, Any],
+    *,
+    task_id: str | None = None,
+    stage_id: str | None = None,
+) -> Path:
     path = str(spec["path"])
     if spec.get("root"):
         resolved = (project_root() / path).resolve()
         if not _within(resolved, project_root()):
             raise RunError(f"root artifact escapes project root: {resolved}")
         return resolved
-    if "{task_id}" in path:
-        if not task_id:
-            raise ConfigError(f"artifact {spec.get('id')} needs a task_id")
-        path = path.replace("{task_id}", task_id)
+    path = substitute_path(path, task_id=task_id, stage_id=stage_id)
     resolved = (run_dir / path).resolve()
     if not _within(resolved, run_dir):
         raise RunError(f"artifact escapes the run directory: {resolved}")
@@ -242,6 +276,95 @@ def validate_markdown(path: Path, required_sections: list[str]) -> list[str]:
     return errors
 
 
+def _check_blocks(text: str) -> list[str]:
+    """Bodies of `### Проверка N` blocks inside `## 2. Проверки`."""
+    body = _section_body(text, CHECKS_SECTION)
+    matches = list(CHECK_HEADING_RE.finditer(body))
+    blocks = []
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
+        blocks.append(body[match.end() : end])
+    return blocks
+
+
+def _field_value(block: str, name: str) -> tuple[bool, str]:
+    """`(found, value)` for a `- Команда:` / `- Вывод:` field.
+
+    The value is the rest of the line, or — when the line is bare — the first
+    fenced block that follows it, so a multi-line command output is accepted
+    without forcing it onto one line.
+    """
+    pattern = re.compile(rf"^\s*[-*]\s*{name}\s*:\s*(.*)$", re.MULTILINE)
+    match = pattern.search(block)
+    if match is None:
+        return False, ""
+    inline = match.group(1).strip().strip("`").strip()
+    if inline:
+        return True, inline
+    rest = block[match.end() :]
+    fence = re.search(r"```[^\n]*\n(.*?)```", rest, re.DOTALL)
+    if fence and fence.group(1).strip():
+        return True, fence.group(1).strip()
+    return True, ""
+
+
+def verification_verdict(text: str) -> tuple[str | None, list[str]]:
+    """The single verdict of a report, or `(None, errors)`.
+
+    A template still carrying the `PASS | FAIL` choice is not a decision: it
+    is the place where one belongs.
+    """
+    body = _section_body(text, VERDICT_SECTION)
+    if not body.strip():
+        return None, [f"missing section {VERDICT_SECTION!r}"]
+    if VERDICT_CHOICE_RE.search(body):
+        return None, ["verdict is unresolved: the report still contains the 'PASS | FAIL' choice"]
+    found = {match.group(1) for match in VERDICT_LINE_RE.finditer(body)}
+    if not found:
+        return None, ["verdict is missing: expected a line 'Вердикт: PASS' or 'Вердикт: FAIL'"]
+    if len(found) > 1:
+        return None, ["verdict is ambiguous: the report states both PASS and FAIL"]
+    return found.pop(), []
+
+
+REASON_LINE_RE = re.compile(r"^\s*[-*]\s*Причина\s*:\s*(.+)$", re.MULTILINE)
+
+
+def verification_reason(text: str) -> str:
+    """The verifier's stated reason, for the journal evidence of a FAIL."""
+    match = REASON_LINE_RE.search(_section_body(text, VERDICT_SECTION))
+    if match is None:
+        return ""
+    return match.group(1).strip().strip("`").strip()
+
+
+def validate_verification_report(path: Path) -> list[str]:
+    """A verifier's report is only valid with three checks, outputs and a verdict."""
+    if not path.exists():
+        return [f"missing artifact: {path}"]
+    if not path.is_file():
+        return [f"artifact is not a file: {path}"]
+    text = path.read_text(encoding="utf-8")
+    errors: list[str] = []
+    blocks = _check_blocks(text)
+    if len(blocks) < REPORT_CHECKS_MIN:
+        errors.append(
+            f"{path}: {len(blocks)} verification check(s); at least {REPORT_CHECKS_MIN} adversarial "
+            "checks are required under '## 2. Проверки' (headings '### Проверка N')"
+        )
+    for index, block in enumerate(blocks, 1):
+        for field in ("Команда", "Вывод"):
+            found, value = _field_value(block, field)
+            if not found:
+                errors.append(f"{path}: check {index} has no '{field}:' field")
+            elif not value:
+                errors.append(f"{path}: check {index} has an empty '{field}:' value")
+    _verdict, verdict_errors = verification_verdict(text)
+    errors.extend(f"{path}: {error}" for error in verdict_errors)
+    return errors
+
+
+
 def validate_json_artifact(path: Path, schema_name: str) -> list[str]:
     if not path.exists():
         return [f"missing artifact: {path}"]
@@ -420,7 +543,11 @@ def validate_acceptance(run_dir: Path) -> list[str]:
 
 
 def validate_artifact(
-    run_dir: Path, spec: dict[str, Any], tasks: dict[str, Any] | None = None
+    run_dir: Path,
+    spec: dict[str, Any],
+    tasks: dict[str, Any] | None = None,
+    *,
+    stage_id: str | None = None,
 ) -> list[str]:
     """Validate one declared artifact spec, independently of its stage.
 
@@ -430,7 +557,7 @@ def validate_artifact(
     errors: list[str] = []
     tasks = tasks or {}
     if spec.get("directory"):
-        path = artifact_path(run_dir, spec)
+        path = artifact_path(run_dir, spec, stage_id=stage_id)
         relative = path.relative_to(run_dir).as_posix() if _within(path, run_dir) else path.name
         if not path.exists() or not path.is_dir():
             errors.append(f"missing directory: {relative}")
@@ -444,8 +571,12 @@ def validate_artifact(
         if not owners:
             errors.append(f"no task to validate {spec.get('id', spec.get('path'))} against")
         for task in owners:
-            path = artifact_path(run_dir, spec, task_id=task["task_id"])
+            path = artifact_path(
+                run_dir, spec, task_id=task["task_id"], stage_id=stage_id
+            )
             errors.extend(validate_markdown(path, list(spec.get("required_sections", []))))
+            if spec.get("report") == "verification" and path.is_file():
+                errors.extend(validate_verification_report(path))
         return errors
     if spec.get("per_pattern"):
         paths = pattern_paths(run_dir, spec)
@@ -454,25 +585,36 @@ def validate_artifact(
         for path in paths:
             errors.extend(validate_markdown(path, list(spec.get("required_sections", []))))
         return errors
-    path = artifact_path(run_dir, spec)
+    path = artifact_path(run_dir, spec, stage_id=stage_id)
     if spec.get("schema"):
         errors.extend(validate_json_artifact(path, Path(str(spec["schema"])).name))
     if spec.get("required_sections"):
         errors.extend(validate_markdown(path, list(spec["required_sections"])))
+        if spec.get("report") == "verification" and path.is_file():
+            errors.extend(validate_verification_report(path))
     elif not spec.get("schema") and not spec.get("directory") and not path.exists():
         errors.append(f"missing artifact: {path}")
     return errors
 
 
-def validate_stage(run_dir: Path, stage: dict[str, Any], registry: dict[str, Any], tasks: dict[str, Any] | None = None) -> list[str]:
+def validate_stage(
+    run_dir: Path,
+    stage: dict[str, Any],
+    registry: dict[str, Any],
+    tasks: dict[str, Any] | None = None,
+    *,
+    verification_policy: str | None = None,
+) -> list[str]:
     errors: list[str] = []
     tasks = tasks or {}
     for artifact_id in stage["artifacts"]:
         spec = dict(registry["artifacts"][artifact_id])
         spec["id"] = artifact_id
+        if not policy_allows(spec, verification_policy):
+            continue
         if spec.get("per_task"):
             spec["stage"] = stage["id"]
-        errors.extend(validate_artifact(run_dir, spec, tasks))
+        errors.extend(validate_artifact(run_dir, spec, tasks, stage_id=stage["id"]))
     if stage["id"] == "s1_spec":
         errors.extend(validate_traceability(run_dir))
     if stage["id"] == "s3_plan":

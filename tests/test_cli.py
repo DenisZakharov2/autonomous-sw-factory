@@ -176,7 +176,8 @@ def test_budget_command_reports_engine_limits(tmp_path):
     assert data["default_max_attempts"] == 3
     assert data["mode"] == "nano"
     assert data["mode_budget"]["minutes"] == 120
-    assert data["mode_budget"]["tokens"] == 3_100_000
+    # Measured on the real verifier run: worst green 4 131 427 + 25 %.
+    assert data["mode_budget"]["tokens"] == 5_200_000
     assert data["enforced_by_engine"] == ["attempts", "veto_retries"]
     assert data["runtime_responsibility"] == ["minutes", "tokens", "usd"]
     assert data["attempts_used"] == {"gates": {}, "tasks": {}}

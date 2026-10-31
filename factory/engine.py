@@ -14,9 +14,15 @@ from .artifacts import (
     artifact_path,
     collect_artifact_entries,
     pattern_paths,
+    policy_allows,
     resolve_recorded_path,
+    substitute_path,
     validate_artifact,
+    validate_markdown,
     validate_stage,
+    validate_verification_report,
+    verification_reason,
+    verification_verdict,
 )
 from .config import (
     PACKAGE_ROOT,
@@ -27,7 +33,7 @@ from .config import (
     validate_against_schema,
 )
 from .errors import JournalError, RunError, VerificationError
-from .journal import ARTIFACT_RECORDS, read_events, record_event, run_lock
+from .journal import ARTIFACT_RECORDS, read_events, record_event, run_lock, sha256_file
 from .paths import run_dir as safe_run_dir
 from .paths import runs_root, validate_run_id, validate_task_id
 from .pipeline import effective_owner, effective_roles, stage_artifacts
@@ -38,6 +44,7 @@ from .state import (
     current_stage,
     find_stage,
     gate_record,
+    get_task,
     load_state,
     new_state,
     reject_task,
@@ -46,6 +53,14 @@ from .state import (
     submit_task,
 )
 from .verify import parse_role, verify_run
+
+VERIFIER = "02-independent-verifier"
+VERIFICATION_IDS = {"verification", "task_verification"}
+
+
+def verification_policy(state: dict[str, Any]) -> str | None:
+    """`role` for runs whose gates execute the verifier; `None` for history."""
+    return str(state.get("verification_policy") or "") or None
 
 
 def _archive_existing(run_dir: Path) -> Path:
@@ -128,14 +143,16 @@ def _check_gate_approver(stage: dict[str, Any], approver: str) -> None:
         raise RunError(f"gate {gate_id} must be decided by {expected}, got {approver!r}")
 
 
-def _declared_artifact_base(run_dir: Path, spec: dict[str, Any]) -> tuple[Path, bool]:
+def _declared_artifact_base(
+    run_dir: Path, spec: dict[str, Any], *, stage_id: str | None = None
+) -> tuple[Path, bool]:
     """Resolved base path of a declared artifact and whether it scopes a directory."""
     path = str(spec["path"])
     if spec.get("per_pattern") and "{num}" in path:
         return (run_dir / path.rsplit("/", 1)[0]).resolve(), True
     if spec.get("root"):
         return artifact_path(run_dir, spec), False
-    return (run_dir / path).resolve(), bool(spec.get("directory"))
+    return (run_dir / substitute_path(path, stage_id=stage_id)).resolve(), bool(spec.get("directory"))
 
 
 def _root_paths(
@@ -144,10 +161,13 @@ def _root_paths(
     mode: str,
     stage: dict[str, Any],
     run_dir: Path,
+    policy: str | None = None,
 ) -> list[str]:
     return [
         str(spec["path"])
-        for spec in stage_artifacts(pipeline, registry, mode, stage, run_dir=run_dir)
+        for spec in stage_artifacts(
+            pipeline, registry, mode, stage, run_dir=run_dir, verification_policy=policy
+        )
         if spec.get("root")
     ]
 
@@ -162,13 +182,16 @@ def _check_stage_artifact_owners(
     registry: dict[str, Any],
 ) -> None:
     """Every submitted entry must belong to an artifact owned by the role."""
+    policy = verification_policy(state)
     declared = []
-    for spec in stage_artifacts(pipeline, registry, state["mode"], stage, run_dir=run_dir):
+    for spec in stage_artifacts(
+        pipeline, registry, state["mode"], stage, run_dir=run_dir, verification_policy=policy
+    ):
         if spec.get("per_task"):
             continue
-        base, is_dir = _declared_artifact_base(run_dir, spec)
+        base, is_dir = _declared_artifact_base(run_dir, spec, stage_id=stage["id"])
         declared.append((str(spec.get("owner", "")), base, is_dir))
-    roots = _root_paths(pipeline, registry, state["mode"], stage, run_dir)
+    roots = _root_paths(pipeline, registry, state["mode"], stage, run_dir, policy)
     for entry in entries:
         path = str(entry["path"])
         candidate = resolve_recorded_path(run_dir, path, root_paths=roots)
@@ -196,19 +219,24 @@ def _collect_paths(
     state: dict[str, Any],
 ) -> list[str]:
     """Paths of all declared stage artifacts that currently exist."""
+    policy = verification_policy(state)
     paths: list[str] = []
-    for spec in stage_artifacts(pipeline, registry, state["mode"], stage, run_dir=run_dir):
+    for spec in stage_artifacts(
+        pipeline, registry, state["mode"], stage, run_dir=run_dir, verification_policy=policy
+    ):
         if spec.get("per_task"):
             for task in state["tasks"].values():
                 if task.get("stage") == stage["id"]:
-                    candidate = artifact_path(run_dir, spec, task_id=task["task_id"])
+                    candidate = artifact_path(
+                        run_dir, spec, task_id=task["task_id"], stage_id=stage["id"]
+                    )
                     if candidate.exists():
                         paths.append(str(candidate))
             continue
         if spec.get("per_pattern"):
             paths.extend(str(item) for item in pattern_paths(run_dir, spec) if item.exists())
             continue
-        candidate = artifact_path(run_dir, spec)
+        candidate = artifact_path(run_dir, spec, stage_id=stage["id"])
         if candidate.exists():
             if candidate.is_dir() and not any(
                 item.is_file() for item in candidate.rglob("*")
@@ -228,14 +256,22 @@ def _stage_entries(
     return collect_artifact_entries(
         run_dir,
         _collect_paths(run_dir, stage, pipeline, registry, state),
-        root_paths=_root_paths(pipeline, registry, state["mode"], stage, run_dir),
+        root_paths=_root_paths(
+            pipeline, registry, state["mode"], stage, run_dir, verification_policy(state)
+        ),
     )
 
 
-def _task_entries(run_dir: Path, task: dict[str, Any]) -> list[dict[str, Any]]:
+def _task_entries(
+    run_dir: Path, task: dict[str, Any], *, include_verification: bool = True
+) -> list[dict[str, Any]]:
     paths = [str(item) for item in task.get("artifacts", [])]
-    for name in ("deliverable.md", "verification.md"):
-        candidate = run_dir / "tasks" / str(task["task_id"]) / name
+    task_id = str(task["task_id"])
+    names = ["deliverable.md", "verification.md"]
+    if include_verification:
+        names.append("verification/verification.md")
+    for name in names:
+        candidate = run_dir / "tasks" / task_id / name
         if candidate.exists():
             paths.append(str(candidate))
     return collect_artifact_entries(run_dir, paths)
@@ -262,22 +298,30 @@ def _pending_artifacts(
         stage,
         task_id=task["task_id"] if task else None,
         run_dir=run_dir,
+        verification_policy=verification_policy(state),
     )
     pending: list[dict[str, Any]] = []
     task_scope = state["tasks"] if task is None else {str(task["task_id"]): task}
     for spec in specs:
         if spec.get("per_task"):
             spec["stage"] = stage["id"]
-        errors = validate_artifact(run_dir, spec, task_scope)
+        errors = validate_artifact(run_dir, spec, task_scope, stage_id=stage["id"])
         if not errors:
             continue
         owner = str(spec.get("owner", ""))
         if owner == "{task.owner}" and task:
             owner = str(task["owner"])
+        # Report the concrete path: `{stage}` and `{task_id}` are already
+        # resolved in `resolved_path`, and a prompt that names a literal
+        # `{stage}` teaches the model to create that directory.
+        declared_path = str(spec.get("path", ""))
+        resolved = str(spec.get("resolved_path") or "")
+        if resolved and Path(resolved).is_absolute():
+            declared_path = _relative(run_dir, Path(resolved))
         pending.append(
             {
                 "id": str(spec.get("id", spec.get("path", ""))),
-                "path": str(spec.get("path", "")),
+                "path": declared_path,
                 "owner": owner,
                 "errors": errors[:3],
             }
@@ -293,8 +337,11 @@ def _next_role(
 ) -> str | None:
     if task is not None:
         if task.get("status") == "review":
-            return "02-independent-verifier"
+            return VERIFIER
         return str(task.get("owner") or "") or None
+    if order.get("action") == "verify":
+        # The only stage-level verify order is the verifier's own step.
+        return VERIFIER
     if order.get("action") == "gate":
         approver = str(stage["gate"]["approver"])
         return None if approver == "human" else approver
@@ -311,7 +358,14 @@ def _next_role(
 
 
 def _write_verification(run_dir: Path, task: dict[str, Any]) -> Path:
-    """The verifier's report required by the 02 role card."""
+    """Legacy stub for historical runs that predate the verifier step.
+
+    A run with `verification_policy: role` never reaches this function: its
+    report is written by `02-independent-verifier` and must pass
+    `validate_verification_report`.  Keeping the stub for old runs means an
+    operator can still accept a task in a journal that never had the step,
+    without rewriting history.
+    """
     task_id = str(task["task_id"])
     path = run_dir / "tasks" / task_id / "verification.md"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -326,6 +380,219 @@ def _write_verification(run_dir: Path, task: dict[str, Any]) -> Path:
         encoding="utf-8",
     )
     return path
+
+
+def _verification_spec(registry: dict[str, Any], *, task: bool) -> dict[str, Any]:
+    artifact_id = "task_verification" if task else "verification"
+    spec = dict(registry["artifacts"][artifact_id])
+    spec["id"] = artifact_id
+    return spec
+
+
+def stage_declares_verification(registry: dict[str, Any], stage: dict[str, Any]) -> bool:
+    return "verification" in stage["artifacts"] and "verification" in registry["artifacts"]
+
+
+def verification_report(
+    run_dir: Path,
+    registry: dict[str, Any],
+    *,
+    stage_id: str,
+    task_id: str | None = None,
+) -> tuple[Path, list[str], str | None, str]:
+    """`(path, errors, verdict, reason)` for a report, valid or not.
+
+    A report is valid only when it exists, carries the required sections, has
+    at least three checks with a command and an output each, and states one
+    verdict — never the template's `PASS | FAIL` choice.
+    """
+    spec = _verification_spec(registry, task=task_id is not None)
+    path = artifact_path(run_dir, spec, task_id=task_id, stage_id=stage_id)
+    if not path.is_file():
+        return path, [f"missing artifact: {path}"], None, ""
+    text = path.read_text(encoding="utf-8")
+    errors = validate_markdown(path, list(spec.get("required_sections") or []))
+    errors.extend(validate_verification_report(path))
+    verdict, verdict_errors = verification_verdict(text)
+    return path, errors, verdict, verification_reason(text)
+
+
+def _relative(run_dir: Path, path: Path) -> str:
+    try:
+        return path.relative_to(run_dir.resolve()).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _latest_verify(
+    events: list[dict[str, Any]], *, stage_id: str, task_id: str | None
+) -> dict[str, Any] | None:
+    """The newest VERIFY event for this stage (or task), ignoring other stages."""
+    for event in reversed(events):
+        if event.get("event_type") != "VERIFY":
+            continue
+        if task_id is not None:
+            if event.get("task_id") == task_id:
+                return event
+        elif event.get("stage") == stage_id and not event.get("task_id"):
+            return event
+    return None
+
+
+def verification_is_stale(
+    run_dir: Path,
+    *,
+    stage_id: str,
+    task_id: str | None = None,
+    events: list[dict[str, Any]] | None = None,
+) -> bool:
+    """True when the newest verdict no longer describes the current artifacts.
+
+    A report is a statement about specific files.  If a producer submitted
+    after it, or a veto or a rejected gate reopened the stage, the old PASS is
+    history, not a licence: the verifier has to look again.
+    """
+    events = events if events is not None else read_events(run_dir / "blackbox.jsonl")
+    last: int | None = None
+    for index, event in enumerate(events):
+        if event.get("event_type") != "VERIFY":
+            continue
+        if task_id is not None:
+            if event.get("task_id") == task_id:
+                last = index
+        elif event.get("stage") == stage_id and not event.get("task_id"):
+            last = index
+    if last is None:
+        return True
+    for event in events[last + 1 :]:
+        if task_id is not None:
+            if event.get("task_id") != task_id:
+                continue
+        elif str(event.get("stage") or "") != stage_id or event.get("task_id"):
+            continue
+        event_type = str(event.get("event_type") or "")
+        if event_type == "VETO":
+            return True
+        if event_type == "GATE_DECISION" and (event.get("verdict") or {}).get("status") != "PASS":
+            return True
+        if event_type == "ARTIFACT_SUBMIT":
+            # The verifier submits its own report; that is not new evidence
+            # about the producers' work.  Any other submit is.
+            if str(event.get("role") or "") == VERIFIER:
+                continue
+            return True
+    return False
+
+
+def _record_verification_locked(
+    run_dir: Path,
+    state: dict[str, Any],
+    registry: dict[str, Any],
+    *,
+    stage_id: str,
+    task_id: str | None,
+    evidence: list[str],
+) -> dict[str, Any]:
+    """Write one VERIFY event for the report currently on disk.
+
+    The event is idempotent per report hash: re-approving after a crash does
+    not mint a second witness for the same bytes.  The caller must hold the
+    run lock.
+    """
+    path, errors, verdict, reason = verification_report(
+        run_dir, registry, stage_id=stage_id, task_id=task_id
+    )
+    if errors:
+        raise VerificationError(
+            "verification report is not valid:\n- " + "\n- ".join(errors[:6])
+        )
+    assert verdict is not None
+    relative = _relative(run_dir, path)
+    digest = sha256_file(path)
+    events = read_events(run_dir / "blackbox.jsonl")
+    latest = _latest_verify(events, stage_id=stage_id, task_id=task_id)
+    if latest is not None and not verification_is_stale(
+        run_dir, stage_id=stage_id, task_id=task_id, events=events
+    ):
+        same_verdict = str((latest.get("verdict") or {}).get("status")) == verdict
+        same_report = any(
+            str(item.get("path")) == relative and str(item.get("sha256")) == digest
+            for item in latest.get("artifacts") or []
+            if isinstance(item, dict)
+        )
+        if same_verdict and same_report:
+            return latest
+    reason_text = f"; reason: {reason}" if reason else ""
+    event_evidence = list(evidence) + [f"{relative}: sha256 {digest[:12]} verdict {verdict}{reason_text}"]
+    model = _model_for(VERIFIER, "tier-3-frontier")
+    return record_event(
+        run_dir,
+        state,
+        stage=stage_id,
+        task_id=task_id,
+        role=VERIFIER,
+        event_type="VERIFY",
+        why="Independent verification of the declared artifacts",
+        for_what=f"Decide {'task ' + task_id if task_id else stage_id}",
+        action=f"VERIFY {verdict} for {'task ' + task_id if task_id else stage_id}",
+        verdict_status=verdict,
+        verified_by=VERIFIER,
+        artifacts=[_report_entry(run_dir, path)],
+        evidence=event_evidence,
+        model_tier=model["tier"],
+        model_id=model["model_id"],
+        reasoning_effort=model["effort"],
+    )
+
+
+def _report_entry(run_dir: Path, path: Path) -> dict[str, Any]:
+    return {
+        "path": _relative(run_dir, path),
+        "sha256": sha256_file(path),
+        "bytes": path.stat().st_size,
+    }
+
+
+def record_verification(
+    run_id: str,
+    *,
+    stage_id: str,
+    task_id: str | None = None,
+    evidence: list[str],
+    root: str | Path | None = None,
+) -> dict[str, Any]:
+    """Record the verifier's verdict from the report on disk."""
+    run_dir = safe_run_dir(run_id, root)
+    with run_lock(run_dir):
+        state = load_state(run_dir)
+        if verification_policy(state) != "role":
+            raise RunError(f"run {run_id} has no role verification policy")
+        registry = load_artifacts(state["mode"])
+        event = _record_verification_locked(
+            run_dir, state, registry, stage_id=stage_id, task_id=task_id, evidence=evidence
+        )
+        save_state(run_dir, state)
+        return event
+
+
+def _task_deliverable_errors(
+    run_dir: Path, task: dict[str, Any], registry: dict[str, Any]
+) -> list[str]:
+    """A task is acceptable only when its deliverable and files are on disk."""
+    errors: list[str] = []
+    spec = dict(registry["artifacts"]["deliverable"])
+    spec["id"] = "deliverable"
+    spec["stage"] = "s4_build"
+    errors.extend(
+        validate_artifact(
+            run_dir, spec, {str(task["task_id"]): task}, stage_id="s4_build"
+        )
+    )
+    for path in task.get("artifacts") or []:
+        candidate = run_dir / str(path)
+        if not candidate.exists():
+            errors.append(f"missing task artifact: {path}")
+    return errors
 
 
 def init_run(
@@ -387,17 +654,39 @@ def _task_work_order(
     registry: dict[str, Any],
 ) -> dict[str, Any]:
     state = load_state(run_dir)
+    policy = verification_policy(state)
     artifacts = stage_artifacts(
-        pipeline, registry, state["mode"], stage, task_id=task["task_id"], run_dir=run_dir
+        pipeline,
+        registry,
+        state["mode"],
+        stage,
+        task_id=task["task_id"],
+        run_dir=run_dir,
+        verification_policy=policy,
     )
     status = task["status"]
     if status == "review":
-        action = "verify"
-        roles = ["02-independent-verifier"]
-        instructions = (
-            f"Task {task['task_id']} is submitted and waits for independent verification."
+        # The verifier writes one report and gets nothing else writable: the
+        # producer's deliverable and files are listed read-only on purpose.
+        artifacts = [spec for spec in artifacts if spec.get("id") == "task_verification"]
+        report = run_dir / "tasks" / str(task["task_id"]) / "verification" / "verification.md"
+        report_rel = _relative(run_dir, report)
+        deliverables = ", ".join(
+            f"`{item}`" for item in [f"tasks/{task['task_id']}/deliverable.md"]
+            + list(task.get("allowed_files") or [])
         )
-        next_command = f"factory task accept --run-id {run_id} --task-id {task['task_id']}"
+        action = "verify"
+        roles = [VERIFIER]
+        instructions = (
+            f"Task {task['task_id']} is submitted and waits for independent verification. "
+            f"Read (do not edit) {deliverables}. Run at least three adversarial checks — "
+            "one of them `factory verify` for the stage — and write "
+            f"`{report_rel}` with the commands, their real output and one verdict "
+            "`PASS` or `FAIL`. You may write only that report."
+        )
+        next_command = (
+            f"factory task accept --run-id {run_id} --task-id {task['task_id']}"
+        )
     elif status == "in_progress":
         action = "produce"
         roles = [task["owner"]]
@@ -447,10 +736,18 @@ def _stage_work_order(
     pipeline: dict[str, Any],
     registry: dict[str, Any],
 ) -> dict[str, Any]:
-    artifacts = stage_artifacts(pipeline, registry, state["mode"], stage, run_dir=run_dir)
+    policy = verification_policy(state)
+    artifacts = stage_artifacts(
+        pipeline, registry, state["mode"], stage, run_dir=run_dir, verification_policy=policy
+    )
     gate = state["gate_status"].get(stage["gate"]["id"], {})
     status = state["stage_status"].get(stage["id"])
     approver = str(stage["gate"]["approver"])
+    report_path, report_errors, report_verdict, _reason = (
+        verification_report(run_dir, registry, stage_id=stage["id"])
+        if policy == "role" and stage_declares_verification(registry, stage)
+        else (run_dir, ["verification is not part of this run"], None, "")
+    )
     if gate.get("status") == "needs_human":
         action = "gate"
         instructions = f"Gate {stage['gate']['id']} needs a human decision."
@@ -459,14 +756,27 @@ def _stage_work_order(
             "--approver human:<id> --evidence <text>"
         )
     elif status == "review":
-        errors = validate_stage(run_dir, stage, registry, state["tasks"])
+        errors = validate_stage(
+            run_dir, stage, registry, state["tasks"], verification_policy=policy
+        )
         if errors:
-            action = "verify"
+            # The stage is in review but no longer validates (an artifact was
+            # edited after submission, or a rule tightened).  That is a
+            # producer's repair, not a verifier's job: the verifier has no
+            # write scope for the files that are wrong.
+            action = "produce"
             instructions = (
                 "Artifacts are submitted but deterministic validation fails: "
                 + "; ".join(errors[:3])
             )
             next_command = f"factory verify --run-id {run_id} --stage {stage['id']}"
+            pending = _pending_artifacts(run_dir, state, stage, pipeline, registry)
+            if not any(item["id"] in VERIFICATION_IDS for item in pending):
+                # The offender is a producer artifact; the witness stays out of
+                # the repair's write scope.
+                artifacts = [
+                    spec for spec in artifacts if spec.get("id") not in VERIFICATION_IDS
+                ]
         else:
             action = "gate"
             instructions = "All required artifacts validate. Ask the gate approver to decide."
@@ -476,22 +786,77 @@ def _stage_work_order(
                 f"--approver {gate_approver} --evidence <text>"
             )
     else:
-        action = "produce"
-        instructions = (
-            f"Stage {stage['id']}: produce the listed artifacts using the templates, "
-            "then submit them. Do not write outside your role's scope."
+        pending = _pending_artifacts(run_dir, state, stage, pipeline, registry)
+        producer_pending = [item for item in pending if item["id"] not in VERIFICATION_IDS]
+        # Artifact shape is not the whole contract: acceptance rows, REQ
+        # parity, the plan graph and the task graph are stage-level rules.
+        # If any of them still fails, the work belongs to a producer — the
+        # verifier has no write scope to fix it, and asking it to look again
+        # only burns an attempt.
+        producer_errors = validate_stage(
+            run_dir, stage, registry, state["tasks"], verification_policy=None
         )
-        next_command = (
-            f"factory submit --run-id {run_id} --stage {stage['id']} "
-            "--role <role> --artifact <path>"
-        )
+        if (
+            policy == "role"
+            and approver == VERIFIER
+            and stage_declares_verification(registry, stage)
+            and not producer_pending
+            and not producer_errors
+            and (
+                report_errors
+                or report_verdict != "PASS"
+                or verification_is_stale(run_dir, stage_id=stage["id"])
+            )
+        ):
+            # Every producer artifact validates; the only missing witness is
+            # the verifier's own report.  The order carries that one spec, so
+            # the runtime opens exactly the report's directory writable.
+            action = "verify"
+            artifacts = [spec for spec in artifacts if spec.get("id") == "verification"]
+            report_rel = _relative(run_dir, report_path)
+            readable = ", ".join(
+                f"`{spec['path']}`" for spec in stage_artifacts(
+                    pipeline, registry, state["mode"], stage, run_dir=run_dir,
+                    verification_policy=policy,
+                ) if spec.get("id") != "verification"
+            )
+            instructions = (
+                f"Stage {stage['id']} artifacts validate; now verify them as "
+                "`02-independent-verifier`. Read (do not edit) " + (readable or "—")
+                + ". Run at least three adversarial checks — one of them "
+                f"`factory verify --run-id {run_id} --stage {stage['id']}` — and write "
+                f"`{report_rel}` with the commands, their real output and one verdict "
+                "`PASS` or `FAIL`. You may write only that report."
+            )
+            next_command = (
+                f"factory verify --run-id {run_id} --stage {stage['id']} && "
+                f"factory submit --run-id {run_id} --stage {stage['id']} "
+                f"--role {VERIFIER} --artifact {report_rel}"
+            )
+        else:
+            action = "produce"
+            # A producer never gets the verifier's report writable: the report
+            # is the witness, not an input to the work it judges.
+            artifacts = [
+                spec for spec in artifacts if spec.get("id") not in VERIFICATION_IDS
+            ]
+            instructions = (
+                f"Stage {stage['id']}: produce the listed artifacts using the templates, "
+                "then submit them. Do not write outside your role's scope."
+            )
+            next_command = (
+                f"factory submit --run-id {run_id} --stage {stage['id']} "
+                "--role <role> --artifact <path>"
+            )
     order = {
         "schema_version": "1.0.0",
         "action": action,
         "run_id": run_id,
         "stage": stage["id"],
         "stage_title": stage["title"],
-        "roles": effective_roles(pipeline, state["mode"], stage),
+        # A verifier step is addressed to one role; a produce or gate order
+        # still names every role active on the stage.
+        "roles": [VERIFIER] if action == "verify" else effective_roles(pipeline, state["mode"], stage),
         "task_id": None,
         "artifacts": artifacts,
         "pending_artifacts": [],
@@ -504,6 +869,14 @@ def _stage_work_order(
         order["pending_artifacts"] = _pending_artifacts(
             run_dir, state, stage, pipeline, registry
         )
+        if action == "produce":
+            # A producer's order names the producer's debt only; the verifier's
+            # report is not something this role can or should produce.
+            order["pending_artifacts"] = [
+                item
+                for item in order["pending_artifacts"]
+                if item["id"] not in VERIFICATION_IDS
+            ]
     order["next_role"] = _next_role(order["pending_artifacts"], order, stage, None)
     return order
 
@@ -695,7 +1068,12 @@ def submit_work(
             raise RunError(f"role {role} is not active on {stage_id} in mode {state['mode']}")
         if task_id:
             submit_task(state, task_id, role, artifacts, run_dir=run_dir)
-            entries = _task_entries(run_dir, state["tasks"][task_id])
+            # A producer cannot submit the verifier's report: it is not theirs,
+            # and binding its hash at submit time would blame them for a file
+            # the verifier writes afterwards.
+            entries = _task_entries(
+                run_dir, state["tasks"][task_id], include_verification=False
+            )
             model = _model_for(role)
             event = record_event(
                 run_dir,
@@ -721,7 +1099,9 @@ def submit_work(
         _check_stage_artifact_owners(
             run_dir, stage, role, entries, pipeline, state, registry
         )
-        errors = validate_stage(run_dir, stage, registry, state["tasks"])
+        errors = validate_stage(
+            run_dir, stage, registry, state["tasks"], verification_policy=verification_policy(state)
+        )
         state["stage_status"][stage_id] = "review" if not errors else "in_progress"
         model = _model_for(role)
         event = record_event(
@@ -791,7 +1171,7 @@ def _declared_for_path(
                         ):
                             matches.append((stage, owner, None))
                     continue
-                base, is_dir = _declared_artifact_base(run_dir, spec)
+                base, is_dir = _declared_artifact_base(run_dir, spec, stage_id=stage["id"])
                 if base == target or (is_dir and base in target.parents):
                     matches.append((stage, owner, None))
 
@@ -935,6 +1315,33 @@ def gate_approve(
         errors = verify_run(run_dir, stage["id"], require_gate=False)
         if errors:
             raise VerificationError("gate preconditions failed:\n- " + "\n- ".join(errors))
+        if verification_policy(state) == "role" and stage_declares_verification(
+            registry, stage
+        ):
+            if approver != VERIFIER:
+                raise VerificationError(
+                    f"gate {gate_id} closes a stage that requires an independent "
+                    f"verification report; only {VERIFIER} may approve it"
+                )
+            path, report_errors, verdict, reason = verification_report(
+                run_dir, registry, stage_id=stage["id"]
+            )
+            if report_errors:
+                raise VerificationError(
+                    "gate requires a valid verification report:\n- "
+                    + "\n- ".join(report_errors[:6])
+                )
+            if verdict != "PASS":
+                raise VerificationError(
+                    f"the verifier's report says {verdict}: {reason or 'no reason given'}"
+                )
+            # The verdict is recorded before the gate decision, so the journal
+            # always reads producer → VERIFY → GATE_DECISION.
+            verify_event = _record_verification_locked(
+                run_dir, state, registry, stage_id=stage["id"], task_id=None,
+                evidence=[f"gate {gate_id} approval"],
+            )
+            evidence = list(evidence) + [f"VERIFY {verify_event['event_id']}"]
         entries = _stage_entries(run_dir, stage, pipeline, registry, state)
         prepared_plan = _prepare_plan(run_dir, state) if stage["id"] == "s3_plan" else None
         gate_record(state, stage, status="approved", decided_by=approver, evidence=evidence)
@@ -993,6 +1400,17 @@ def gate_reject(
         state = load_state(run_dir)
         registry = load_artifacts(state["mode"])
         _require_current(state, pipeline, stage)
+        if verification_policy(state) == "role" and stage_declares_verification(
+            registry, stage
+        ):
+            _path, report_errors, verdict, _reason = verification_report(
+                run_dir, registry, stage_id=stage["id"]
+            )
+            if not report_errors and verdict == "FAIL":
+                _record_verification_locked(
+                    run_dir, state, registry, stage_id=stage["id"], task_id=None,
+                    evidence=evidence or ["gate rejected"],
+                )
         entries = _stage_entries(run_dir, stage, pipeline, registry, state)
         gate_record(state, stage, status="rejected", decided_by=approver, evidence=evidence)
         gate = stage_gate(state, stage)
@@ -1439,7 +1857,9 @@ def task_submit(run_id: str, task_id: str, role: str, artifacts: list[str], *, r
         state = load_state(run_dir)
         _require_current(state, pipeline, find_stage(pipeline, "s4_build"))
         submit_task(state, task_id, role, artifacts, run_dir=run_dir)
-        entries = _task_entries(run_dir, state["tasks"][task_id])
+        entries = _task_entries(
+            run_dir, state["tasks"][task_id], include_verification=False
+        )
         model = _model_for(role)
         event = record_event(
             run_dir, state, stage="s4_build", task_id=task_id, role=role,
@@ -1458,15 +1878,38 @@ def task_accept(run_id: str, task_id: str, *, root: str | Path | None = None) ->
     pipeline = load_pipeline()
     with run_lock(run_dir):
         state = load_state(run_dir)
+        registry = load_artifacts(state["mode"])
         _require_current(state, pipeline, find_stage(pipeline, "s4_build"))
+        task = get_task(state, task_id)
+        if task["status"] != "review":
+            raise RunError(f"task {task_id} is {task['status']}, cannot accept")
+        if verification_policy(state) == "role":
+            _path, report_errors, verdict, reason = verification_report(
+                run_dir, registry, stage_id="s4_build", task_id=task_id
+            )
+            if report_errors:
+                raise VerificationError(
+                    f"task {task_id} has no valid verification report:\n- "
+                    + "\n- ".join(report_errors[:6])
+                )
+            if verdict != "PASS":
+                raise VerificationError(
+                    f"the verifier's report for {task_id} says {verdict}: "
+                    f"{reason or 'no reason given'}"
+                )
+            _record_verification_locked(
+                run_dir, state, registry, stage_id="s4_build", task_id=task_id,
+                evidence=[f"task {task_id} acceptance"],
+            )
+        else:
+            _write_verification(run_dir, task)
         accept_task(state, task_id)
-        _write_verification(run_dir, state["tasks"][task_id])
         entries = _task_entries(run_dir, state["tasks"][task_id])
-        model = _model_for("02-independent-verifier", "tier-3-frontier")
+        model = _model_for(VERIFIER, "tier-3-frontier")
         event = record_event(
-            run_dir, state, stage="s4_build", task_id=task_id, role="02-independent-verifier",
+            run_dir, state, stage="s4_build", task_id=task_id, role=VERIFIER,
             event_type="TASK_DONE", why="Independent verification passed", for_what=f"Accept {task_id}",
-            action=f"Accepted {task_id}", verdict_status="PASS", verified_by="02-independent-verifier",
+            action=f"Accepted {task_id}", verdict_status="PASS", verified_by=VERIFIER,
             evidence=[f"task {task_id} accepted"], artifacts=entries, model_tier=model["tier"],
             model_id=model["model_id"], reasoning_effort=model["effort"],
         )
@@ -1480,14 +1923,24 @@ def task_reject(run_id: str, task_id: str, reason: str, *, root: str | Path | No
     pipeline = load_pipeline()
     with run_lock(run_dir):
         state = load_state(run_dir)
+        registry = load_artifacts(state["mode"])
         _require_current(state, pipeline, find_stage(pipeline, "s4_build"))
+        if verification_policy(state) == "role":
+            _path, report_errors, verdict, _report_reason = verification_report(
+                run_dir, registry, stage_id="s4_build", task_id=task_id
+            )
+            if not report_errors and verdict == "FAIL":
+                _record_verification_locked(
+                    run_dir, state, registry, stage_id="s4_build", task_id=task_id,
+                    evidence=[f"task {task_id} rejected: {reason}"],
+                )
         reject_task(state, task_id, reason)
-        model = _model_for("02-independent-verifier", "tier-3-frontier")
+        model = _model_for(VERIFIER, "tier-3-frontier")
         event = record_event(
-            run_dir, state, stage="s4_build", task_id=task_id, role="02-independent-verifier",
+            run_dir, state, stage="s4_build", task_id=task_id, role=VERIFIER,
             event_type="REWORK", why="Independent verification failed", for_what=f"Rework {task_id}",
             action=f"Rejected {task_id}: {reason}", verdict_status="FAIL",
-            verified_by="02-independent-verifier", evidence=[reason], reason_code="TASK_REJECTED",
+            verified_by=VERIFIER, evidence=[reason], reason_code="TASK_REJECTED",
             model_tier=model["tier"], model_id=model["model_id"], reasoning_effort=model["effort"],
         )
         save_state(run_dir, state)

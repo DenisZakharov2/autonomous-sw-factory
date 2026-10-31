@@ -234,6 +234,8 @@ def test_normalise_allowed_rejects_escape(tmp_path):
 
 
 def test_parallel_results_verify_as_a_build_stage(build_env):
+    from conftest import write_stage_verification, write_task_verification
+
     runs, run_dir, stage = build_env
     tasks = list(_tasks(run_dir).values())
     run_parallel_tasks("run-01", run_dir, stage, tasks, RecordingExecutor(sleep=0.02), root=runs)
@@ -241,7 +243,9 @@ def test_parallel_results_verify_as_a_build_stage(build_env):
         "def test_ok():\n    assert True\n", encoding="utf-8"
     )
     for task_id in ("TASK-A", "TASK-B"):
+        write_task_verification(run_dir, task_id)
         task_accept("run-01", task_id, root=runs)
+    write_stage_verification(run_dir, "s4_build")
     assert verify_run(run_dir, "s4_build", require_gate=False) == []
 
 

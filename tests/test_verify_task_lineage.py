@@ -64,6 +64,8 @@ def _write(run: Path, relative: str, text: str) -> Path:
 
 
 def _accept_task(run: Path, task_id: str, role: str, body: str) -> None:
+    from conftest import write_task_verification
+
     _write(run, "product/src/todo.py", body)
     _write(run, f"tasks/{task_id}/deliverable.md", DELIVERABLE)
     task_claim("run-01", task_id, role, root=run.parent)
@@ -72,13 +74,18 @@ def _accept_task(run: Path, task_id: str, role: str, body: str) -> None:
         ["product/src/todo.py", f"tasks/{task_id}/deliverable.md"],
         root=run.parent,
     )
+    write_task_verification(run, task_id)
     task_accept("run-01", task_id, root=run.parent)
 
 
 def test_dependent_task_may_rewrite_the_shared_file(s4_run):
+    from conftest import write_stage_verification
+
     run, role = s4_run
     _accept_task(run, "TASK-001", role, "TASKS = []\n")
     _accept_task(run, "TASK-002", role, "TASKS = []\n\n\ndef add(title):\n    TASKS.append(title)\n")
+    # The stage itself is verified once all its tasks are accepted.
+    write_stage_verification(run, "s4_build")
     assert verify_run(run, "s4_build") == []
 
 

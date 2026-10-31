@@ -26,13 +26,14 @@
 
 | Режим | Роли | Бюджет |
 | :--- | :--- | :--- |
-| `nano` | 00, 01, 12, 02 | 2.5M токенов, 120 мин, $6 |
+| `nano` | 00, 01, 12, 02 | 3.1M токенов, 120 мин, $6 |
 | `standard` | 00, 01, 02, 03, 04, 05, 06, 08, 12, 14, 16, 19 | 2.9M, 120 мин, $25 |
 | `enterprise` | все 22 | 6M, 1440 мин, $120 |
 | `brownfield` | те же 12, что `standard` | 4.5M, 30 мин, $30 |
 
 `nano`, `standard` и `brownfield` — по замеру полного реального прогона
-(`nano`: 1.78–1.96M total; `standard-mini`: 1.98M, 15 шагов; `product-mini`:
+(`nano`: 1.78–1.96M на `nano-todo` и 2.44M на `nano-product-mini`;
+`standard-mini`: 1.98M, 15 шагов; `product-mini`:
 2.28M, 15 шагов; `brownfield`: 3.56M, 17 шагов); `enterprise` — расчёт, на
 реальном Hermes не проверялся.
 

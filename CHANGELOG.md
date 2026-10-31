@@ -44,9 +44,29 @@ All notable changes are recorded here. The project follows a simple
   `constraints.md` удержаны: три `REQ`, две задачи, `s1_spec` сдали
   `05-business-analyst` и `06-system-analyst` раздельно. Запись добавлена в
   `eval/baseline-hermes.json` рядом с `nano-todo`.
+- **кейс `nano-product-mini`:** режим `nano` на реальном крейте `pfu` из
+  `proxy-for-ubuntu` (seed `product/`, 252 КБ, тот же commit, что у
+  `product-mini`). Задача — действующие лимиты канала в `config.rs` и
+  `router.rs`. Зелёный прогон на реальном Hermes: 13 шагов, 33 события, 2
+  задачи, 2 436 448 total / 390 496 billable, 95 API-вызовов, 11,8 минуты,
+  224 product tests (`cargo test --lib`); `factory compare` с fake совпал
+  постадийно (13/13, 33/33). Запись — пятая в `eval/baseline-hermes.json`.
+- **`nano-todo/constraints.md`:** todo-специфичные правила (три `REQ` —
+  `add`/`list`/`done`, ровно две задачи, один автор `s1_spec`) переехали из
+  промпта режима в рамки кейса. Промпт `nano` теперь универсален: другой
+  nano-кейс описывает свои `REQ` и задачи сам.
 
 ### Changed
 
+- **бюджет `nano` поднят с 2.5M до 3.1M токенов** (минуты те же 120) по
+  худшему из двух зелёных nano-кейсов: `nano-product-mini` дал 2 436 448
+  total — 97,5 % прежнего потолка. 2 436 448 + 25 % → 3.1M. Правило прежнее:
+  законный прогон, подошедший к потолку ближе чем на 10 %, пересчитывается по
+  замеру, а не на глаз.
+- **fake-эталон `eval/baseline.json` перегенерирован** для двух CI-кейсов.
+  Шаги и события не сдвинулись (13/33 и 15/35 — значения из `aeeb148`),
+  обновились `prompt_chars` (у `nano-todo` вырос: рамки кейса теперь в каждом
+  промпте) и `seconds`; brownfield и product-mini в fake-эталон не входят.
 - **бюджет `brownfield` пересчитан с 1.8M / 480 минут на 4.5M / 30 минут**
   по полному прогону: 3 560 791 total + 25 %, 17,2 мин + 25 %. Первый запуск
   с потолком 3M остановился на `s7_release` при 3 115 133 total — это замер

@@ -83,6 +83,33 @@ def test_case_constraints_reach_the_prompt_without_an_empty_section(run_env):
     assert "обрезано" in build_prompt(order, run_dir=run_dir)
 
 
+def test_nano_prompt_carries_no_case_specific_rules(run_env):
+    """Every prompt of a mode is generic: a case brings its own frame.
+
+    The todo frame (three REQ named add/list/done, exactly two tasks) used to
+    live in the nano prompt, so any other nano case was forced into it.  It now
+    travels in `constraints.md`, and no mode prompt may name it again.
+    """
+    run_dir = run_env / "run-01"
+    seen: list[str] = []
+    for _ in range(40):
+        order = next_action("run-01", root=run_env)
+        if order.get("stage") in {None, "s4_build"}:
+            break
+        seen.append(build_prompt(order, run_dir=run_dir))
+        result = run_loop("run-01", FakeExecutor(), max_steps=1, root=run_env)
+        if result.code == 2:
+            _approve_human("run-01", result, run_env)
+    assert seen, "no prompt was built"
+    joined = "\n".join(seen)
+    # Accepted artifacts may quote REQ ids; what must not come back is the rule
+    # text that pinned every nano case to the todo product.
+    assert "Правила спецификации" not in joined
+    assert "ровно три требования" not in joined
+    assert "ровно из двух задач" not in joined
+    assert "допустимы только `TASK-001`" not in joined
+
+
 def test_work_order_says_who_owes_what(run_env):
     order = next_action("run-01", root=run_env)
     assert order["action"] == "produce"

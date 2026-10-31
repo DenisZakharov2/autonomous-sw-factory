@@ -22,8 +22,10 @@ hermes -z "<prompt>" --in <run_dir> --usage-file <runtime>/usage.json \
 - `--yolo` auto-approves the agent's own tool calls; it never closes a factory
   gate.
 - Measured on a full `nano-todo` run: 13 steps, 1 780 308 total / 336 980
-  billable tokens, 10.5 minutes, `verify` OK. The `nano` budget (2.5M) is sized
-  from that measurement; raise it only for a more expensive model.
+  billable tokens, 10.5 minutes, `verify` OK; a full `nano-product-mini` run on
+  the real `pfu` crate: 13 steps, 2 436 448 total / 390 496 billable, 11.8
+  minutes. The `nano` budget (3.1M) is the worse of the two + 25 %; raise it
+  only for a more expensive model.
 
 ## Capabilities
 

@@ -24,7 +24,7 @@ eval/cases/<case-id>/
   case.json       # id, mode, title, max_steps, budget, thresholds
   idea.md         # единственный источник истины о продукте
   constraints.md  # необязательные рамки кейса: REQ, задачи, роли стадии
-  seed/           # необязательный seed brownfield: tar.gz + seed.json
+  seed/           # необязательный seed: tar.gz + seed.json (существующее дерево)
   expected.json   # инварианты: артефакты, REQ, задачи, гейты, тесты продукта
   checks/         # необязательные pytest-проверки продукта
 ```
@@ -69,15 +69,18 @@ eval/cases/<case-id>/
 пустой файл равен отсутствию.
 Рамки — число `REQ`, состав задач `s4_build`, роли, которые сдают
 мультиролевую стадию, требования к тестам продукта — принадлежат кейсу, а не
-режиму: промпт `standard` остаётся универсальным для всех его кейсов.
-`standard-mini` задаёт так три `REQ`, две задачи и двух авторов `s1_spec`;
-правила `nano` пока живут в промпте режима.
+режиму: промпт режима универсален для всех его кейсов. `standard-mini` и
+`product-mini` задают так три `REQ` и две задачи, `nano-todo` и
+`nano-product-mini` — свои три `REQ`, две задачи и одного автора `s1_spec`.
+Конкретных `REQ`, имён команд и числа задач в промпте режима нет: иначе
+`nano` умел бы только todo-кейс.
 
-## Seed для brownfield
+## Seed для существующего дерева
 
-Greenfield-кейс начинает с пустого каталога, brownfield — с существующего
-репозитория. `factory eval` не подкладывает дерево сам, поэтому кейс несёт
-`seed/repo.tar.gz` и `seed/seed.json`:
+Greenfield-кейс начинает с пустого каталога, brownfield и продуктовые
+кейсы — с существующего репозитория или крейта. `factory eval` не
+подкладывает дерево сам, поэтому кейс несёт `seed/repo.tar.gz` (или
+`seed/product.tar.gz`) и `seed/seed.json`:
 
 - `seed.json` фиксирует `source`, `commit`, `archive`, `sha256` и
   `require_git`; схема — `eval-seed.schema.json`;
@@ -223,9 +226,19 @@ factory eval --cases "$PWD/runs/hermes-cases" --executor hermes \
 по `tokens_billable`.
 
 `total` в 5 раз больше billable: Hermes повторно считает кешированный префикс
-на каждом API-вызове. Потолок `nano` в `pipeline.yaml` — 2.5M / 120 минут по
-этому замеру (три прогона дали 1.78–1.96M); флаги `--budget-*` нужны, только
-если модель дороже измеренной.
+на каждом API-вызове. Потолок `nano` в `pipeline.yaml` — **3.1M / 120 минут**
+по худшему из двух nano-кейсов (см. ниже: 2 436 448 + 25 %); прежние 2.5M
+закрывались на 97,5 %. Флаги `--budget-*` нужны, только если модель дороже
+измеренной.
+
+Измерено 31.10.2026 на `nano-product-mini` — тот же режим `nano`, но seed —
+крейт `pfu` из `proxy-for-ubuntu` (`product/`, 252 КБ, без `.git`), задача в
+`config.rs` и `router.rs`. 13 шагов, 33 события, 2 задачи, 2 436 448 total /
+390 496 billable, 95 API-вызовов, 707 с исполнителя, 11,8 минуты, `pass@1`
+1.0, 224 product tests (`cargo test --lib`; 218 до изменений, 6 новых).
+`constraints.md` удержаны буквально: три `REQ`, ровно `TASK-001`/`TASK-002`,
+`TASK-002` с `depends_on`, `s1_spec` сдала одна роль `01-smart-interviewer`
+(в `nano` нет `05`/`06`). Запись — в `eval/baseline-hermes.json`.
 
 Измерено 30.10.2026 на `standard-mini` (та же модель и конфигурация,
 `constraints.md`: три `REQ`, две задачи, две роли на `s1_spec`): 15 шагов,
@@ -247,7 +260,9 @@ billable, 155 API-вызовов, 1033 с исполнителя, 17,2 мину�
 `pipeline.yaml` — **4.5M / 30 минут**: 3 560 791 + 25 % и 17,2 мин + 25 %.
 Первый запуск с потолком 3M остановился на `s7_release` при 3 115 133 total;
 это число — нижняя граница замера, полный прогон стоит 3.56M. Запись лежит в
-`eval/baseline-hermes.json` рядом с `nano-todo` и `standard-mini`.
+`eval/baseline-hermes.json` рядом с `nano-todo`, `standard-mini`,
+`product-mini` и `nano-product-mini` — пять записей, по одной на каждый
+зелёный прогон реального исполнителя.
 
 ## CI
 

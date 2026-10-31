@@ -97,7 +97,10 @@ def test_eval_set_matches_the_committed_baseline(tmp_path, monkeypatch):
 
 
 def test_load_case_reads_an_optional_constraints_file(tmp_path):
+    # Every shipped case now carries its own frame, so the "no file" branch is
+    # exercised on a copy with the frame removed.
     case_dir = _copy_case("nano-todo", tmp_path)
+    (case_dir / "constraints.md").unlink()
     assert load_case(case_dir)["constraints"] is None
     (case_dir / "constraints.md").write_text("Ровно три `REQ`.\n", encoding="utf-8")
     assert load_case(case_dir)["constraints"].startswith("Ровно три")

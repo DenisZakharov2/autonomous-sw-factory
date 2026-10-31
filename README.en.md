@@ -15,7 +15,7 @@
 - **Producer != Verifier**: only `02-independent-verifier` can record `PASS`; a human can accept risk separately.
 - **SkillSpector 2.12.0 quarantine adapter** with a fail-closed decision table and a hash lock.
 - **Signed journal checkpoints**: `factory sign` stores an HMAC-SHA256 head anchor outside `runs/`; `factory verify` tells `stale` from `rolled_back` and `diverged` — see [`docs/checkpoints.md`](docs/checkpoints.md).
-- **An external eval set and run comparison**: `factory eval` drives fixed cases (`nano-todo`, `standard-mini`, `brownfield-proxy-mini`, `product-mini`) on `fake` or a real executor, checks invariants and numeric baselines, and fails on extra steps, fewer events or more than 10 % cost growth; `factory compare` shows the stage, cost and artifact-hash delta of two runs — see [`docs/eval.md`](docs/eval.md).
+- **An external eval set and run comparison**: `factory eval` drives fixed cases (`nano-todo`, `nano-product-mini`, `standard-mini`, `brownfield-proxy-mini`, `product-mini`) on `fake` or a real executor, checks invariants and numeric baselines, and fails on extra steps, fewer events or more than 10 % cost growth; `factory compare` shows the stage, cost and artifact-hash delta of two runs — see [`docs/eval.md`](docs/eval.md).
 - **38 templates, 13 JSON schemas, a 33-event reference run** in `examples/nano-todo/`.
 
 ## Quick start

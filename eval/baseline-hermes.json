@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "generated_at": "2026-10-30T22:51:40Z",
+  "generated_at": "2026-10-31T06:36:00Z",
   "cases": {
     "nano-todo": {
       "status": "complete",
@@ -120,6 +120,36 @@
       "usd": 0.0,
       "seconds": 737.383,
       "prompt_chars": 151349,
+      "verification_coverage": 1.0,
+      "traceability_coverage": 1.0
+    },
+    "nano-product-mini": {
+      "status": "complete",
+      "steps": 13,
+      "loop_steps": 29,
+      "events": 33,
+      "rework_events": 0,
+      "tasks": 2,
+      "gates_closed": [
+        "gate_s0",
+        "gate_s00",
+        "gate_s1",
+        "gate_s15",
+        "gate_s2",
+        "gate_s3",
+        "gate_s4",
+        "gate_s5",
+        "gate_s6",
+        "gate_s7",
+        "gate_s8",
+        "gate_s9"
+      ],
+      "pass_at_1": 1.0,
+      "tokens": 2436448,
+      "tokens_billable": 390496,
+      "usd": 0.0,
+      "seconds": 707.538,
+      "prompt_chars": 151232,
       "verification_coverage": 1.0,
       "traceability_coverage": 1.0
     }

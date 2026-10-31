@@ -1,11 +1,13 @@
 # Handoff — 0.3.0
 
-Состояние на 30 октября 2026. Ветка `main`, версия `0.3.0`, 234 теста.
+Состояние на 31 октября 2026. Ветка `main`, версия `0.3.0`, 235 тестов.
 Eval-набор зелёный на реальном Hermes: `eval/baseline-hermes.json` хранит
-три записи — `nano-todo` (`runs/nano-todo-20261030-191409`),
-`standard-mini` (`runs/standard-mini-standard-real`) и `brownfield-proxy-mini`
-(`runs/brownfield-proxy-mini-brownfield-real2`). Fake-эталон CI
-(`eval/baseline.json`) не менялся и проходит.
+пять записей — `nano-todo` (`runs/nano-todo-20261030-191409`),
+`standard-mini` (`runs/standard-mini-standard-real`),
+`brownfield-proxy-mini` (`runs/brownfield-proxy-mini-brownfield-real2`),
+`product-mini` (`runs/product-mini-product-real`) и `nano-product-mini`
+(`runs/nano-product-mini-nano-product-real`). Fake-эталон CI
+(`eval/baseline.json`) перегенерирован 31.10 и проходит.
 
 ## Что вошло в 0.3.0
 
@@ -35,7 +37,7 @@ sandbox         bwrap, run dir writable + ro-bind поверх control plane
 sandbox-rw      ~/.hermes/installs/<hash>, ~/.hermes/cache, ~/.hermes/logs
 timeout         900 s на шаг, --yolo
 budget          3 000 000 total / 120 минут (флаги замера;
-                дефолт режима `nano` после 0.3.0 — 2.5M / 120 мин)
+                дефолт режима `nano` сейчас — 3.1M / 120 мин)
 ```
 
 Команда:
@@ -308,6 +310,85 @@ restore drill). Задача — backoff повторных попыток по�
 2 284 755 + 25 % → **2.9M / 120 минут** (было 2.5M). Время не является
 узким местом: факт 12,3 минуты.
 
+## nano-product-mini на реальном Hermes
+
+Первый nano-кейс на реальном продукте и первый nano-кейс с seed: режим
+`nano`, но продукт — крейт `pfu` из `proxy-for-ubuntu` (commit `dfe54336…`),
+разложенный в `product/` без `.git` (seed 252 КБ — тот же архив, что у
+`product-mini`; 9,7 МБ brownfield-репозитория не дублируется). Задача —
+действующие лимиты канала: `LimitsConfig::effective_for` в `config.rs`,
+отказ `validate`/`validate_for_read` на неизвестный ключ `limits.outbound`
+и переход `Engine::build` на новый метод в `router.rs`.
+
+Сначала todo-специфичные правила nano переехали из промпта режима в
+`eval/cases/nano-todo/constraints.md`: промпт `nano` больше не знает про
+`REQ-001 add` и «ровно две задачи», а рамки кейса знают. Fake `nano-todo`
+после переноса не изменился — 13 шагов / 33 события.
+
+Профиль тот же: одна модель `deepseek-ai/DeepSeek-V4.1-Flash-1017`,
+`--reasoning high`, `--executor-tools auto`, `bwrap`, `--yolo`; бюджет
+замера 2.5M / 120 минут; `CARGO_TARGET_DIR` — прогретый brownfield-target.
+
+```bash
+export FACTORY_RUNS_ROOT="$PWD/runs"
+export CARGO_TARGET_DIR="$PWD/runs/brownfield-src/proxy-for-ubuntu/app/src-tauri/target"
+factory eval --cases "$PWD/runs/hermes-cases-nano-product" --executor hermes \
+  --executor-model deepseek-ai/DeepSeek-V4.1-Flash-1017 \
+  --executor-tools auto --reasoning high --timeout 900 --yolo \
+  --sandbox-rw /home/anony/.hermes/installs/74e85d3cd01c2ec7 \
+  --sandbox-rw ~/.hermes/cache --sandbox-rw ~/.hermes/logs \
+  --sandbox-rw "$CARGO_TARGET_DIR" \
+  --budget-tokens 2500000 --budget-minutes 120 --stamp nano-product-real --json
+```
+
+Итог: `status=complete`, `verify` — OK, все 12 гейтов, **13 шагов, 33
+события, 2 задачи**, 2 436 448 total / 390 496 billable, 95 API-вызовов,
+707 с (11,8 мин), **224 product tests** (`cargo test --lib`; 218 до
+изменений, 6 новых), coverage 1.0/1.0. Прогон уложился в 2.5M на 97,5 % —
+прежний потолок больше не годится, `nano` пересчитан по правилу «+25 % от
+худшего зелёного»: **3.1M / 120 минут**.
+
+| step | stage | task | role | total | in | cache | out | billable | api | sec |
+| ---: | :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | s00_intake | — | 01-smart-interviewer | 24 732 | 12 576 | 10 240 | 1 916 | 14 492 | 2 | 24.1 |
+| 2 | s0_vision | — | 01-smart-interviewer | 42 391 | 15 792 | 23 808 | 2 791 | 18 583 | 3 | 30.0 |
+| 3 | s1_spec | — | 01-smart-interviewer | 106 000 | 15 459 | 83 968 | 6 573 | 22 032 | 6 | 47.3 |
+| 4 | s15_quarantine | — | 00-orchestrator | 61 683 | 13 358 | 47 104 | 1 221 | 14 579 | 5 | 23.2 |
+| 5 | s2_architecture | — | 12-fullstack-developer | 195 513 | 26 464 | 156 416 | 12 633 | 39 097 | 8 | 77.7 |
+| 6 | s3_plan | — | 01-smart-interviewer | 57 921 | 9 134 | 46 080 | 2 707 | 11 841 | 4 | 24.7 |
+| 7 | s4_build | TASK-001 | 12-fullstack-developer | 705 840 | 64 761 | 632 576 | 8 503 | 73 264 | 13 | 106.8 |
+| 8 | s4_build | TASK-002 | 12-fullstack-developer | 401 727 | 28 607 | 367 872 | 5 248 | 33 855 | 15 | 102.1 |
+| 9 | s5_acceptance | — | 12-fullstack-developer | 129 549 | 23 797 | 100 352 | 5 400 | 29 197 | 7 | 45.7 |
+| 10 | s6_security | — | 12-fullstack-developer | 66 611 | 13 490 | 48 384 | 4 737 | 18 227 | 4 | 37.4 |
+| 11 | s7_release | — | 12-fullstack-developer | 281 712 | 38 097 | 230 144 | 13 471 | 51 568 | 10 | 87.0 |
+| 12 | s8_docs | — | 12-fullstack-developer | 180 273 | 23 310 | 151 552 | 5 411 | 28 721 | 9 | 45.4 |
+| 13 | s9_learn | — | 00-orchestrator | 182 496 | 28 204 | 147 456 | 6 836 | 35 040 | 9 | 55.9 |
+
+`s4_build` — 1 107 567 total (45 %): `TASK-001` 705 840 (13 вызовов, правка
+2 078-строчного `config.rs` и 6 новых тестов), `TASK-002` 401 727 (15
+вызовов, `router.rs`). Дороже всего после сборки — `s7_release` 281 712 и
+`s2_architecture` 195 513. Дорогая `TASK-001` — плата за чтение большого
+файла и `cargo`-цикл в терминале, а не за rework: `rework_events` = 0.
+
+Рамки кейса удержаны буквально: в `spec.md`/`spec-human.md` ровно
+`REQ-001..003`, в плане ровно `TASK-001`/`TASK-002` (`TASK-002` с
+`depends_on: TASK-001`), `traceability.json` ссылается только на них,
+`s1_spec` сдала одна роль `01-smart-interviewer` — в `nano` ролей `05`/`06`
+нет.
+
+Продукт изменён по идее, а не только по тестам: `effective_for` сливает
+глобальные лимиты с переопределением (`0` в `rate_limit` — «без
+ограничения», неизвестное имя получает глобальные значения),
+`validate_inner` отвергает неизвестный ключ `limits.outbound` и называет его
+в ошибке, `Engine::build` собирает `outbound_limits` через новый метод.
+
+`factory compare nano-product-mini-casecheck nano-product-mini-nano-product-real`:
+шаги и события совпадают постадийно (13/13, 33/33); токены только у реального
+прогона — 390 496 billable. `only_left` — фикстуры `FakeExecutor`
+(`product/src/todo.py`, `product/tests/test_todo.py`, `screens/cli.md`),
+`only_right` — реальные артефакты кейса (`adr/ADR-002.md`, два патча,
+`screens/config-limits.md`).
+
 ## Что исправлено, чтобы гейт `s4_build` проходил
 
 ### 1. `factory/verify.py`: последняя запись на путь, а не все исторические
@@ -373,11 +454,13 @@ pytest собирает тоже, поэтому fake-эталон не изме
 
 ## Известные ограничения
 
-1. **Бюджет `nano` поднят до 2.5M / 120 мин по замеру.** Три реальных прогона
-   дали 1.78–1.96M total (327–367k billable), поэтому 2.5M оставляет ~25 %
-   запаса; прежние 400k останавливали реальный прогон сразу после плана, до
-   написания кода. Флаги `--budget-tokens/--budget-minutes` нужны, только если
-   модель дороже измеренной. USD-потолок $6 номинальный: цена не измеряется.
+1. **Бюджет `nano` — 3.1M / 120 мин по худшему из двух кейсов.**
+   `nano-todo` дал 1.78–1.96M total (327–367k billable), `nano-product-mini`
+   — 2 436 448 (390 496 billable), это 97,5 % прежнего потолка 2.5M, поэтому
+   потолок пересчитан: 2 436 448 + 25 % → 3.1M. Прежние 400k останавливали
+   реальный прогон сразу после плана, до написания кода. Флаги
+   `--budget-tokens/--budget-minutes` нужны, только если модель дороже
+   измеренной. USD-потолок $6 номинальный: цена не измеряется.
 2. **USD не измеряется.** `estimated_cost_usd = 0.0` при `cost_status:
    unknown`; в baseline стоит 0.0, а не `null`, но ценой это не является.
 3. **`brownfield` прогнан на реальном Hermes 30.10.2026**, но с оговоркой:
@@ -402,16 +485,30 @@ pytest собирает тоже, поэтому fake-эталон не изме
    перед релизом гейты закрывает живой человек.
 8. **Одна модель, один провайдер.** Числа не переносятся на другую модель;
    `--reasoning medium` этот провайдер отвергает HTTP 400.
+9. **Ссылка на тест в `traceability.json` проверяется по файлу, а не по
+   имени функции.** `trace._test_exists` отрезает `::name` и сверяет только
+   существование файла, поэтому матрица с несуществующими тестами даёт
+   coverage 1.0. Прогон `nano-product-mini` нашёл это сам: в `acceptance.md`
+   записан `BUG-001` — для `REQ-003` матрица называет
+   `build_collects_outbound_limits_via_effective_for` и
+   `outbound_max_connections_enforced`, а в коде
+   `build_uses_effective_limits_per_outbound` и
+   `max_connections_blocks_and_releases`. Гейт `s5_acceptance` увидел
+   расхождение, но `verification_coverage` остался 1.0. Проверка имени —
+   кандидат в `build_matrix`.
 
 ## Что дальше
 
-- **CI зелёный на `1336b65`:** run 41173606772, 14/14 jobs — ubuntu/macOS/
+- **CI зелёный на `79748c1`:** run `41174141512`, 14/14 jobs — ubuntu/macOS/
   Windows × Python 3.10–3.13, eval и build. Матрица трёх ОС закрыта.
-- Перегенерировать fake-эталон `eval/baseline.json`: в нём 14/33 и 16/35,
-  текущий fake даёт 13/33 и 15/35. Шаги упали после фикса «стадия без
-  pending не зовёт модель» (`f1895da`), но падение шагов не считается
-  регрессией, поэтому тест молчит.
-- Следить за потолками `nano` 2.5M, `standard` 2.9M и `brownfield` 4.5M: если
+- **Fake-эталон перегенерирован 31.10:** `eval/baseline.json` содержит
+  13/33 для `nano-todo` и 15/35 для `standard-mini` (значения из `aeeb148`;
+  в старом тексте handoff было 14/33 и 16/35 — оно устарело до этой сессии),
+  `prompt_chars` обновлены под новые промпты.
+- **Все три режима на реальном продукте закрыты:** `nano` (`nano-product-mini`),
+  `standard` (`standard-mini`, `product-mini`), `brownfield`
+  (`brownfield-proxy-mini`). Это условие DESIGN.md §11 для 1.0.0.
+- Следить за потолками `nano` 3.1M, `standard` 2.9M и `brownfield` 4.5M: если
   законный прогон подойдёт к ним ближе чем на 10 %, поднимать по новому
   замеру, а не на глаз.
 - Добавить `re-record` для легитимного обновления принятого артефакта, если
@@ -421,9 +518,10 @@ pytest собирает тоже, поэтому fake-эталон не изме
 
 ## Решение по релизу
 
-Потолки `nano` подняты до 2.5M / 120 минут по измерению (1.78–1.96M на трёх
-прогонах); `standard` — до **2.9M / 120 минут** по худшему из двух замеров
-(2 284 755 на `product-mini`, 1 978 597 на `standard-mini`). Потолок
-`brownfield` пересчитан по первому полному прогону: **3 560 791 total + 25 %
-→ 4.5M**, 17,2 мин + 25 % → **30 минут**. Прежние расчётные 1.8M / 480 минут
-не покрывали даже `s2_architecture` (948k после шага 9).
+Потолки `nano` — **3.1M / 120 минут** по худшему из двух кейсов: 2 436 448
+total на `nano-product-mini` (97,5 % прежних 2.5M) + 25 %; `standard` —
+**2.9M / 120 минут** по худшему из двух замеров (2 284 755 на `product-mini`,
+1 978 597 на `standard-mini`). Потолок `brownfield` пересчитан по первому
+полному прогону: **3 560 791 total + 25 % → 4.5M**, 17,2 мин + 25 % →
+**30 минут**. Прежние расчётные 1.8M / 480 минут не покрывали даже
+`s2_architecture` (948k после шага 9).

@@ -1,6 +1,6 @@
-# Handoff — 1.0.0
+# Handoff — 1.0.1
 
-Состояние на 31 октября 2026. Ветка `main`, версия `1.0.0`, 235 тестов.
+Состояние на 31 октября 2026. Ветка `main`, версия `1.0.1`, 274 теста.
 Eval-набор зелёный на реальном Hermes: `eval/baseline-hermes.json` хранит
 пять записей — `nano-todo` (`runs/nano-todo-20261030-191409`),
 `standard-mini` (`runs/standard-mini-standard-real`),
@@ -8,6 +8,31 @@ Eval-набор зелёный на реальном Hermes: `eval/baseline-herm
 `product-mini` (`runs/product-mini-product-real`) и `nano-product-mini`
 (`runs/nano-product-mini-nano-product-real`). Fake-эталон CI
 (`eval/baseline.json`) перегенерирован 31.10 и проходит.
+
+## Что вошло в 1.0.1
+
+- **`traceability` проверяет имя теста.** Последний сегмент ссылки после `::`
+  обязан быть объявлен в файле: `def`/`async def`/`class` для Python, `fn` с
+  `#[test]`/`#[tokio::test]` для Rust. Ссылка без `::` по-прежнему проверяет
+  только существование файла. Матрица несёт `test_problems`, `factory trace`
+  печатает причину под `GAP`, eval добавляет её к ошибке покрытия. Исторические
+  прогоны не переписывались: новое правило честно показало 2/3 у
+  `nano-todo-20261030-191409` (REQ-001), `brownfield-proxy-mini-brownfield-real2`
+  (REQ-003) и `nano-product-mini` (REQ-003, BUG-001).
+- **`factory artifact re-record`.** Легальная правка артефакта, принятого на
+  гейте: событие `ARTIFACT_RERECORD` с `old_sha256`, новым `sha256`, причиной и
+  evidence; `verdict` только `DRAFT`, `PASS` запрещён, статусы не двигаются.
+  Право — только у владельца артефакта по реестру. `verify` применяет
+  «последняя запись на путь побеждает» и печатает `re-records: N ...`; правка
+  после re-record снова `tampered`. Схема расширена опциональными `old_sha256`
+  и `reason`, старые журналы валидируются.
+- **Новое описание для человека.** `README.md` и `README.en.md` переписаны:
+  первый экран отвечает, что это, зачем, что вы получаете и чем платите;
+  технические детали (22 роли, 13 стадий, журнал, схемы, eval, CI) — ниже.
+- **Fake-эталон не изменился:** `nano-todo` 13/33, `standard-mini` 15/35,
+  baseline match; `examples/nano-todo verify --require-gate` — OK, trace 3/3.
+- **CI зелёный на `fdff070`:** run `41221412801`, 14/14 jobs
+  (ubuntu/macOS/Windows × Python 3.10–3.13, eval, build).
 
 ## Что вошло в 1.0.0
 
@@ -521,7 +546,7 @@ pytest собирает тоже, поэтому fake-эталон не изме
 
 ## Что дальше
 
-- **CI зелёный на `980a812`:** run `41215104365`, 14/14 jobs — ubuntu/macOS/
+- **CI зелёный на `fdff070`:** run `41221412801`, 14/14 jobs — ubuntu/macOS/
   Windows × Python 3.10–3.13, eval и build. Матрица трёх ОС закрыта.
   Предыдущий прогон (`41214643319` на `1bbb8c8`) упал на одном джобе:
   `test_budget_exhaustion_stops_the_loop` на windows-latest 3.11 — 10-мс шаг

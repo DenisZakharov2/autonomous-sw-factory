@@ -1,9 +1,9 @@
 # Changelog
 
-All notable changes are recorded here. The project follows a simple
-`0.MINOR.PATCH` scheme until `1.0.0`.
+All notable changes are recorded here. From `1.0.0` the project follows
+Semantic Versioning.
 
-## [Unreleased]
+## [1.0.1] — 2026-10-31
 
 ### Added
 
@@ -18,6 +18,10 @@ All notable changes are recorded here. The project follows a simple
   (правка после re-record снова `tampered`) и печатает строку
   `re-records: N ... (stage: N)`. Схема события расширена опциональными
   `old_sha256` и `reason`, поэтому старые журналы валидируются без изменений.
+- **Новое описание фабрики для человека.** `README.md` и `README.en.md`
+  переписаны: первый экран отвечает на три вопроса — что это, зачем это, что
+  вы получаете и чем платите; технические детали (22 роли, 13 стадий, журнал,
+  схемы, eval, CI) перенесены на второй экран.
 
 ### Changed
 
@@ -32,6 +36,12 @@ All notable changes are recorded here. The project follows a simple
   прогоны не переписывались: `nano-product-mini` показывает 2/3 (REQ-003),
   `nano-todo-20261030-191409` — 2/3 (REQ-001). Fake-эталон не изменился:
   13/33 и 15/35.
+
+### Verified
+
+- CI run `41221412801` на `fdff070`: 14/14 jobs (ubuntu/macOS/Windows ×
+  Python 3.10–3.13, eval, build); локально — 274 теста, `factory doctor` — OK,
+  fake eval `nano-todo` 13/33 и `standard-mini` 15/35, baseline match.
 
 ## [1.0.0] — 2026-10-31
 

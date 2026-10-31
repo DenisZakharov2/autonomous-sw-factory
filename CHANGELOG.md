@@ -3,7 +3,7 @@
 All notable changes are recorded here. The project follows a simple
 `0.MINOR.PATCH` scheme until `1.0.0`.
 
-## [Unreleased]
+## [1.0.0] — 2026-10-31
 
 ### Added
 

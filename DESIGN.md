@@ -1,4 +1,4 @@
-# DESIGN.md — концепция Autonomous Software Factory v0.3.0
+# DESIGN.md — концепция Autonomous Software Factory v1.0.0
 
 ## 1. Задача
 
@@ -20,7 +20,7 @@
 4. **Доказательство вместо обещания.** Каждый `PASS` имеет evidence; каждый артефакт — хеш; каждая стадия — проверяемый критерий.
 5. **Рантайм-агностичность.** Ядро не вызывает вендорскую модель. Оно выдаёт JSON work order; Hermes, Claude Code, OpenCode или Cursor его исполняют. `models.yaml` разрешает tier через runtime/env.
 6. **Изоляция.** Комплект (`factory/`) не перезаписывается прогоном. Всё, что создаёт прогон, лежит в `runs/<run_id>/` (или в `examples/<run>/` для эталона).
-7. **Честный статус.** Версия `0.3.0`: движок, схемы, тесты, reference run и исполняемый рантайм (`factory run`) есть; полной автономности и встроенной модели нет.
+7. **Честный статус.** Версия `1.0.0`: движок, схемы, тесты, reference run и исполняемый рантайм (`factory run`) есть; полной автономности и встроенной модели нет.
 
 ## 3. Модель исполнения
 
@@ -176,5 +176,5 @@ Read-only скан ограничен расширениями, числом ф�
 - `0.2.0` — исполняемый рантайм: `pending_artifacts`/`next_role`, адаптеры fake/Hermes/OpenCode, `usage.jsonl`, evidence, tripwire.
 - `0.2.1` — CI-фикс sandbox-тестов.
 - `0.2.2` — граница доверия: `bwrap` по умолчанию для реальных исполнителей, read-only управляющая плоскость; измеренная стоимость шага (`--executor-tools auto`, durable `step`); параллельные задачи `s4_build` в git worktree.
-- `0.3.0` — подписанные контрольные точки (сделано: `factory sign`, HMAC-якорь вне `runs/`), внешний eval-набор (сделано: `factory eval`, два кейса, baseline в CI), сравнение прогонов (сделано: `factory compare`) и зелёный прогон `nano-todo` на реальном Hermes (сделано: `eval/baseline-hermes.json`, разбор — `handoff.md`); текущая.
-- `1.0.0` — после полного прогона `nano`, `standard` и `brownfield` на реальном продукте и зелёного CI на трёх ОС.
+- `0.3.0` — подписанные контрольные точки (`factory sign`, HMAC-якорь вне `runs/`), внешний eval-набор (`factory eval`, два кейса, baseline в CI), сравнение прогонов (`factory compare`) и зелёный прогон `nano-todo` на реальном Hermes (`eval/baseline-hermes.json`, разбор — `handoff.md`).
+- `1.0.0` — полный `nano`, `standard` и `brownfield` на реальном продукте (`nano-product-mini`, `product-mini`, `brownfield-proxy-mini`), пять записей в `eval/baseline-hermes.json`, потолки режимов по замерам и зелёный CI на ubuntu/macOS/Windows (run `41215608643`, 14/14); текущая.

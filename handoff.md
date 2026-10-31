@@ -1,6 +1,6 @@
-# Handoff — 0.3.0
+# Handoff — 1.0.0
 
-Состояние на 31 октября 2026. Ветка `main`, версия `0.3.0`, 235 тестов.
+Состояние на 31 октября 2026. Ветка `main`, версия `1.0.0`, 235 тестов.
 Eval-набор зелёный на реальном Hermes: `eval/baseline-hermes.json` хранит
 пять записей — `nano-todo` (`runs/nano-todo-20261030-191409`),
 `standard-mini` (`runs/standard-mini-standard-real`),
@@ -8,6 +8,22 @@ Eval-набор зелёный на реальном Hermes: `eval/baseline-herm
 `product-mini` (`runs/product-mini-product-real`) и `nano-product-mini`
 (`runs/nano-product-mini-nano-product-real`). Fake-эталон CI
 (`eval/baseline.json`) перегенерирован 31.10 и проходит.
+
+## Что вошло в 1.0.0
+
+- **`nano` на реальном продукте:** кейс `nano-product-mini` на крейте `pfu`
+  (seed 252 КБ, commit `dfe54336…`), 13 шагов, 33 события, 2 436 448 total /
+  390 496 billable, 224 product tests, запись в `eval/baseline-hermes.json`.
+- **Промпт режима стал универсальным:** todo-правила `nano` переехали в
+  `eval/cases/nano-todo/constraints.md`; страж —
+  `test_nano_prompt_carries_no_case_specific_rules`.
+- **Потолок `nano` пересчитан:** 2.5M → 3.1M токенов (худший зелёный прогон
+  + 25 %), минуты те же 120.
+- **Fake-эталон перегенерирован** для двух CI-кейсов: 13/33 и 15/35.
+- **CI на трёх ОС зелёный** на `5326616` (run `41215608643`, 14/14); тест
+  минутного бюджета больше не флейкает на windows-latest 3.11.
+- **Найдено ограничение:** `traceability` проверяет существование файла
+  теста, а не имя функции (см. «Известные ограничения», п. 9).
 
 ## Что вошло в 0.3.0
 

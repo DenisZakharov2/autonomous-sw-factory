@@ -1,6 +1,6 @@
 # Autonomous Software Factory
 
-**Версия 0.3.0.** Это исполнимый kit для стадийной разработки ПО с независимой проверкой, а не «полностью автономная фабрика из 22 думающих агентов». Движок выдаёт work orders, проверяет артефакты и ведёт журнал; роли исполняет рантайм (`factory run` с адаптерами Hermes, OpenCode или детерминированным fake), либо человек.
+**Версия 1.0.0.** Это исполнимый kit для стадийной разработки ПО с независимой проверкой, а не «полностью автономная фабрика из 22 думающих агентов». Движок выдаёт work orders, проверяет артефакты и ведёт журнал; роли исполняет рантайм (`factory run` с адаптерами Hermes, OpenCode или детерминированным fake), либо человек.
 
 [![CI](https://github.com/DenisZakharov2/autonomous-sw-factory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/DenisZakharov2/autonomous-sw-factory/actions/workflows/ci.yml) · [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 

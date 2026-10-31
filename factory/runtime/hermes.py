@@ -69,13 +69,14 @@ class HermesExecutor:
     def toolset_for(self, stage: str | None) -> str | None:
         """The narrowest toolset that can do this stage's work.
 
-        `s4_build` runs the product's check command, so it keeps `terminal`.
-        Every other stage produces Markdown/JSON, which the `file` toolset
-        covers; loading web, browser, delegation and image schemas there costs
-        tokens without changing the artifact.
+        `s4_build` runs the product's check command and `s_in` runs the real
+        backup/restore drill (`git bundle`, `tar`, a restore clone), so both
+        keep `terminal`.  Every other stage produces Markdown/JSON, which the
+        `file` toolset covers; loading web, browser, delegation and image
+        schemas there costs tokens without changing the artifact.
         """
         if self.toolset and self.toolset.strip().lower() == "auto":
-            return "file,terminal" if stage == "s4_build" else "file"
+            return "file,terminal" if stage in {"s4_build", "s_in"} else "file"
         return self.toolset
 
     def command(

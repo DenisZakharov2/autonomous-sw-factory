@@ -79,3 +79,16 @@ def test_role_ids_are_22():
 def test_unknown_mode_rejected():
     with pytest.raises(ConfigError):
         mode_roles(load_pipeline(), "turbo")
+
+
+def test_brownfield_remaps_code_artifacts_to_the_seeded_tree():
+    # A brownfield run starts from an existing repository, so the greenfield
+    # `product/src` layout would be empty.  Only the mode remaps it; other
+    # modes and every other artifact keep the registry path.
+    default = load_artifacts()["artifacts"]
+    brownfield = load_artifacts("brownfield")["artifacts"]
+    assert default["product_src"]["path"] == "product/src/"
+    assert brownfield["product_src"]["path"] == "app/src-tauri/src"
+    assert brownfield["product_tests"]["path"] == "app/src-tauri/tests"
+    assert brownfield["spec"]["path"] == default["spec"]["path"]
+    assert load_artifacts("standard")["artifacts"]["product_src"]["path"] == "product/src/"

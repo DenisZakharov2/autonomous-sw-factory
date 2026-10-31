@@ -6,9 +6,10 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .artifacts import _row_has_req, _table_rows, extract_req_ids
-from .config import load_json, validate_instance
+from .artifacts import _row_has_req, _table_rows, artifact_path, extract_req_ids
+from .config import load_artifacts, load_json, validate_instance
 from .errors import RunError
+from .state import load_state
 
 
 def load_traceability(run_dir: Path) -> dict[str, Any]:
@@ -44,14 +45,32 @@ def _test_exists(run_dir: Path, reference: str) -> bool:
     return (candidate == root or root in candidate.parents) and candidate.exists()
 
 
+def _tests_root(run_dir: Path) -> Path:
+    """Where this run's product tests live.
+
+    Greenfield uses `product/tests`; brownfield remaps the artifact to the
+    seeded tree (Rust tests may be inline in `src/`).  Reading the registry
+    keeps traceability honest instead of silently accepting any reference when
+    the greenfield path is absent.
+    """
+    try:
+        mode = str(load_state(run_dir).get("mode") or "")
+    except Exception:
+        mode = ""
+    spec = load_artifacts(mode or None)["artifacts"]["product_tests"]
+    return artifact_path(run_dir, spec)
+
+
 def build_matrix(run_dir: Path) -> dict[str, Any]:
     spec = run_dir / "artifacts" / "spec.md"
     if not spec.exists():
         raise RunError(f"spec not found: {spec}")
     reqs = sorted(extract_req_ids(spec.read_text(encoding="utf-8")))
     trace = load_traceability(run_dir)["requirements"]
-    tests_root = run_dir / "product" / "tests"
-    tests_present = tests_root.exists() and any(tests_root.rglob("*.py"))
+    tests_root = _tests_root(run_dir)
+    tests_present = tests_root.exists() and any(
+        item.is_file() and "__pycache__" not in item.parts for item in tests_root.rglob("*")
+    )
     acceptance = run_dir / "artifacts" / "acceptance.md"
     acceptance_rows = _table_rows(acceptance.read_text(encoding="utf-8"), "## 1. Матрица приёмки") if acceptance.exists() else []
     rows = []
@@ -60,7 +79,7 @@ def build_matrix(run_dir: Path) -> dict[str, Any]:
         tasks = list(item.get("tasks", []))
         tests = list(item.get("tests", []))
         tasks_ok = all(_task_exists(run_dir, task) for task in tasks) if tasks else False
-        tests_ok = all(_test_exists(run_dir, ref) for ref in tests) if (tests and tests_present) else bool(tests)
+        tests_ok = bool(tests) and tests_present and all(_test_exists(run_dir, ref) for ref in tests)
         acceptance_ok = bool(item.get("acceptance"))
         if acceptance_rows:
             acceptance_ok = acceptance_ok and any(

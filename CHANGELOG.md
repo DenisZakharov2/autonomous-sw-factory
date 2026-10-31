@@ -7,6 +7,34 @@ All notable changes are recorded here. The project follows a simple
 
 ### Added
 
+- **seed-механизм для brownfield-кейсов:** `eval/cases/<id>/seed/repo.tar.gz`
+  + `seed/seed.json` (`source`, `commit`, `sha256`, `require_git`). `run_case`
+  распаковывает архив после `init_run` и до `_drive_run`, `factory doctor`
+  проверяет sha256, path traversal, symlink-escape и наличие `.git/HEAD`.
+  Архив, а не каталог: вложенный `.git` нельзя закоммитить, а restore drill
+  нужен историю. Первый кейс — `brownfield-proxy-mini` на публичном
+  `proxy-for-ubuntu` 0.4.0.
+- **режимные `artifact_paths`:** brownfield переопределяет `product_src` и
+  `product_tests` на `app/src-tauri/{src,tests}`, `load_artifacts(mode)`
+  применяет путь, `doctor` валидирует каждый режим, `build_matrix` берёт
+  корень тестов из реестра.
+- **`--case ID` у `factory eval`** (повторяемый): CI гоняет быстрые
+  greenfield-кейсы, brownfield с cargo-сборкой запускается отдельно.
+- **`s_in` с терминалом:** `toolset_for("s_in")` = `file,terminal`, в промпт
+  добавлены `backups/` и разрешение читать `.git`; backup/restore drill
+  выполняется реально (`git bundle`, `tar`, клон, сверка 140 файлов).
+- **зелёный brownfield-прогон на реальном Hermes:** 17 шагов, 38 событий,
+  2 задачи, 3 560 791 total / 528 727 billable, 155 API-вызовов, 17,2 минуты,
+  222 product tests, coverage 1.0; запись в `eval/baseline-hermes.json` рядом
+  с `nano-todo` и `standard-mini`.
+- **зелёный product-mini на реальном Hermes:** крейт `pfu` из
+  `proxy-for-ubuntu` в `product/`, seed 252 КБ; 15 шагов, 35 событий,
+  2 задачи, 2 284 755 total / 430 803 billable, 97 API-вызовов, 12,3 минуты,
+  228 product tests, coverage 1.0; `factory compare` с fake совпал
+  постадийно (15/15, 35/35).
+- **CI на трёх ОС:** `doctor` и `pytest` на ubuntu/macOS/Windows × Python
+  3.10–3.13; лок журнала на Windows — `msvcrt.locking`, symlink/shell/
+  POSIX-mode-bit проверки пропускаются по наличию примитива, а не удаляются.
 - **зелёный прогон `standard-mini` на реальном Hermes:** одна модель
   (`deepseek-ai/DeepSeek-V4.1-Flash-1017`), `--reasoning high`,
   `--executor-tools auto`, `bwrap`; 15 шагов, 35 событий, 2 задачи,
@@ -18,9 +46,14 @@ All notable changes are recorded here. The project follows a simple
 
 ### Changed
 
-- **бюджет `standard` поднят с 1.5M / 360 минут до 2.5M / 120 минут** по
-  замеру: 1 978 597 total + 26 % запаса. Прежние 1.5M остановили бы прогон
-  на `s6_security` (1 553 552 после шага 12). USD-потолок $25 не менялся —
+- **бюджет `brownfield` пересчитан с 1.8M / 480 минут на 4.5M / 30 минут**
+  по полному прогону: 3 560 791 total + 25 %, 17,2 мин + 25 %. Первый запуск
+  с потолком 3M остановился на `s7_release` при 3 115 133 total — это замер
+  предохранителя, а не дефект; журнал продолжен с 4.5M.
+- **бюджет `standard` поднят с 1.5M / 360 минут до 2.9M / 120 минут** по
+  двум замерам: `standard-mini` 1 978 597 total, `product-mini` 2 284 755
+  total; худший +25 % → 2.9M. Прежние 1.5M остановили бы `standard-mini` на
+  `s6_security` (1 553 552 после шага 12). USD-потолок $25 не менялся —
   цена провайдером не измеряется.
 
 ## [0.3.0] — 2026-10-30

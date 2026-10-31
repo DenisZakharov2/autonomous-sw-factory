@@ -390,8 +390,8 @@ def run_parallel_tasks(
 
     run_dir = run_dir.resolve()
     pipeline = load_pipeline()
-    registry = load_artifacts()
     state = load_state(run_dir)
+    registry = load_artifacts(str(state["mode"]))
     workspace = WorktreeWorkspace(run_dir)
     workspace.prepare()
     by_id = {str(task["task_id"]): task for task in tasks}

@@ -1,5 +1,7 @@
 import json
-import multiprocessing
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -12,6 +14,8 @@ from factory.journal import (
     compute_event_hash,
     verify_chain,
 )
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
 def _event(run_dir: Path, action: str = "did work", **overrides):
@@ -147,34 +151,38 @@ def test_audit_trail_escapes_table_cells(nano_run):
 
 def test_concurrent_appends_keep_chain(nano_run):
     run_dir, _, _ = nano_run
-    ctx = multiprocessing.get_context("fork")
-    processes = [ctx.Process(target=_concurrent_writer, args=(str(run_dir), i)) for i in range(12)]
+    # Subprocesses, not multiprocessing: the same test exercises `flock` on
+    # POSIX and `msvcrt.locking` on Windows, and `fork` does not exist there.
+    env = {**os.environ, "PYTHONPATH": str(ROOT)}
+    script = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from factory.journal import append_event\n"
+        "append_event(Path(sys.argv[1]), stage='s4_build', task_id=None,\n"
+        "             role='12-fullstack-developer', event_type='ARTIFACT_SUBMIT',\n"
+        "             why='race', for_what='race', action='writer ' + sys.argv[2],\n"
+        "             verdict_status='DRAFT', verified_by='12-fullstack-developer',\n"
+        "             artifacts=[])\n"
+    )
+    processes = [
+        subprocess.Popen(
+            [sys.executable, "-c", script, str(run_dir), str(index)],
+            cwd=ROOT,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for index in range(12)
+    ]
     for process in processes:
-        process.start()
-    for process in processes:
-        process.join(timeout=30)
-        assert process.exitcode == 0
+        stdout, stderr = process.communicate(timeout=60)
+        assert process.returncode == 0, stderr
     errors = verify_chain(run_dir / "blackbox.jsonl", run_dir / "state.json")
     assert errors == []
     events = [json.loads(line) for line in (run_dir / "blackbox.jsonl").read_text().splitlines()]
     assert len(events) == 13
     assert len({event["event_id"] for event in events}) == 13
-
-
-def _concurrent_writer(run_dir: str, index: int) -> None:
-    append_event(
-        Path(run_dir),
-        stage="s4_build",
-        task_id=None,
-        role="12-fullstack-developer",
-        event_type="ARTIFACT_SUBMIT",
-        why="race",
-        for_what="race",
-        action=f"writer {index}",
-        verdict_status="DRAFT",
-        verified_by="12-fullstack-developer",
-        artifacts=[],
-    )
 
 
 def test_genesis_hash_is_zeroes():

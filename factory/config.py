@@ -88,11 +88,29 @@ def load_pipeline() -> dict[str, Any]:
     return data
 
 
-def load_artifacts() -> dict[str, Any]:
+def load_artifacts(mode: str | None = None) -> dict[str, Any]:
     data = _read_yaml(PACKAGE_ROOT / "artifacts.yaml")
     artifacts = data.get("artifacts")
     if not isinstance(artifacts, dict) or not artifacts:
         raise ConfigError("factory/artifacts.yaml must define a non-empty artifacts map")
+    if mode is not None:
+        # Brownfield starts from an existing tree, so the greenfield
+        # `product/src` convention does not describe it.  A mode may remap a
+        # few artifact paths; everything else stays registry-wide.
+        modes = load_pipeline().get("modes", {})
+        if mode not in modes:
+            raise ConfigError(f"unknown mode: {mode!r}")
+        overrides = modes[mode].get("artifact_paths") or {}
+        for artifact_id, path in overrides.items():
+            if artifact_id not in artifacts:
+                raise ConfigError(
+                    f"mode {mode!r} remaps unknown artifact {artifact_id!r}"
+                )
+            if not isinstance(path, str) or not path.strip():
+                raise ConfigError(
+                    f"mode {mode!r} artifact {artifact_id!r} has an empty path"
+                )
+            artifacts[artifact_id] = {**artifacts[artifact_id], "path": path}
     seen_paths: dict[str, str] = {}
     for artifact_id, spec in artifacts.items():
         if not isinstance(spec, dict) or "path" not in spec or "owner" not in spec:

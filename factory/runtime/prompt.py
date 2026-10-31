@@ -106,8 +106,8 @@ def build_prompt(
     workspace = Path(workspace) if workspace is not None else run_dir
 
     pipeline = _pipeline()
-    registry = load_artifacts()
     state = load_state(run_dir)
+    registry = load_artifacts(str(state["mode"]))
     role = str(role or order.get("next_role") or (order.get("roles") or [""])[0] or "")
     stage_id = order.get("stage")
     stage = find_stage(pipeline, stage_id) if stage_id else None
@@ -338,6 +338,11 @@ def build_prompt(
         task = state["tasks"].get(str(order["task_id"]), {})
         pending_paths.extend(str(item) for item in task.get("allowed_files") or [])
         pending_paths.append(f"tasks/{order['task_id']}/deliverable.md")
+    if stage is not None and stage["id"] == "s_in":
+        # The drill writes a git bundle, a worktree archive and a restore
+        # clone.  They are not registry artifacts, but they are evidence the
+        # case checks and must be inside the run.
+        pending_paths.append("backups/")
     for path in dict.fromkeys(pending_paths):
         lines.append(f"- `{path}`")
     lines.append("")
@@ -368,6 +373,12 @@ def build_prompt(
         "- Не запускай команды `factory ...` (submit, verify, gate, task): это делает рантайм. "
         "Твоя работа заканчивается на файлах в разрешённых путях."
     )
+    if stage is not None and stage["id"] == "s_in":
+        lines.append(
+            "- На `s_in` разрешено и требуется выполнять `git` и `tar` внутри каталога прогона: "
+            "бэкап-бандл, архив worktree и манифест кладутся в `backups/`, восстановление "
+            "проверяется во временном каталоге внутри прогона. Читать `.git` нужно, менять — нет."
+        )
     lines.append("")
     lines.append("# Формат ответа")
     lines.append("1. Что сделано (2–5 строк).")

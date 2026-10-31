@@ -207,6 +207,10 @@ def test_factory_cli_cannot_close_a_gate_inside_the_sandbox(run):
         binary = shutil.which("factory")
     if not binary:
         pytest.skip("factory console script is not installed")
+    if str(binary).startswith(("/tmp/", "/private/tmp/")):
+        # The sandbox mounts an empty `--tmpfs /tmp`: a venv installed there
+        # (the sdist smoke job does exactly that) cannot be executed inside.
+        pytest.skip("factory console script lives under /tmp, which bwrap masks")
     writable = _writable(run)
     before = _sha(run / "state.json")
     proc = _sandboxed(
@@ -322,7 +326,10 @@ def test_runtime_never_writes_through_a_symlink(tmp_path):
     outside = tmp_path / "outside.txt"
     outside.write_text("safe")
     link = run_dir / "runtime" / "prompt.md"
-    link.symlink_to(outside)
+    try:
+        link.symlink_to(outside)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are not available on this platform")
     safe_write_text(link, "prompt")
     assert outside.read_text() == "safe"
     assert not link.is_symlink()
@@ -334,7 +341,10 @@ def test_symlinked_runtime_directory_is_refused(tmp_path):
     run_dir.mkdir()
     outside = tmp_path / "outside"
     outside.mkdir()
-    (run_dir / "runtime").symlink_to(outside)
+    try:
+        (run_dir / "runtime").symlink_to(outside)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are not available on this platform")
     context = RunContext(
         run_id="run",
         run_dir=run_dir,

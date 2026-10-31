@@ -1,0 +1,9 @@
+{
+  "schema_version": "1.0.0",
+  "source": "https://github.com/DenisZakharov2/proxy-for-ubuntu/tree/dfe54336fed20cbed9ba12e6ff8be1f7877346f0/app/src-tauri",
+  "commit": "dfe54336fed20cbed9ba12e6ff8be1f7877346f0",
+  "archive": "product.tar.gz",
+  "sha256": "f0b5b22752c72fd95715c7cc22d3c47ec628b97879dfaa4e7976655efb3ed42d",
+  "require_git": false,
+  "note": "The pfu crate from the same commit, laid out as product/ for the standard mode. No .git: this mode has no restore drill."
+}

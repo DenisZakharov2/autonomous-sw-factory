@@ -592,7 +592,7 @@ def _next_action(run_id: str, *, root: str | Path | None = None) -> dict[str, An
     run_dir = safe_run_dir(run_id, root)
     state = load_state(run_dir)
     pipeline = load_pipeline()
-    registry = load_artifacts()
+    registry = load_artifacts(state["mode"])
     stage = current_stage(state, pipeline)
     if stage is None:
         return {
@@ -685,10 +685,10 @@ def submit_work(
         raise RunError("task submissions belong to s4_build")
     run_dir = safe_run_dir(run_id, root)
     pipeline = load_pipeline()
-    registry = load_artifacts()
     stage = find_stage(pipeline, stage_id)
     with run_lock(run_dir):
         state = load_state(run_dir)
+        registry = load_artifacts(state["mode"])
         _require_current(state, pipeline, stage)
         _require_stage_status(state, stage, {"pending", "in_progress", "review"})
         if role not in effective_roles(pipeline, state["mode"], stage):
@@ -756,7 +756,6 @@ def gate_approve(
 ) -> dict[str, Any]:
     run_dir = safe_run_dir(run_id, root)
     pipeline = load_pipeline()
-    registry = load_artifacts()
     stage = next((s for s in pipeline["stages"] if s["gate"]["id"] == gate_id), None)
     if stage is None:
         raise RunError(f"unknown gate: {gate_id}")
@@ -768,6 +767,7 @@ def gate_approve(
     )
     with run_lock(run_dir):
         state = load_state(run_dir)
+        registry = load_artifacts(state["mode"])
         _require_current(state, pipeline, stage)
         _require_stage_status(state, stage, {"review"})
         errors = verify_run(run_dir, stage["id"], require_gate=False)
@@ -818,7 +818,6 @@ def gate_reject(
 ) -> dict[str, Any]:
     run_dir = safe_run_dir(run_id, root)
     pipeline = load_pipeline()
-    registry = load_artifacts()
     stage = next((s for s in pipeline["stages"] if s["gate"]["id"] == gate_id), None)
     if stage is None:
         raise RunError(f"unknown gate: {gate_id}")
@@ -830,6 +829,7 @@ def gate_reject(
     )
     with run_lock(run_dir):
         state = load_state(run_dir)
+        registry = load_artifacts(state["mode"])
         _require_current(state, pipeline, stage)
         entries = _stage_entries(run_dir, stage, pipeline, registry, state)
         gate_record(state, stage, status="rejected", decided_by=approver, evidence=evidence)
@@ -895,13 +895,13 @@ def accept_risk(
         raise RunError("risk and mitigation are required for a risk acceptance")
     run_dir = safe_run_dir(run_id, root)
     pipeline = load_pipeline()
-    registry = load_artifacts()
     stage = next((s for s in pipeline["stages"] if s["gate"]["id"] == gate_id), None)
     if stage is None:
         raise RunError(f"unknown gate: {gate_id}")
     approval = _check_human_approval(run_id, gate_id, approver, approval_token)
     with run_lock(run_dir):
         state = load_state(run_dir)
+        registry = load_artifacts(state["mode"])
         _require_current(state, pipeline, stage)
         status = state["stage_status"].get(stage["id"])
         if status not in {"escalated", "blocked", "review"}:

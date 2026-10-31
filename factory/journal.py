@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 from collections.abc import Iterable
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -27,8 +28,12 @@ from .paths import ensure_within
 
 try:  # Linux/macOS
     import fcntl
-except ImportError:  # pragma: no cover - Windows fallback
+except ImportError:  # pragma: no cover - Windows
     fcntl = None  # type: ignore[assignment]
+try:  # Windows
+    import msvcrt
+except ImportError:  # pragma: no cover - POSIX
+    msvcrt = None  # type: ignore[assignment]
 
 GENESIS_PREV_HASH = "0" * 64
 EVENT_TYPES = {
@@ -63,15 +68,36 @@ def sha256_file(path: Path) -> str:
 
 @contextmanager
 def _locked(lock_path: Path):
+    """Exclusive advisory lock around read-tail/write/update.
+
+    POSIX uses `flock`; Windows has no `fcntl`, and silently dropping the lock
+    would let two processes mint the same `seq`/`prev_hash`.  `msvcrt.locking`
+    locks one byte at offset 0 of the same file, with the same exclusive
+    semantics; a mixed POSIX/Windows share is not supported, which matches the
+    rest of the toolchain.
+    """
+    if fcntl is None and msvcrt is None:  # pragma: no cover - no known platform
+        raise JournalError("no file locking primitive is available on this platform")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a+") as handle:
+    with lock_path.open("a+b") as handle:
         if fcntl is not None:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        else:  # Windows
+            handle.seek(0)
+            while True:
+                try:
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    time.sleep(0.05)
         try:
             yield
         finally:
             if fcntl is not None:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            else:  # Windows
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 @contextmanager

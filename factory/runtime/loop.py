@@ -296,8 +296,8 @@ def run_loop(
     if not run_dir.is_dir():
         raise RunError(f"run {run_id!r} does not exist; run `factory init` first")
     pipeline = load_pipeline()
-    registry = load_artifacts()
     state = load_state(run_dir)
+    registry = load_artifacts(str(state["mode"]))
     mode = str(state["mode"])
     if budget is None:
         budget = pipeline["modes"][mode].get("budget")

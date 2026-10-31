@@ -63,7 +63,7 @@ modes:
   standard:
     description: "Backend/CLI product team with product, analysis, architecture, build, QA, security and release."
     roles: ["00-orchestrator", "01-smart-interviewer", "02-independent-verifier", "03-product-owner", "04-team-lead", "05-business-analyst", "06-system-analyst", "08-software-architect", "12-fullstack-developer", "14-qa-engineer", "16-security-engineer", "19-devops-engineer"]
-    budget: { tokens: 2500000, minutes: 120, usd: 25 }
+    budget: { tokens: 2900000, minutes: 120, usd: 25 }
     artifact_owners:
       ux_flows: "08-software-architect"
       screens: "08-software-architect"
@@ -81,7 +81,12 @@ modes:
   brownfield:
     description: "Standard team plus a mandatory backup/restore drill before any write."
     roles: ["00-orchestrator", "01-smart-interviewer", "02-independent-verifier", "03-product-owner", "04-team-lead", "05-business-analyst", "06-system-analyst", "08-software-architect", "12-fullstack-developer", "14-qa-engineer", "16-security-engineer", "19-devops-engineer"]
-    budget: { tokens: 1800000, minutes: 480, usd: 30 }
+    budget: { tokens: 4500000, minutes: 30, usd: 30 }
+    # Brownfield works in the seeded tree, not in the greenfield `product/`
+    # layout.  Only the two code artifacts move; docs stay factory-owned.
+    artifact_paths:
+      product_src: "app/src-tauri/src"
+      product_tests: "app/src-tauri/tests"
     artifact_owners:
       ux_flows: "08-software-architect"
       screens: "08-software-architect"

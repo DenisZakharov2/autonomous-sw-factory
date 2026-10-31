@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/DenisZakharov2/autonomous-sw-factory/schemas/eval-seed.schema.json",
+  "title": "EvalSeed",
+  "description": "A pinned source tree shipped with a brownfield eval case. The archive is a tar.gz containing the repository, including .git: the restore drill must restore real history, and a nested .git cannot be committed to git directly.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "source", "commit", "archive", "sha256"],
+  "properties": {
+    "schema_version": {"type": "string", "const": "1.0.0"},
+    "source": {"type": "string", "pattern": "^https://[^\\s]+$"},
+    "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "archive": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\.(tar\\.gz|tgz)$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "require_git": {"type": "boolean", "default": true},
+    "note": {"type": "string", "minLength": 1}
+  }
+}

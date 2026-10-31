@@ -345,15 +345,20 @@ def artifact_integrity_errors(
 def verify_run(run_dir: Path, stage_id: str | None = None, require_gate: bool = False) -> list[str]:
     errors: list[str] = []
     pipeline = load_pipeline()
-    registry = load_artifacts()
+    try:
+        state = load_state(run_dir)
+        state_error = None
+    except FactoryError as exc:
+        state = None
+        state_error = str(exc)
+    registry = load_artifacts(state["mode"] if state else None)
     errors.extend(validate_pipeline(pipeline, registry))
     errors.extend(validate_roles())
     errors.extend(validate_schemas())
     errors.extend(validate_templates())
-    try:
-        state = load_state(run_dir)
-    except FactoryError as exc:
-        return errors + [str(exc)]
+    if state is None:
+        assert state_error is not None
+        return errors + [state_error]
     errors.extend(check_state_consistency(run_dir, state, pipeline))
     errors.extend(verify_chain(run_dir / "blackbox.jsonl", run_dir / "state.json"))
     try:
@@ -398,6 +403,11 @@ def doctor_report() -> dict[str, Any]:
     errors.extend(validate_roles())
     errors.extend(validate_schemas())
     errors.extend(validate_templates())
+    for mode in sorted(pipeline["modes"]):
+        try:
+            load_artifacts(mode)
+        except ConfigError as exc:
+            errors.append(f"mode {mode}: {exc}")
     cases_dir = project_root() / "eval" / "cases"
     if cases_dir.is_dir():
         from .eval import validate_cases

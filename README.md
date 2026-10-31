@@ -15,11 +15,11 @@
 - **Исполнимый Python-движок**: `init`, `next`, `submit`, `gate`, `verify`, `task`, `quarantine`, `trace`, `metrics`, `doctor`.
 - **Рантайм `factory run`**: work order → исполнитель → проверка → сдача → гейт; `pending_artifacts` и `next_role` в каждом ордере, `usage.jsonl` с durable-шагом и разбивкой токенов, evidence и стоп-гарды (подмена состояния, запись вне прогона, бюджет). Адаптеры: `fake` (без модели), `hermes`, `opencode`; реальные CLI запускаются в `bwrap` по умолчанию, управляющая плоскость read-only. `standard` проверен до `complete`; `--parallel-tasks N` собирает независимые задачи `s4_build` в отдельных git worktree; `--executor-tools auto` платит за `file`, а `terminal` включает только на сборке — см. [`docs/runtime.md`](docs/runtime.md).
 - **Подписанные контрольные точки**: `factory sign` кладёт HMAC-SHA256 головы журнала в store вне `runs/`; `factory verify` отличает `stale` от `rolled_back` и `diverged`, то есть усечение журнала и пересчёт всей цепочки — см. [`docs/checkpoints.md`](docs/checkpoints.md).
-- **Внешний eval-набор и сравнение прогонов**: `factory eval` гоняет фиксированные кейсы (`nano-todo`, `standard-mini`) на `fake`, сверяет инварианты и числа с baseline и падает при росте шагов, падении событий или росте токенов больше чем на 10 %; `factory compare` показывает дельту стадий, стоимости и хешей артефактов двух прогонов — см. [`docs/eval.md`](docs/eval.md).
+- **Внешний eval-набор и сравнение прогонов**: `factory eval` гоняет фиксированные кейсы (`nano-todo`, `standard-mini`, `brownfield-proxy-mini`, `product-mini`) на `fake` или реальном исполнителе, сверяет инварианты и числа с baseline и падает при росте шагов, падении событий или росте токенов больше чем на 10 %; `factory compare` показывает дельту стадий, стоимости и хешей артефактов двух прогонов — см. [`docs/eval.md`](docs/eval.md).
 - **Журнал с хеш-цепочкой** SHA-256, блокировкой записи, state-якорем и семантической проверкой `PASS`.
 - **Независимый верификатор**: `PASS` может поставить только `02-independent-verifier`; человек может принять риск отдельным событием.
 - **Карантин скиллов**: адаптер `NVIDIA/SkillSpector 2.12.0` с fail-closed и локом хешей.
-- **Шаблоны и схемы**: 38 шаблонов и 12 JSON-схем; шаблоны не ставят `PASS` заранее.
+- **Шаблоны и схемы**: 38 шаблонов и 13 JSON-схем; шаблоны не ставят `PASS` заранее.
 - **Эталонный прогон** `examples/nano-todo/`: 33 события, 2 задачи, 3 REQ, все гейты пройдены, продукт запускается.
 
 ## Чего здесь нет
@@ -199,7 +199,7 @@ factory/                 # движок и конфиги
     sandbox.py           # bwrap: read-only корень и управляющая плоскость
     fixtures/nano/       # эталонные артефакты для fake
   roles/                 # 22 карточки
-  schemas/               # 12 JSON-схем
+  schemas/               # 13 JSON-схем
   templates/             # 38 шаблонов
   pipeline.yaml          # граф стадий и режимы
   artifacts.yaml         # реестр артефактов

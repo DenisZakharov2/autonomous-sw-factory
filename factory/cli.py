@@ -472,6 +472,7 @@ def cmd_eval(args: argparse.Namespace) -> int:
         update_baseline=Path(args.update_baseline) if args.update_baseline else None,
         stamp=args.stamp,
         budget=budget or None,
+        only=set(args.cases_only) if args.cases_only else None,
     )
     if args.json:
         _print_json(report)
@@ -638,6 +639,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     evaluate = sub.add_parser("eval", help="run the external eval cases against a baseline")
     evaluate.add_argument("--cases", default="eval/cases", help="directory with one subdirectory per case")
+    evaluate.add_argument(
+        "--case",
+        action="append",
+        dest="cases_only",
+        metavar="ID",
+        help="run only this case id (repeatable); the full set stays the default",
+    )
     evaluate.add_argument("--baseline", help="baseline JSON (default: <cases>/../baseline.json)")
     evaluate.add_argument(
         "--update-baseline",

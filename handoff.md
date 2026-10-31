@@ -1,9 +1,10 @@
 # Handoff — 0.3.0
 
-Состояние на 30 октября 2026. Ветка `main`, версия `0.3.0`, 224 теста.
+Состояние на 30 октября 2026. Ветка `main`, версия `0.3.0`, 234 теста.
 Eval-набор зелёный на реальном Hermes: `eval/baseline-hermes.json` хранит
-две записи — `nano-todo` (`runs/nano-todo-20261030-191409`) и
-`standard-mini` (`runs/standard-mini-standard-real`). Fake-эталон CI
+три записи — `nano-todo` (`runs/nano-todo-20261030-191409`),
+`standard-mini` (`runs/standard-mini-standard-real`) и `brownfield-proxy-mini`
+(`runs/brownfield-proxy-mini-brownfield-real2`). Fake-эталон CI
 (`eval/baseline.json`) не менялся и проходит.
 
 ## Что вошло в 0.3.0
@@ -127,7 +128,7 @@ factory eval --cases "$PWD/runs/hermes-cases" --executor hermes \
 
 Тот же профиль, что у `nano-todo`: одна модель, `--reasoning high`,
 `--executor-tools auto`, `bwrap`, `--yolo`; бюджет замера 4M / 240 минут
-(дефолт `standard` после пересчёта — 2.5M / 120 минут).
+(дефолт `standard` после пересчёта — 2.9M / 120 минут).
 
 ```bash
 factory eval --cases "$PWD/runs/hermes-cases" --executor hermes \
@@ -178,6 +179,134 @@ access-matrix). Секция «Ограничения кейса» есть в �
 тогда как текущий fake даёт 13/33 и 15/35. Тест этого не ловит: падение шагов
 не считается регрессией. Перегенерация — отдельная задача, fake-эталон здесь
 не менялся.
+
+## brownfield-proxy-mini на реальном Hermes
+
+Первый brownfield-прогон на реальном продукте: публичный
+`proxy-for-ubuntu` 0.4.0 (Rust/Tauri, commit `dfe54336…`, 12 МБ с `.git`),
+seed-архив в `eval/cases/brownfield-proxy-mini/seed/`. Та же модель и
+конфигурация, что у `nano-todo`: `deepseek-ai/DeepSeek-V4.1-Flash-1017`,
+`--reasoning high`, `--executor-tools auto`, `bwrap`, `--yolo`.
+
+```bash
+export FACTORY_RUNS_ROOT="$PWD/runs"
+export CARGO_TARGET_DIR="$PWD/runs/brownfield-src/proxy-for-ubuntu/app/src-tauri/target"
+factory eval --cases "$PWD/runs/hermes-cases-brownfield" --executor hermes \
+  --executor-model deepseek-ai/DeepSeek-V4.1-Flash-1017 \
+  --executor-tools auto --reasoning high --timeout 900 --yolo \
+  --sandbox-rw /home/anony/.hermes/installs/74e85d3cd01c2ec7 \
+  --sandbox-rw ~/.hermes/cache --sandbox-rw ~/.hermes/logs \
+  --sandbox-rw "$CARGO_TARGET_DIR" \
+  --budget-tokens 4500000 --budget-minutes 240 --stamp brownfield-real --json
+```
+
+Первая попытка шла с `--budget-tokens 3000000` и остановилась на `s7_release`
+при **3 115 133 total**; потолок поднят не на ходу, а в продолжении того же
+журнала (`factory run` с 4.5M). Команда выше — то, чем case нужно запускать
+с нуля.
+
+| Метрика | Значение |
+| :--- | ---: |
+| steps / loop_steps / events | 17 / 32 / 38 |
+| rework_events | 0 |
+| tasks / accepted | 2 / 2 |
+| pass@1 | 1.0 |
+| verification_coverage / traceability_coverage | 1.0 / 1.0 |
+| tokens total | 3 560 791 |
+| tokens billable | 528 727 |
+| cache read | 3 032 064 |
+| api_calls | 155 |
+| секунды исполнителя / wall | 1033 / ~1290 |
+| prompt_chars | 194 916 |
+| product tests | 222 passed (`cargo test --lib`, +4 новых) |
+| restore drill | 140/140 tracked files, HEAD/status/sha256 совпали |
+
+### Цена по шагам
+
+| step | stage | task | role | total | in | cache | out | billable | api | sec |
+| ---: | :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | s_in | — | 01-smart-interviewer | 123 404 | 18 268 | 100 352 | 4 784 | 23 052 | 8 | 43.8 |
+| 2 | s_in | — | 08-software-architect | 206 822 | 26 541 | 174 592 | 5 689 | 32 230 | 10 | 46.4 |
+| 3 | s00_intake | — | 01-smart-interviewer | 23 852 | 10 555 | 10 496 | 2 801 | 13 356 | 2 | 27.6 |
+| 4 | s0_vision | — | 03-product-owner | 56 538 | 14 685 | 37 632 | 4 221 | 18 906 | 4 | 37.3 |
+| 5 | s1_spec | — | 05-business-analyst | 51 978 | 10 449 | 37 632 | 3 897 | 14 346 | 4 | 33.6 |
+| 6 | s1_spec | — | 06-system-analyst | 94 569 | 17 088 | 72 704 | 4 777 | 21 865 | 6 | 39.9 |
+| 7 | s15_quarantine | — | 16-security-engineer | 61 101 | 11 214 | 48 128 | 1 759 | 12 973 | 5 | 27.0 |
+| 8 | s2_architecture | — | 08-software-architect | 290 984 | 39 744 | 235 520 | 15 720 | 55 464 | 10 | 104.6 |
+| 9 | s3_plan | — | 04-team-lead | 38 679 | 9 427 | 26 112 | 3 140 | 12 567 | 3 | 30.1 |
+| 10 | s4_build | TASK-001 | 12-fullstack-developer | 488 901 | 40 175 | 438 272 | 10 454 | 50 629 | 17 | 135.6 |
+| 11 | s4_build | TASK-002 | 12-fullstack-developer | 823 512 | 43 317 | 764 672 | 15 523 | 58 840 | 28 | 157.4 |
+| 12 | s5_acceptance | — | 14-qa-engineer | 399 088 | 43 422 | 344 832 | 10 834 | 54 256 | 14 | 77.8 |
+| 13 | s6_security | — | 16-security-engineer | 251 117 | 34 375 | 207 360 | 9 382 | 43 757 | 10 | 66.7 |
+| 14 | s6_security | — | 12-fullstack-developer | 77 368 | 10 812 | 62 720 | 3 836 | 14 648 | 6 | 39.8 |
+| 15 | s7_release | — | 19-devops-engineer | 127 220 | 23 072 | 96 256 | 7 892 | 30 964 | 7 | 59.1 |
+| 16 | s8_docs | — | 12-fullstack-developer | 284 204 | 30 107 | 247 808 | 6 289 | 36 396 | 13 | 53.1 |
+| 17 | s9_learn | — | 00-orchestrator | 161 454 | 27 708 | 126 976 | 6 770 | 34 478 | 8 | 53.0 |
+
+`s4_build` — 1.31M (37 %), из них `TASK-002` 824k; `s2_architecture` 291k и
+`s5_acceptance` 399k — следующие. Ровно две задачи, `TASK-002` зависит от
+`TASK-001`, обе правят `app/src-tauri/src/config.rs`.
+
+### Что дал seed и как прошёл drill
+
+- `seed/repo.tar.gz` + `seed/seed.json`: 9,7 МБ, commit и sha256 пинятся,
+  `doctor` проверяет hash/path traversal/`.git`. Распаковка идёт после
+  `init_run` и до `_drive_run`, `HEAD` сверяется с пином.
+- `s_in` выполнен ролью `01` с `file,terminal`: `git bundle create --all`,
+  `git ls-files | tar`, `sha256sum -c`, `git clone` в `backups/restore-check`.
+  Drill восстановил 140/140 отслеживаемых файлов, `HEAD` и
+  `git status --porcelain --untracked-files=no` совпали; `restore-drill.md` —
+  `PASS`. `checks/test_brownfield_evidence.py` подтвердил это после прогона.
+- Brownfield-режим переопределяет `product_src`/`product_tests` на
+  `app/src-tauri/{src,tests}`; без этого `s4_build` требовал пустой
+  `product/src`, которого в реальном репозитории нет.
+
+### Цена cargo
+
+`cargo test --lib` на 4 ядрах: холодная сборка **567 с**, тёплая **54 с**,
+218 тестов до изменений и **222** после. `timeout_seconds` в схеме — 600,
+поэтому прогретый `CARGO_TARGET_DIR` передаётся и агенту (`--sandbox-rw`), и
+`_product_tests`; `cargo clean` в задаче запрещён.
+
+## product-mini на реальном Hermes
+
+Второй standard-кейс на том же продукте: крейт `pfu` из `proxy-for-ubuntu`
+(commit `dfe54336…`), разложенный в `product/` без `.git` (standard не делает
+restore drill). Задача — backoff повторных попыток подписки в
+`subscription.rs`; seed 252 КБ, `require_git: false`. Профиль тот же, что у
+`standard-mini`; бюджет замера 3M / 120 минут.
+
+Итог: `status=complete`, `verify` — OK, все 12 гейтов, 15 шагов, 35 событий,
+2 задачи, **2 284 755 total / 430 803 billable**, 97 API-вызовов, 737 с
+(12,3 мин), **228 product tests** (218 + 10 новых), coverage 1.0/1.0.
+Запись — в `eval/baseline-hermes.json`.
+
+| step | stage | task | role | total | api | sec |
+| ---: | :--- | :--- | :--- | ---: | ---: | ---: |
+| 1 | s00_intake | — | 01-smart-interviewer | 24 263 | 2 | 21.1 |
+| 2 | s0_vision | — | 03-product-owner | 41 788 | 3 | 30.0 |
+| 3 | s1_spec | — | 05-business-analyst | 58 574 | 4 | 31.1 |
+| 4 | s1_spec | — | 06-system-analyst | 97 013 | 6 | 38.6 |
+| 5 | s15_quarantine | — | 16-security-engineer | 35 027 | 3 | 19.3 |
+| 6 | s2_architecture | — | 08-software-architect | 241 673 | 9 | 95.4 |
+| 7 | s3_plan | — | 04-team-lead | 40 207 | 3 | 21.8 |
+| 8 | s4_build | TASK-001 | 12-fullstack-developer | 199 599 | 8 | 80.3 |
+| 9 | s4_build | TASK-002 | 12-fullstack-developer | 357 940 | 11 | 83.3 |
+| 10 | s5_acceptance | — | 14-qa-engineer | 269 230 | 8 | 53.7 |
+| 11 | s6_security | — | 16-security-engineer | 148 350 | 6 | 32.9 |
+| 12 | s6_security | — | 12-fullstack-developer | 77 178 | 5 | 41.7 |
+| 13 | s7_release | — | 19-devops-engineer | 221 359 | 9 | 83.0 |
+| 14 | s8_docs | — | 12-fullstack-developer | 263 970 | 11 | 47.7 |
+| 15 | s9_learn | — | 00-orchestrator | 208 584 | 9 | 57.3 |
+
+`factory compare product-mini-product-fake product-mini-product-real`: шаги и
+события совпадают постадийно (15/15, 35/35); токены только у реального —
+430 803 billable. `only_left` — фикстуры `FakeExecutor` (`product/src/todo.py`,
+`product/tests/test_todo.py`), `only_right` — реальные файлы кейса.
+
+Потолок `standard` пересчитан по худшему из двух зелёных прогонов:
+2 284 755 + 25 % → **2.9M / 120 минут** (было 2.5M). Время не является
+узким местом: факт 12,3 минуты.
 
 ## Что исправлено, чтобы гейт `s4_build` проходил
 
@@ -251,9 +380,12 @@ pytest собирает тоже, поэтому fake-эталон не изме
    модель дороже измеренной. USD-потолок $6 номинальный: цена не измеряется.
 2. **USD не измеряется.** `estimated_cost_usd = 0.0` при `cost_status:
    unknown`; в baseline стоит 0.0, а не `null`, но ценой это не является.
-3. **`brownfield` на реальном Hermes не гонялся.** Зелёные `nano-todo`
-   (13 шагов) и `standard-mini` (15 шагов); гейты `standard` закрыты
-   eval-харнессом (`human:eval`), живого ревью ролей `05`/`06`/`08` не было.
+3. **`brownfield` прогнан на реальном Hermes 30.10.2026**, но с оговоркой:
+   первый запуск остановился по потолку 3M на `s7_release` (3 115 133 total),
+   продолжение того же журнала с 4.5M дало полные 17 шагов и `verify` OK.
+   Живого ревью ролей `05`/`06`/`08` не было: гейты закрыты `human:eval`, как
+   и в остальных кейсах. Отдельно: `s2_architecture` и `TASK-002` съели 1.11M
+   из 3.56M — это следующий кандидат на удешевление промпта.
 4. **Артефакт, принятый на гейте, заморожен.** Легального способа обновить
    его на более поздней стадии нет: единственный путь — объявить его
    артефактом этой стадии заранее. Для `traceability` это решено правилом
@@ -273,19 +405,26 @@ pytest собирает тоже, поэтому fake-эталон не изме
 
 ## Что дальше
 
+- **Проверить CI на macOS и Windows после push.** Матрица и платформенные
+  правки (`msvcrt`-лок, skip'ы по symlink/шеллу, POSIX-mode-bit) добавлены, но
+  локально прогнан только Linux; зелёная трёхосная матрица — критерий 1.0.0.
 - Перегенерировать fake-эталон `eval/baseline.json`: в нём 14/33 и 16/35,
   текущий fake даёт 13/33 и 15/35. Шаги упали после фикса «стадия без
   pending не зовёт модель» (`f1895da`), но падение шагов не считается
   регрессией, поэтому тест молчит.
-- Следить за потолком `nano` 2.5M: если законный прогон подойдёт к нему ближе
-  чем на 10 %, поднимать по новому замеру, а не на глаз.
+- Следить за потолками `nano` 2.5M, `standard` 2.9M и `brownfield` 4.5M: если
+  законный прогон подойдёт к ним ближе чем на 10 %, поднимать по новому
+  замеру, а не на глаз.
 - Добавить `re-record` для легитимного обновления принятого артефакта, если
   практика покажет, что правило «план следует матрице» слишком тесное.
-- Сравнить зелёный прогон с baseline через `factory compare` и зафиксировать
-  дельту в CHANGELOG следующей версии.
+- Сравнить зелёный brownfield с baseline через `factory compare` и
+  зафиксировать дельту в CHANGELOG следующей версии.
 
 ## Решение по релизу
 
 Потолки `nano` подняты до 2.5M / 120 минут по измерению (1.78–1.96M на трёх
-прогонах), после чего `0.3.0` публикуется. Потолок `standard` пересчитан по
-первому реальному прогону: 1 978 597 total + 26 % → 2.5M / 120 минут.
+прогонах); `standard` — до **2.9M / 120 минут** по худшему из двух замеров
+(2 284 755 на `product-mini`, 1 978 597 на `standard-mini`). Потолок
+`brownfield` пересчитан по первому полному прогону: **3 560 791 total + 25 %
+→ 4.5M**, 17,2 мин + 25 % → **30 минут**. Прежние расчётные 1.8M / 480 минут
+не покрывали даже `s2_architecture` (948k после шага 9).

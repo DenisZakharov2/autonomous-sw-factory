@@ -138,7 +138,18 @@ def test_budget_command_reports_engine_limits(tmp_path):
     )
     assert standard["mode"] == "standard"
     assert standard["mode_budget"]["minutes"] == 120
-    assert standard["mode_budget"]["tokens"] == 2_500_000
+    assert standard["mode_budget"]["tokens"] == 2_900_000
+
+    assert (
+        cli("init", "--run-id", "demo-brownfield", "--mode", "brownfield", runs_root=tmp_path).returncode
+        == 0
+    )
+    brownfield = json.loads(
+        cli("budget", "--run-id", "demo-brownfield", runs_root=tmp_path).stdout
+    )
+    assert brownfield["mode"] == "brownfield"
+    assert brownfield["mode_budget"]["minutes"] == 30
+    assert brownfield["mode_budget"]["tokens"] == 4_500_000
 
 
 def test_brownfield_starts_at_s_in(tmp_path):

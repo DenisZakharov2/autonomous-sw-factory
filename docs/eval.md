@@ -24,6 +24,7 @@ eval/cases/<case-id>/
   case.json       # id, mode, title, max_steps, budget, thresholds
   idea.md         # единственный источник истины о продукте
   constraints.md  # необязательные рамки кейса: REQ, задачи, роли стадии
+  seed/           # необязательный seed brownfield: tar.gz + seed.json
   expected.json   # инварианты: артефакты, REQ, задачи, гейты, тесты продукта
   checks/         # необязательные pytest-проверки продукта
 ```
@@ -72,13 +73,49 @@ eval/cases/<case-id>/
 `standard-mini` задаёт так три `REQ`, две задачи и двух авторов `s1_spec`;
 правила `nano` пока живут в промпте режима.
 
+## Seed для brownfield
+
+Greenfield-кейс начинает с пустого каталога, brownfield — с существующего
+репозитория. `factory eval` не подкладывает дерево сам, поэтому кейс несёт
+`seed/repo.tar.gz` и `seed/seed.json`:
+
+- `seed.json` фиксирует `source`, `commit`, `archive`, `sha256` и
+  `require_git`; схема — `eval-seed.schema.json`;
+- `run_case` распаковывает архив в `run_dir` после `init_run` и до
+  `_drive_run`; манифест сверяется по sha256, а после распаковки
+  `git rev-parse HEAD` обязан совпасть с `commit`;
+- `factory doctor` проверяет хеш, отсутствие path traversal, наличие
+  `.git/HEAD` при `require_git: true` и отсутствие специальных файлов;
+- распаковка отказывается писать поверх управляющей плоскости (`state.json`,
+  `blackbox.*`, `idea.md`, `constraints.md`, `runtime/`, `checks/`);
+- архив, а не каталог: вложенный `.git` нельзя закоммитить в репозиторий
+  фабрики (git превращает его в gitlink), а restore drill нужен реальную
+  историю.
+
+Seed — это код продукта, а не артефакты фабрики. Brownfield-режим
+переопределяет только пути к коду: `product_src` → `app/src-tauri/src`,
+`product_tests` → `app/src-tauri/tests` (`artifact_paths` в `pipeline.yaml`);
+всё остальное остаётся общим реестром. Тесты продукта запускаются из
+`run_dir`, поэтому Rust-кейс указывает
+`cargo test --lib --manifest-path app/src-tauri/Cargo.toml`.
+
+Большой архив попадает в sdist (`recursive-include eval *`): это цена
+самодостаточного кейса. Если он не нужен в пакете, seed держат вне кейса и
+сверяют только коммит источника — но тогда `doctor` не может проверить
+целостность дерева.
+
 ## Команды
 
 ```bash
 factory eval --cases eval/cases --executor fake
 factory eval --cases eval/cases --executor fake --json
+factory eval --cases eval/cases --executor fake --case nano-todo
 factory eval --cases eval/cases --update-baseline eval/baseline.json
 ```
+
+`--case ID` (можно повторять) сужает набор: CI гоняет только быстрые
+greenfield-кейсы, а brownfield-кейс с cargo-сборкой запускается отдельно.
+`factory doctor` при этом валидирует все кейсы каталога.
 
 `factory eval` прогоняет каждый кейс в отдельном `runs/<case-id>-<stamp>/`,
 считает метрики и сверяет их с baseline. По умолчанию baseline —
@@ -193,12 +230,35 @@ factory eval --cases "$PWD/runs/hermes-cases" --executor hermes \
 Измерено 30.10.2026 на `standard-mini` (та же модель и конфигурация,
 `constraints.md`: три `REQ`, две задачи, две роли на `s1_spec`): 15 шагов,
 35 событий, 1 978 597 total / 363 237 billable, 97 API-вызовов, 653 с
-исполнителя, 11,2 минуты, `pass@1` 1.0, 11 product tests. Потолок `standard`
-в `pipeline.yaml` — 2.5M / 120 минут по этому замеру: прежние 1.5M
-остановили бы прогон на `s6_security` (1 553 552 после шага 12).
+исполнителя, 11,2 минуты, `pass@1` 1.0, 11 product tests. Второй замер —
+`product-mini` на реальном крейте `pfu` (`proxy-for-ubuntu`): 15 шагов,
+35 событий, 2 284 755 total / 430 803 billable, 97 API-вызовов, 737 с,
+12,3 минуты, 228 product tests. Потолок `standard` в `pipeline.yaml` —
+**2.9M / 120 минут** по худшему из двух: 2 284 755 + 25 %. Прежние 1.5M
+остановили бы `standard-mini` на `s6_security` (1 553 552 после шага 12).
+
+Измерено 30.10.2026 на `brownfield-proxy-mini` (seed — публичный
+`proxy-for-ubuntu` 0.4.0, commit `dfe54336…`, Rust/Tauri; та же модель и
+конфигурация): 17 шагов, 38 событий, 2 задачи, 3 560 791 total / 528 727
+billable, 155 API-вызовов, 1033 с исполнителя, 17,2 минуты, `pass@1` 1.0,
+`verification_coverage` и `traceability_coverage` 1.0, 222 product tests
+(`cargo test --lib`). Restore drill восстановил 140 отслеживаемых файлов с
+совпадением `HEAD`, `git status` и sha256. Потолок `brownfield` в
+`pipeline.yaml` — **4.5M / 30 минут**: 3 560 791 + 25 % и 17,2 мин + 25 %.
+Первый запуск с потолком 3M остановился на `s7_release` при 3 115 133 total;
+это число — нижняя граница замера, полный прогон стоит 3.56M. Запись лежит в
+`eval/baseline-hermes.json` рядом с `nano-todo` и `standard-mini`.
 
 ## CI
 
+`doctor` и `pytest` идут на `ubuntu-latest`, `macos-latest` и
+`windows-latest` (Python 3.10–3.13). Платформенные примитивы не удаляются:
+`bwrap`-тесты пропускаются по его отсутствию, POSIX-mode-bit проверка
+выполняется только на POSIX, shell-заглушки адаптеров — только на POSIX,
+а лок журнала на Windows использует `msvcrt.locking` вместо `flock`.
+
 Eval в CI работает на `fake`: без сети, без `bwrap` и укладывается в минуты.
-Джоб выполняет `factory eval --cases eval/cases --executor fake`; baseline
-лежит в репозитории, поэтому рост шагов или удвоение токенов валит сборку.
+Linux-джоб выполняет `factory eval --cases eval/cases --executor fake
+--case nano-todo --case standard-mini`; brownfield-кейс требует seed и
+cargo-сборки и запускается отдельно. Baseline лежит в репозитории, поэтому
+рост шагов или удвоение токенов валит сборку.

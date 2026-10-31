@@ -1,0 +1,9 @@
+{
+  "schema_version": "1.0.0",
+  "source": "https://github.com/DenisZakharov2/proxy-for-ubuntu",
+  "commit": "dfe54336fed20cbed9ba12e6ff8be1f7877346f0",
+  "archive": "repo.tar.gz",
+  "sha256": "279f8f48bf1e85c102ab7bf7e81dede89f12e32ee27539361faf433d3462c620",
+  "require_git": true,
+  "note": "Public main of proxy-for-ubuntu 0.4.0; app/src-tauri/target excluded."
+}

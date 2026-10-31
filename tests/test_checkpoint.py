@@ -1,5 +1,6 @@
 """Signed journal checkpoints: a signature that survives a chain rewrite."""
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -86,7 +87,10 @@ def test_sign_then_verify_is_clean(signed_run):
     result = sign_run(run_dir, key_file=key_file, store=store)
     assert result["event_count"] == 3
     assert store_path("run-01", store).is_file()
-    assert (store / "run-01.json").stat().st_mode & 0o777 == 0o600
+    if os.name != "nt":
+        # Windows does not enforce POSIX mode bits; the owner ACL is the OS
+        # equivalent, and the signature itself is checked below.
+        assert (store / "run-01.json").stat().st_mode & 0o777 == 0o600
     status = checkpoint_state(run_dir, store)
     assert status["status"] == "signed"
     assert verify_checkpoint(run_dir, key_file=key_file, store=store) == []

@@ -70,6 +70,9 @@ def test_eval_set_matches_the_committed_baseline(tmp_path, monkeypatch):
         root=tmp_path / "runs",
         baseline=COMMITTED_BASELINE,
         stamp="test",
+        # The brownfield case runs a real cargo build (and needs a seed tree);
+        # the fast fake baseline covers the greenfield contract.
+        only={"nano-todo", "standard-mini"},
     )
     assert report["baseline"]["present"] is True
     assert report["ok"], [result["errors"] for result in report["cases"]]
@@ -134,7 +137,12 @@ def test_eval_writes_a_valid_baseline(tmp_path, monkeypatch):
 
     monkeypatch.setattr(eval_module, "run_case", fake_run_case)
     report = run_eval_set(
-        CASES, FakeExecutor(), root=tmp_path / "runs", update_baseline=baseline, stamp="write"
+        CASES,
+        FakeExecutor(),
+        root=tmp_path / "runs",
+        update_baseline=baseline,
+        stamp="write",
+        only={"nano-todo", "standard-mini"},
     )
     assert report["ok"] is True
     assert report["baseline_written"] == str(baseline.resolve())
@@ -279,3 +287,21 @@ def test_cli_exposes_eval_and_compare():
     args = parser.parse_args(["compare", "--left", "a", "--right", "b", "--json"])
     assert args.func.__name__ == "cmd_compare"
     assert (args.left, args.right) == ("a", "b")
+
+
+def test_case_filter_selects_only_requested_cases():
+    from factory.eval import load_cases
+
+    bundles = load_cases(CASES, {"nano-todo"})
+    assert [bundle["case"]["id"] for bundle in bundles] == ["nano-todo"]
+    with pytest.raises(ConfigError, match="unknown eval case"):
+        load_cases(CASES, {"no-such-case"})
+
+
+def test_brownfield_case_pins_a_real_seed_and_keeps_its_frame():
+    bundle = load_case(CASES / "brownfield-proxy-mini")
+    assert bundle["case"]["mode"] == "brownfield"
+    assert bundle["seed"]["manifest"]["commit"] == "dfe54336fed20cbed9ba12e6ff8be1f7877346f0"
+    assert bundle["seed"]["archive"].is_file()
+    assert "s_in" in (bundle["constraints"] or "")
+    assert bundle["expected"]["product_tests"]["min_tests"] >= 218

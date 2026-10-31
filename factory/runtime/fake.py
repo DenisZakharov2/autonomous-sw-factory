@@ -131,8 +131,22 @@ class FakeExecutor:
 
         if spec.get("directory"):
             prefix = str(spec.get("path") or "")
+            artifact_id = str(spec.get("id") or "")
+            # A mode may remap a directory artifact (`brownfield` moves
+            # `product_src`/`product_tests` into the seeded tree), while the
+            # fake scenario is written for the canonical greenfield layout.
+            # Fall back to that canonical fixture, otherwise the fake writes
+            # nothing and a static traceability fixture points at a missing
+            # file.
+            canonical = {
+                "product_src": "product/src",
+                "product_tests": "product/tests",
+            }.get(artifact_id)
+            fixture_dir = self.fixture_root / prefix
+            if not fixture_dir.is_dir() and canonical:
+                fixture_dir = self.fixture_root / canonical
             written = []
-            for source in sorted((self.fixture_root / prefix).rglob("*")):
+            for source in sorted(fixture_dir.rglob("*")):
                 if not source.is_file():
                     continue
                 # An installed wheel byte-compiles package data, so the fixture

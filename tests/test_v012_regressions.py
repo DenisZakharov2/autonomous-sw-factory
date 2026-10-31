@@ -385,7 +385,11 @@ def test_quarantine_rejects_symlinks(tmp_path):
     skill = tmp_path / "skill"
     skill.mkdir()
     (skill / "SKILL.md").write_text("# demo\n", encoding="utf-8")
-    (skill / "leak").symlink_to("/etc/hostname")
+    (skill / "target.md").write_text("target\n", encoding="utf-8")
+    try:
+        (skill / "leak").symlink_to("target.md")
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are not available on this platform")
     with pytest.raises(QuarantineError, match="symlink forbidden"):
         hash_skill_dir(skill)
 

@@ -30,7 +30,8 @@
             }
           },
           "stage_roles": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "string"}, "minItems": 1}},
-          "artifact_owners": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}}
+          "artifact_owners": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}},
+          "artifact_paths": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}}
         }
       }
     },

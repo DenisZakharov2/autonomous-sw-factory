@@ -7,10 +7,15 @@ import pytest
 
 from factory.engine import init_run, next_action
 from factory.runtime.base import RunContext
+from factory.runtime.fake import FakeExecutor
 from factory.runtime.hermes import HermesExecutor
 from factory.runtime.opencode import OpenCodeExecutor
 from factory.runtime.prompt import build_prompt
 from factory.runtime.sandbox import sandbox_available, sandbox_command
+
+POSIX_SHELL = pytest.mark.skipif(
+    os.name == "nt", reason="the stub is a POSIX /bin/sh script"
+)
 
 
 def _stub(bin_dir: Path, name: str, body: str) -> Path:
@@ -49,6 +54,7 @@ def test_prompt_carries_role_stage_and_paths(context):
     assert len(context.prompt) < 26000
 
 
+@POSIX_SHELL
 def test_opencode_run_command_and_usage(tmp_path, monkeypatch, context):
     bin_dir = tmp_path / "bin"
     args_file = tmp_path / "args.txt"
@@ -74,6 +80,7 @@ def test_opencode_run_command_and_usage(tmp_path, monkeypatch, context):
     assert Path(result.transcript_path).is_file()
 
 
+@POSIX_SHELL
 def test_opencode_reports_error_events(tmp_path, monkeypatch, context):
     bin_dir = tmp_path / "bin"
     _stub(
@@ -88,6 +95,7 @@ def test_opencode_reports_error_events(tmp_path, monkeypatch, context):
     assert "no provider" in result.summary
 
 
+@POSIX_SHELL
 def test_opencode_timeout_is_bounded(tmp_path, monkeypatch, context):
     bin_dir = tmp_path / "bin"
     _stub(bin_dir, "opencode", "#!/bin/sh\nsleep 5\n")
@@ -103,6 +111,7 @@ def test_missing_binary_is_explicit(context):
     assert "not found" in result.stderr
 
 
+@POSIX_SHELL
 def test_hermes_command_reads_usage_file(tmp_path, monkeypatch, context):
     bin_dir = tmp_path / "bin"
     args_file = tmp_path / "args.txt"
@@ -143,6 +152,7 @@ def test_hermes_command_reads_usage_file(tmp_path, monkeypatch, context):
     assert argv[argv.index("-t") + 1] == "file"  # s00_intake writes Markdown only
 
 
+@POSIX_SHELL
 def test_hermes_failed_turn_is_not_success(tmp_path, monkeypatch, context):
     bin_dir = tmp_path / "bin"
     _stub(
@@ -166,6 +176,7 @@ def test_hermes_toolset_follows_the_stage():
     assert HermesExecutor().toolset_for("s00_intake") == "file"
     assert HermesExecutor().toolset_for("s1_spec") == "file"
     assert HermesExecutor().toolset_for("s4_build") == "file,terminal"
+    assert HermesExecutor().toolset_for("s_in") == "file,terminal"
     assert HermesExecutor(toolset="all").toolset_for("s00_intake") == "all"
     assert HermesExecutor(toolset=None).toolset_for("s4_build") is None
 
@@ -222,3 +233,17 @@ def test_sandbox_binds_context_read_write_paths(tmp_path, context):
     # plane inside it stays read-only (asserted in the trust-boundary tests).
     assert str(context.run_dir.resolve()) in binds
     assert str(extra.resolve()) in binds
+
+
+def test_fake_uses_the_canonical_fixture_for_a_remapped_directory(tmp_path):
+    # Brownfield remaps product_src/product_tests into the seeded tree; the
+    # fake scenario still writes the canonical greenfield fixture so its
+    # static traceability references a file that exists.
+    written = FakeExecutor()._write_spec(
+        {"id": "product_src", "path": "app/src-tauri/src", "directory": True},
+        {},
+        tmp_path,
+        {},
+    )
+    assert "product/src/todo.py" in written
+    assert (tmp_path / "product" / "src" / "todo.py").is_file()

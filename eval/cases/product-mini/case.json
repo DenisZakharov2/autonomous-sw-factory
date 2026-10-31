@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0.0",
+  "id": "product-mini",
+  "mode": "standard",
+  "title": "Standard: subscription retry backoff in the real pfu crate",
+  "tags": ["standard", "rust", "real-product", "subscription"],
+  "max_steps": 200,
+  "max_cycles": 25,
+  "thresholds": {"steps_growth": 0, "events_fall": 0, "tokens_growth": 0.1, "usd_growth": 0.1}
+}

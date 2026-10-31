@@ -13,14 +13,16 @@ the run instead of overwriting the repository copy.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tarfile
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Iterator
 
 from .artifacts import artifact_path, pattern_paths
@@ -41,6 +43,23 @@ from .verify import verify_run
 
 EVAL_APPROVER = "human:eval"
 CONSTRAINTS_NAME = "constraints.md"
+SEED_DIR = "seed"
+SEED_MANIFEST = "seed.json"
+SEED_SCHEMA = "eval-seed.schema.json"
+# Names owned by the run's control plane.  A seed is a product tree, never a
+# second state store: an archive carrying one of these would either overwrite
+# the journal or be silently ignored, so extraction refuses it outright.
+SEED_PROTECTED = (
+    "state.json",
+    "blackbox.jsonl",
+    "blackbox.lock",
+    "idea.md",
+    CONSTRAINTS_NAME,
+    "AUDIT_TRAIL.md",
+    "checkpoint.json",
+    "runtime",
+    "checks",
+)
 DEFAULT_MAX_STEPS = 200
 DEFAULT_MAX_CYCLES = 20
 DEFAULT_THRESHOLDS = {
@@ -55,6 +74,121 @@ RAN_RE = re.compile(r"Ran\s+(\d+)\s+tests?\b")
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _normalised_member(name: str) -> PurePosixPath:
+    """Archive paths are POSIX; a leading `./` is noise, not a directory."""
+    return PurePosixPath(name[2:] if name.startswith("./") else name)
+
+
+def _seed_members(archive: Path) -> list[tarfile.TarInfo]:
+    try:
+        with tarfile.open(archive, "r:gz") as tar:
+            return tar.getmembers()
+    except (OSError, tarfile.TarError) as exc:
+        raise ConfigError(f"cannot read seed archive {archive}: {exc}") from exc
+
+
+def _case_seed(case_dir: Path) -> dict[str, Any] | None:
+    """Optional seed tree shipped with the case.
+
+    Brownfield starts from an existing repository, and `init_run` only creates
+    an empty run directory.  The seed is a tarball, not a plain directory: a
+    nested `.git` cannot be committed to the factory repository (git turns it
+    into a submodule link), while the restore drill needs real history.  The
+    manifest pins the source commit and the archive hash, so a case cannot
+    silently drift from the tree it was measured on.
+    """
+    seed_dir = case_dir / SEED_DIR
+    if not seed_dir.is_dir():
+        return None
+    manifest_file = seed_dir / SEED_MANIFEST
+    if not manifest_file.is_file():
+        raise ConfigError(f"missing {SEED_MANIFEST} in {seed_dir}")
+    manifest = load_json(manifest_file)
+    validate_against_schema(manifest, SEED_SCHEMA, str(manifest_file))
+    archive = seed_dir / manifest["archive"]
+    if not archive.is_file():
+        raise ConfigError(f"seed archive not found: {archive}")
+    actual = _sha256_file(archive)
+    if actual != manifest["sha256"]:
+        raise ConfigError(
+            f"seed archive sha256 mismatch for {archive}: archive is {actual}, "
+            f"manifest says {manifest['sha256']}"
+        )
+    return {"dir": seed_dir, "manifest": manifest, "archive": archive}
+
+
+def _seed_errors(seed: dict[str, Any]) -> list[str]:
+    """Structural checks `factory doctor` can run without extracting."""
+    errors: list[str] = []
+    members = _seed_members(seed["archive"])
+    if not members:
+        return [f"seed archive is empty: {seed['archive']}"]
+    names = {_normalised_member(member.name).as_posix() for member in members}
+    if seed["manifest"].get("require_git"):
+        if ".git/HEAD" not in names:
+            errors.append("seed archive has no .git/HEAD, so the restore drill has no history")
+    for member in members:
+        path = _normalised_member(member.name)
+        if path.is_absolute() or ".." in path.parts:
+            errors.append(f"seed archive member escapes the run: {member.name}")
+        if member.issym() or member.islnk():
+            target = PurePosixPath(member.linkname)
+            if target.is_absolute() or ".." in target.parts:
+                errors.append(f"seed archive link escapes the run: {member.name} -> {member.linkname}")
+        if not (member.isfile() or member.isdir() or member.issym() or member.islnk()):
+            errors.append(f"seed archive contains a special file: {member.name}")
+    return errors
+
+
+def _seed_into(run_dir: Path, seed: dict[str, Any]) -> None:
+    """Extract the case seed into a freshly initialised run directory."""
+    errors = _seed_errors(seed)
+    if errors:
+        raise ConfigError("seed cannot be used: " + "; ".join(errors))
+    members: list[tarfile.TarInfo] = []
+    for member in _seed_members(seed["archive"]):
+        path = _normalised_member(member.name)
+        if not path.parts or path.as_posix() == ".":
+            continue
+        if path.parts[0] in SEED_PROTECTED:
+            raise ConfigError(
+                f"seed archive member {member.name!r} would overwrite the run control plane"
+            )
+        members.append(member)
+    with tarfile.open(seed["archive"], "r:gz") as tar:
+        try:
+            tar.extractall(run_dir, members=members, filter="data")
+        except TypeError:  # Python < 3.12 before the security backport
+            tar.extractall(run_dir, members=members)
+    manifest = seed["manifest"]
+    if not manifest.get("require_git"):
+        return
+    if not (run_dir / ".git").is_dir():
+        raise ConfigError("seed archive did not produce .git in the run directory")
+    git = shutil.which("git")
+    if git is None:
+        raise ConfigError("seed requires git history but git is not installed")
+    completed = subprocess.run(
+        [git, "-C", str(run_dir), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    actual = (completed.stdout or "").strip()
+    if completed.returncode != 0 or actual != manifest["commit"]:
+        raise ConfigError(
+            f"seed HEAD is {actual or 'unreadable'!r}, manifest pins {manifest['commit']!r}"
+        )
 
 
 def _case_constraints(case_dir: Path) -> str | None:
@@ -101,14 +235,20 @@ def load_case(case_dir: Path) -> dict[str, Any]:
         "idea": idea + "\n",
         "expected": expected,
         "constraints": _case_constraints(case_dir),
+        "seed": _case_seed(case_dir),
         "checks": checks_dir if checks_dir.is_dir() else None,
     }
 
 
-def load_cases(cases_dir: Path) -> list[dict[str, Any]]:
+def load_cases(cases_dir: Path, only: set[str] | None = None) -> list[dict[str, Any]]:
     if not cases_dir.is_dir():
         raise ConfigError(f"eval cases directory not found: {cases_dir}")
     directories = sorted(path for path in cases_dir.iterdir() if path.is_dir())
+    if only:
+        unknown = only - {path.name for path in directories}
+        if unknown:
+            raise ConfigError(f"unknown eval case id(s): {sorted(unknown)}")
+        directories = [path for path in directories if path.name in only]
     if not directories:
         raise ConfigError(f"no eval cases found in {cases_dir}")
     bundles = [load_case(path) for path in directories]
@@ -140,6 +280,8 @@ def validate_cases(cases_dir: Path) -> list[str]:
         if case_id in seen:
             errors.append(f"eval case {path.name}: duplicate id {case_id}")
         seen.add(case_id)
+        if bundle["seed"] is not None:
+            errors.extend(f"eval case {path.name}: {error}" for error in _seed_errors(bundle["seed"]))
     return errors
 
 
@@ -503,7 +645,7 @@ def run_case(
     expected = bundle["expected"]
     run_id = _case_run_id(case["id"], stamp)
     run_dir = safe_run_dir(run_id, runs_root)
-    registry = load_artifacts()
+    registry = load_artifacts(case["mode"])
     mode_budget = load_pipeline()["modes"][case["mode"]].get("budget")
     budget = _budget_for(case, mode_budget)
     for key, value in (budget_override or {}).items():
@@ -517,6 +659,9 @@ def run_case(
         constraints = bundle.get("constraints")
         if constraints:
             (run_dir / CONSTRAINTS_NAME).write_text(constraints, encoding="utf-8")
+        seed = bundle.get("seed")
+        if seed is not None:
+            _seed_into(run_dir, seed)
         drive = _drive_run(
             run_id,
             executor,
@@ -663,8 +808,9 @@ def run_eval_set(
     stamp: str | None = None,
     budget: dict[str, Any] | None = None,
     progress: Any = None,
+    only: set[str] | None = None,
 ) -> dict[str, Any]:
-    bundles = load_cases(cases_dir)
+    bundles = load_cases(cases_dir, only)
     stamp = stamp or datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     runs_root = Path(root).expanduser().resolve() if root else default_runs_root()
     results: list[dict[str, Any]] = []

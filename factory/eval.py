@@ -496,9 +496,14 @@ def _requirement_errors(run_dir: Path, expected: dict[str, Any]) -> list[str]:
         errors.append(f"unexpected requirements in traceability/spec: {extra}")
     for row in matrix["requirements"]:
         if row["req"] in wanted and not row["covered"]:
+            detail = (
+                f"; unresolved test references: {row.get('test_problems')}"
+                if row.get("test_problems")
+                else ""
+            )
             errors.append(
                 f"{row['req']} is not covered (tasks={len(row['tasks'])}, "
-                f"tests={len(row['tests'])}, acceptance={row['acceptance']!r})"
+                f"tests={len(row['tests'])}, acceptance={row['acceptance']!r}){detail}"
             )
     return errors
 

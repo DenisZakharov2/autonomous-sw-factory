@@ -35,6 +35,7 @@ All notable changes are recorded here. The project follows a simple
 - **CI на трёх ОС:** `doctor` и `pytest` на ubuntu/macOS/Windows × Python
   3.10–3.13; лок журнала на Windows — `msvcrt.locking`, symlink/shell/
   POSIX-mode-bit проверки пропускаются по наличию примитива, а не удаляются.
+  Матрица проверена: run `41173606772`, 14/14 jobs зелёные.
 - **зелёный прогон `standard-mini` на реальном Hermes:** одна модель
   (`deepseek-ai/DeepSeek-V4.1-Flash-1017`), `--reasoning high`,
   `--executor-tools auto`, `bwrap`; 15 шагов, 35 событий, 2 задачи,

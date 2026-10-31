@@ -1,33 +1,67 @@
 # Autonomous Software Factory
 
-**Version 1.0.1.** A toolkit that makes AI-assisted development provable: work moves through stages with acceptance gates, every stage has a document to hand in, and a journal keeps a digital fingerprint of every step and every file. It is not a "fully autonomous factory": a human makes the calls at the key gates.
-
 [![CI](https://github.com/DenisZakharov2/autonomous-sw-factory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/DenisZakharov2/autonomous-sw-factory/actions/workflows/ci.yml) · [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 [Русский README](README.md) · [License](LICENSE) · [Reference run](examples/nano-todo/) · [Audit](AUDIT.md) · [Quick start](docs/quickstart.md)
 
 ---
 
-## Why this exists
+**Version 1.0.1.**
 
-An AI agent writes code in minutes. Checking that work is still expensive: you cannot tell whether the thing you asked for was actually built, who reviewed it, or whether a file changed after it was accepted. Usually there is no evidence — just a chat log, a list of changes and the developer's word.
+**Autonomous Software Factory makes building applications and writing code convenient, safe and transparent.** It is a set of tools and rules that move work through stages: interview, requirements, architecture, build, acceptance, release, documentation and lessons. Every stage has a document to submit, a check to pass, and an explicit decision — proceed or send it back.
 
-The factory turns that into a process with evidence:
+**Convenient** — because the process leads the person, not the other way round. The factory asks the questions and adapts its language to the person's level: plain words for a newcomer, options, constraints and a budget for a manager, files, tests and commands for a developer. It takes a product from scratch end to end — from interview and requirements to a working, verified result — or helps a team finish a project that has run out of energy, time or resources.
 
-- work is split into **stages** with explicit acceptance gates;
-- each stage has a **document** that is submitted and checked;
-- only an **independent verifier** can accept a result — the author cannot mark their own work as passed;
-- a **journal** keeps a digital fingerprint of every step and every file.
+**Safe** — because the author does not accept their own work: only an independent verifier can record `PASS`. A real executor runs in a sandbox where the control files are read-only, and before any change to an existing project a backup is taken and a restore is verified.
 
-## What you get
+**Transparent and verifiable** — because every stage leaves a document, every requirement is linked to a task and a test, and the journal keeps fingerprints of steps and files. The result can be checked, compared against a reference, and shown to a customer.
 
-- **Proof that the work matches the written requirements.** `factory trace` shows the "requirement → task → test → acceptance" chain and names the gaps; a link to a test that does not exist is a gap too.
-- **Substitution after acceptance is visible.** `factory verify` re-hashes the files on disk: if a file changed after submission or acceptance, the check fails with `artifact tampered`.
-- **You can see who changed an accepted file and why.** A legitimate edit is recorded with `factory artifact re-record`, with a reason and a link to evidence; `factory verify` prints how many records changed after acceptance.
-- **A run can be repeated and compared.** `factory eval` drives five reference examples on the built-in `fake` executor (no model) or a real one and compares steps, events and (for real runs) tokens with the recorded reference; `factory compare` shows the delta between two runs.
-- **A report you can hand to a customer.** `AUDIT_TRAIL.md` is rendered from the journal: who, when, what was submitted, what the verdict was and how the record links to the previous one. The summary is `factory status`; the check is `factory verify`.
-- **Bring your own executor.** `fake` (no model, proves the loop), Hermes, OpenCode — or a human doing the steps by hand.
-- **An agent cannot accept its own work.** Only an independent verifier can mark it accepted; a real executor runs in an isolated environment where the control files are read-only.
+## Why it is convenient
+
+1. **It asks the questions.** You do not start with an empty form but with an adaptive interview: 1–3 questions per step, each with a recommended option and a reason. The interviewer works out the person's profile and does not dump a long questionnaire on them.
+2. **It adapts to the level.** Three profiles — `USER_NON_TECH`, `TECH_MANAGER`, `DEVELOPER` — are fixed in `state.json`. For a newcomer, the role card forbids jargon; a manager sees options, constraints and the mode budget; a developer sees files, templates and commands. One process, a different language.
+3. **From scratch, end to end.** The `nano`, `standard` and `enterprise` modes carry a product from interview and requirements through architecture, build, acceptance and release to documentation and lessons. `factory next` returns the work order, the templates and the exact command that closes the stage. “End to end” here means a working, verified product in the run directory — not hosting, deployment or support.
+4. **It helps finish a stuck project.** The `brownfield` mode for an existing git repository starts with `pre-factory.bundle`, a worktree archive, `manifest.sha256` and a verified restore drill, then moves to a read-only audit and targeted tasks. Nothing has to be rewritten from scratch, and you do not have to start over.
+5. **It does not lock you into a tool and does not demand prompt engineering.** Pick an executor: Hermes, OpenCode, `fake` without a model, or a human. The core never calls a vendor model: `factory next` returns a JSON work order, and the roles, stages and templates are already described. You do not have to design the process yourself.
+
+Two different readers, two different promises: “end to end” is for someone with an idea and no process; “finish the project” is for someone with code and no resources left to carry it.
+
+## Why it is safe
+
+1. **The author does not accept their own work.** Only `02-independent-verifier` can record `PASS`; a producer cannot write it at submission or at verification. A human can accept risk with a separate `accept-risk` record — with a reason, an expiry date and an accountable person.
+2. **Execution is isolated.** A real executor runs in `bwrap`: the filesystem root is read-only, the control plane (`state.json`, the journal, `usage.jsonl`, evidence) is mounted read-only, and writes are open only in directories declared by the work order. A tripwire hashes the state and stops the run on substitution. This is a file boundary, not a separate Unix user and not network isolation — the limitation is stated plainly.
+3. **Backup and restore drill before brownfield.** Before the first edit to existing code, the factory creates `pre-factory.bundle`, a worktree archive and `manifest.sha256`, then verifies the restore in a separate clone: a `diff` of the status and `sha256sum -c`. Without `PASS` in `restore-drill.md`, the `s_in` gate does not close.
+4. **Journal and tamper protection.** `blackbox.jsonl` is a SHA-256 hash chain with file locking and an anchor in `state.json`; `factory verify` re-hashes files and reports `artifact tampered`. `factory sign` stores an HMAC checkpoint outside `runs/` and tells `stale` from `rolled_back` and `diverged`. A legitimate edit to an accepted artifact goes only through `factory artifact re-record`, with a reason and evidence.
+5. **Limits, stops and quarantine.** Each mode has token, minute and USD budgets, each stage has an attempt limit, and a veto has a retry cap (`max_veto_retries: 3`). When a limit is hit, the run stops and escalates to a human instead of looping forever. External skills pass a SkillSpector quarantine with hashes pinned in `skills-lock.json`.
+
+## Why it is transparent and verifiable
+
+1. **Every stage is a document and a gate.** Not “a chat where something was written” but an artifact submitted from a template, a check and an explicit gate decision. `factory next` says up front what to submit and which command closes the stage.
+2. **Requirements are traced.** `factory trace` shows the “requirement → task → test → acceptance” chain and names the gaps. A link to a test that does not exist is a gap too; since 1.0.1 the function name after `::` is checked as well.
+3. **A report for the customer.** `AUDIT_TRAIL.md` is rendered from the journal: who, when, what was submitted, what the verdict was and how the record links to the previous one. The summary is `factory status`; the check is `factory verify`.
+4. **Repeatable and comparable.** `factory eval` drives reference cases on `fake` or a real executor and compares steps, events and tokens with the baseline. `factory compare` shows the delta between two runs, including artifact hashes.
+5. **Spend is visible.** `factory usage` reports `steps`, `api_calls`, `prompt_chars`, `tokens`, `tokens_billable`, `cache_read`, `tokens_out` and `seconds` by stage, task or role. `tokens` is the full context including cache; `tokens_billable` is input plus output only. USD at `0.0` or `null` is not a price but “not measured”.
+
+All of this lives as files under `runs/<id>/`: a run can be archived, handed over and checked later — not only viewed in a chat or a cloud.
+
+## What the factory does not promise
+
+- **Not a “fully autonomous factory”.** A human makes the key decisions — requirements, release, lessons. That is deliberate.
+- **No built-in model.** The code does not “think”; a connected executor or a human performs the role.
+- **No “22 agents in a minute” promise.** One run requires an interview, written requirements, architecture and review.
+- **No issue tracker, no cloud and no deployment.** Tasks and the product live in the run's files; hosting and support are not part of the job.
+- **No absolute safety.** The sandbox is a file boundary; the same uid and the network remain. Naming that limitation is better than hiding it.
+- **USD is not measured.** `0.0` or `null` in `usage.jsonl` is not “free” but “the provider did not return a price”. Compare `tokens_billable`.
+
+## Who it is for
+
+- a founder or a small team with an idea but no time or energy to assemble a development process;
+- a team that already has a project but no resources to finish it;
+- a customer who needs a report of what was checked and by whom, not a screenshot of a chat;
+- a team lead or an auditor who needs the trail behind a decision;
+- a newcomer who needs questions, plain-language explanations and ready-made templates.
+
+**Not for you** if you want a chat that writes code without a human; if this is a throwaway prototype nobody will accept; or if you are not willing to write requirements and an architecture.
 
 ## What it looks like in practice
 
@@ -70,21 +104,6 @@ factory verify --run-id nano-todo --stage s9_learn --require-gate
 
 Expected: `VERIFY OK`. The reference run has 33 events and 3/3 requirements covered by tests; the product runs.
 
-## What this is not
-
-- **Not a "fully autonomous factory".** A human decides on the requirements, the release and the lessons, and performs the restore check before working on an existing project. That is deliberate.
-- **No built-in model.** The code does not "think"; a connected executor or a human performs the role.
-- **No "22 agents in a minute" promise.** One run requires an interview, written requirements, architecture and review.
-- **No issue tracker and no cloud.** Tasks live in the run's files.
-
-## Who it is for
-
-- a small team or a founder who hands development to an AI agent and wants a result they can check;
-- a customer who needs a report of what was checked and by whom, not a screenshot of a chat;
-- a team lead or an auditor who needs the trail behind a decision, not just the final code.
-
-**Not for you** if you want a chat that writes code without a human; if this is a throwaway prototype nobody will accept; or if you are not willing to write requirements and an architecture.
-
 ## What's inside
 
 - **22 role cards** with eight sections: purpose, inputs, procedure, outputs, definition of done, veto, prohibitions, escalation.
@@ -99,7 +118,7 @@ Expected: `VERIFY OK`. The reference run has 33 events and 3/3 requirements cove
 - **38 templates and 13 JSON schemas**; templates never pre-fill `PASS`.
 - **A reference run** in `examples/nano-todo/`: 33 events, 2 tasks, 3 requirements, all gates closed, the product runs.
 
-The numbers: 4 modes (3 of them exercised on a real project), 5 reference examples, 274 tests, CI on Ubuntu, macOS and Windows (Python 3.10–3.13).
+The numbers: 4 modes (3 of them exercised on a real project), 5 reference examples, 282 tests, CI on Ubuntu, macOS and Windows (Python 3.10–3.13).
 
 ## Modes
 

@@ -13,7 +13,7 @@
     "stage": {"type": "string", "enum": ["init", "s_in", "s00_intake", "s0_vision", "s1_spec", "s15_quarantine", "s2_architecture", "s3_plan", "s4_build", "s5_acceptance", "s6_security", "s7_release", "s8_docs", "s9_learn"]},
     "task_id": {"type": ["string", "null"], "pattern": "^TASK-[A-Z0-9-]+$"},
     "role": {"type": "string", "pattern": "^[0-9]{2}-[a-z0-9-]+$"},
-    "event_type": {"type": "string", "enum": ["INIT", "STAGE_RESET", "TASK_ADD", "TASK_CLAIM", "TASK_DONE", "TASK_RESET", "ARTIFACT_SUBMIT", "GATE_DECISION", "VETO", "REWORK", "RISK_ACCEPTANCE", "SKILL_INSTALL"]},
+    "event_type": {"type": "string", "enum": ["INIT", "STAGE_RESET", "TASK_ADD", "TASK_CLAIM", "TASK_DONE", "TASK_RESET", "ARTIFACT_SUBMIT", "ARTIFACT_RERECORD", "GATE_DECISION", "VETO", "REWORK", "RISK_ACCEPTANCE", "SKILL_INSTALL"]},
     "model": {
       "type": "object",
       "additionalProperties": false,
@@ -36,10 +36,12 @@
         "properties": {
           "path": {"type": "string", "minLength": 1},
           "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
-          "bytes": {"type": "integer", "minimum": 0}
+          "bytes": {"type": "integer", "minimum": 0},
+          "old_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
         }
       }
     },
+    "reason": {"type": "string", "minLength": 1},
     "verdict": {
       "type": "object",
       "additionalProperties": false,

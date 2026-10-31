@@ -79,6 +79,58 @@ def test_full_intake_gate(tmp_path):
     assert status["current_stage"] == "s0_vision"
 
 
+def test_artifact_re_record_command(tmp_path):
+    """The CLI path an auditor uses: change, re-record, verify shows the count."""
+    assert cli("init", "--run-id", "demo", "--mode", "nano", runs_root=tmp_path).returncode == 0
+    run_dir = tmp_path / "demo"
+    _write_intake(run_dir)
+    assert cli(
+        "submit", "--run-id", "demo", "--stage", "s00_intake", "--role", "01-smart-interviewer",
+        "--artifact", "artifacts/interview-brief.md", "--artifact", "artifacts/GLOSSARY.md",
+        runs_root=tmp_path,
+    ).returncode == 0
+    assert cli(
+        "gate", "approve", "--run-id", "demo", "--gate", "gate_s00",
+        "--approver", "human:test", "--evidence", "brief accepted", runs_root=tmp_path,
+    ).returncode == 0
+    glossary = run_dir / "artifacts" / "GLOSSARY.md"
+    glossary.write_text(
+        glossary.read_text(encoding="utf-8") + "| Бэклог | backlog | List |\n", encoding="utf-8"
+    )
+    broken = cli("verify", "--run-id", "demo", "--stage", "s00_intake", runs_root=tmp_path)
+    assert broken.returncode == 1
+    assert "tampered" in broken.stdout
+    rerecord = cli(
+        "artifact", "re-record", "--run-id", "demo", "--path", "artifacts/GLOSSARY.md",
+        "--role", "01-smart-interviewer", "--reason", "добавлен термин после ревью",
+        "--evidence", "artifacts/interview-brief.md#3", runs_root=tmp_path,
+    )
+    assert rerecord.returncode == 0, rerecord.stderr
+    assert "RE-RECORDED" in rerecord.stdout
+    assert "artifacts/GLOSSARY.md" in rerecord.stdout
+    verify = cli("verify", "--run-id", "demo", "--stage", "s00_intake", runs_root=tmp_path)
+    assert verify.returncode == 0, verify.stdout
+    assert "re-records: 1" in verify.stdout
+    assert "s00_intake: 1" in verify.stdout
+    payload = json.loads(
+        cli(
+            "verify", "--run-id", "demo", "--stage", "s00_intake", "--json", runs_root=tmp_path
+        ).stdout
+    )
+    assert payload["ok"] is True
+    assert payload["re_records"][0]["paths"] == ["artifacts/GLOSSARY.md"]
+
+
+def test_artifact_re_record_requires_reason_and_evidence(tmp_path):
+    assert cli("init", "--run-id", "demo", "--mode", "nano", runs_root=tmp_path).returncode == 0
+    result = cli(
+        "artifact", "re-record", "--run-id", "demo", "--path", "artifacts/GLOSSARY.md",
+        "--role", "01-smart-interviewer", "--reason", "x", runs_root=tmp_path,
+    )
+    assert result.returncode == 1
+    assert "--evidence" in result.stderr or "--evidence" in result.stdout
+
+
 def test_verify_fails_without_artifacts(tmp_path):
     assert cli("init", "--run-id", "demo", "--mode", "nano", runs_root=tmp_path).returncode == 0
     result = cli("verify", "--run-id", "demo", runs_root=tmp_path)

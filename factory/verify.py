@@ -337,9 +337,56 @@ def artifact_integrity_errors(
             if id(item) in checked:
                 latest[str(item.get("path", ""))] = item
 
+    # A re-record is an owner's explicit act, so it wins over the hash a gate
+    # or a task bound earlier — but only for paths that something accepted or
+    # submitted is bound to.  Everything written after it is tampering again.
+    rerecords: dict[str, list[dict[str, Any]]] = {}
+    for event in events:
+        if event.get("event_type") != "ARTIFACT_RERECORD":
+            continue
+        label = f"re-record {event.get('stage')}"
+        if event.get("task_id"):
+            label += f"/{event.get('task_id')}"
+        for item in event.get("artifacts") or []:
+            if not isinstance(item, dict):
+                continue
+            path = str(item.get("path", ""))
+            if path not in latest:
+                continue
+            latest[path] = item
+            rerecords.setdefault(label, []).append(item)
+
     for label, entries in groups:
         errors.extend(_check_recorded_artifacts(run_dir, entries, label, root_paths, latest))
+    for label, entries in rerecords.items():
+        errors.extend(_check_recorded_artifacts(run_dir, entries, label, root_paths, latest))
     return errors
+
+
+def rerecord_summary(run_dir: Path) -> list[dict[str, Any]]:
+    """Every `ARTIFACT_RERECORD` in the journal, grouped by stage and task.
+
+    `verify` prints this so an auditor sees that an artifact changed after it
+    was accepted, without having to read the journal by hand.
+    """
+    try:
+        events = read_events(run_dir / "blackbox.jsonl")
+    except FactoryError:
+        return []
+    grouped: dict[tuple[str, str | None], dict[str, Any]] = {}
+    for event in events:
+        if event.get("event_type") != "ARTIFACT_RERECORD":
+            continue
+        key = (str(event.get("stage") or ""), event.get("task_id"))
+        row = grouped.setdefault(
+            key,
+            {"stage": key[0], "task_id": key[1], "count": 0, "paths": []},
+        )
+        row["count"] += 1
+        for item in event.get("artifacts") or []:
+            if isinstance(item, dict) and item.get("path"):
+                row["paths"].append(str(item["path"]))
+    return list(grouped.values())
 
 
 def verify_run(run_dir: Path, stage_id: str | None = None, require_gate: bool = False) -> list[str]:

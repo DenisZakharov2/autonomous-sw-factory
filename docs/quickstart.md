@@ -88,7 +88,23 @@ python -m unittest discover -s examples/nano-todo/product/tests -v
 
 Ожидаемо: `VERIFY OK`, `3/3` traceability, `TEST OK`, 3 теста.
 
-## 7. Частые ошибки
+## 7. Правка уже принятого артефакта
+
+Гейт замораживает хеш: после `gate approve` любая правка файла — `tampered`.
+Если правка нужна, её называет владелец артефакта:
+
+```bash
+factory artifact re-record --run-id my-first --path artifacts/GLOSSARY.md \
+  --role 01-smart-interviewer --reason "добавлен термин после ревью" \
+  --evidence "artifacts/interview-brief.md#3"
+```
+
+`reason` и хотя бы один `evidence` обязательны; `PASS` в этом событии
+запрещён, `stage_status` и `gate_status` не меняются, а правка после
+re-record снова ловится как `tampered`. `factory verify` печатает, сколько
+записей менялось после приёмки. Подробности: [`runtime.md`](runtime.md) §5.7.
+
+## 8. Частые ошибки
 
 | Ошибка | Причина | Решение |
 | :--- | :--- | :--- |
@@ -100,7 +116,7 @@ python -m unittest discover -s examples/nano-todo/product/tests -v
 | `BLOCK_INCOMPLETE` | Скан скилла неполный | Повторить с LLM/провайдером или не устанавливать |
 | `state.json ... mismatch` | Ручная правка или усечение | Не править вручную; `factory log verify --run-id <id>` |
 
-## 8. Что дальше
+## 9. Что дальше
 
 - `docs/runtime.md` — контракт исполнителя, цикл `factory run`, бюджет и песочница.
 - `docs/adapters/hermes.md` — как исполнять work orders в Hermes.

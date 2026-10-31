@@ -38,11 +38,14 @@ except ImportError:  # pragma: no cover - POSIX
 GENESIS_PREV_HASH = "0" * 64
 EVENT_TYPES = {
     "INIT", "STAGE_RESET", "TASK_ADD", "TASK_CLAIM", "TASK_DONE", "TASK_RESET",
-    "ARTIFACT_SUBMIT", "GATE_DECISION", "VETO", "REWORK", "RISK_ACCEPTANCE",
-    "SKILL_INSTALL",
+    "ARTIFACT_SUBMIT", "ARTIFACT_RERECORD", "GATE_DECISION", "VETO", "REWORK",
+    "RISK_ACCEPTANCE", "SKILL_INSTALL",
 }
 VERDICTS = {"INIT_OK", "DRAFT", "PASS", "FAIL", "NEEDS_HUMAN", "ACCEPTED_RISK", "BLOCKED"}
 HUMAN_EXEMPT = {"GATE_DECISION", "RISK_ACCEPTANCE"}
+# Events that bind the hash of an artifact to the file on disk.  `verify`
+# compares the newest of these per path with the file.
+ARTIFACT_RECORDS = {"GATE_DECISION", "TASK_DONE", "ARTIFACT_SUBMIT", "ARTIFACT_RERECORD"}
 
 
 def utc_now() -> str:
@@ -140,7 +143,10 @@ def _normalise_artifacts(run_dir: Path, artifacts: Iterable[str | dict[str, Any]
             if not path:
                 raise JournalError("artifact object must contain path")
             if "sha256" in item and "bytes" in item:
-                result.append({"path": path, "sha256": str(item["sha256"]), "bytes": int(item["bytes"])})
+                entry = {"path": path, "sha256": str(item["sha256"]), "bytes": int(item["bytes"])}
+                if item.get("old_sha256"):
+                    entry["old_sha256"] = str(item["old_sha256"])
+                result.append(entry)
                 continue
             candidate = Path(path)
             if not candidate.is_absolute():
@@ -160,7 +166,31 @@ def _normalise_artifacts(run_dir: Path, artifacts: Iterable[str | dict[str, Any]
     return result
 
 
-def _check_semantics(event_type: str, role: str, verdict: str, verified_by: str, evidence: list[str]) -> None:
+def _check_rerecord_artifacts(event_type: str, artifacts: list[dict[str, Any]]) -> None:
+    """A re-record must name both hashes for every artifact it rebinds."""
+    if event_type != "ARTIFACT_RERECORD":
+        return
+    if not artifacts:
+        raise JournalError("ARTIFACT_RERECORD requires at least one artifact")
+    for item in artifacts:
+        if not item.get("old_sha256"):
+            raise JournalError(
+                f"ARTIFACT_RERECORD requires old_sha256 for {item.get('path')!r}"
+            )
+        if str(item.get("old_sha256")) == str(item.get("sha256")):
+            raise JournalError(
+                f"ARTIFACT_RERECORD of {item.get('path')!r} has an unchanged hash"
+            )
+
+
+def _check_semantics(
+    event_type: str,
+    role: str,
+    verdict: str,
+    verified_by: str,
+    evidence: list[str],
+    reason: str = "",
+) -> None:
     if event_type not in EVENT_TYPES:
         raise JournalError(f"unknown event_type: {event_type}")
     if verdict not in VERDICTS:
@@ -169,6 +199,15 @@ def _check_semantics(event_type: str, role: str, verdict: str, verified_by: str,
         raise JournalError("INIT must use INIT_OK")
     if event_type == "INIT" and role != "00-orchestrator":
         raise JournalError("INIT must be written by 00-orchestrator")
+    if event_type == "ARTIFACT_RERECORD":
+        # Re-record is an owner's explicit act, not a verification verdict: it
+        # never carries PASS, and it is worthless without a stated reason.
+        if verdict != "DRAFT":
+            raise JournalError("ARTIFACT_RERECORD must use DRAFT, not a verdict")
+        if not str(reason).strip():
+            raise JournalError("ARTIFACT_RERECORD requires a non-empty reason")
+        if not evidence:
+            raise JournalError("ARTIFACT_RERECORD requires at least one evidence reference")
     if verdict == "PASS" and event_type not in HUMAN_EXEMPT:
         if role != "02-independent-verifier" or verified_by != role:
             raise JournalError(
@@ -219,6 +258,7 @@ def record_event(
     reason_code: str = "",
     evidence: Iterable[str] = (),
     parent_event_id: str | None = None,
+    reason: str = "",
 ) -> dict[str, Any]:
     """Append one event while the caller holds `run_lock`.
 
@@ -228,8 +268,10 @@ def record_event(
     run_dir = run_dir.resolve()
     log_path = run_dir / "blackbox.jsonl"
     evidence_list = [str(x) for x in evidence]
-    _check_semantics(event_type, role, verdict_status, verified_by, evidence_list)
+    reason = str(reason)
+    _check_semantics(event_type, role, verdict_status, verified_by, evidence_list, reason)
     prepared_artifacts = _normalise_artifacts(run_dir, artifacts)
+    _check_rerecord_artifacts(event_type, prepared_artifacts)
 
     events = read_events(log_path)
     seq = len(events) + 1
@@ -261,6 +303,10 @@ def record_event(
         "parent_event_id": parent_event_id,
         "prev_hash": prev_hash,
     }
+    if reason:
+        # Top-level `reason` is what makes a re-record auditable in isolation.
+        # Other event types omit the key, so their hashes are unchanged.
+        payload["reason"] = reason
     event_hash = compute_event_hash(prev_hash, payload)
     event = {**payload, "hash": event_hash}
     validate_against_schema(event, "event.schema.json", f"event {event['event_id']}")
@@ -299,6 +345,7 @@ def append_event(
     reason_code: str = "",
     evidence: Iterable[str] = (),
     parent_event_id: str | None = None,
+    reason: str = "",
 ) -> dict[str, Any]:
     """Standalone append for callers that do not own a transaction.
 
@@ -328,6 +375,7 @@ def append_event(
             reason_code=reason_code,
             evidence=evidence,
             parent_event_id=parent_event_id,
+            reason=reason,
         )
         if state is not None:
             _save_state_file(run_dir, state)
@@ -368,6 +416,11 @@ def verify_chain(log_path: Path, state_path: Path | None = None) -> list[str]:
                 str(verdict.get("status", "")),
                 str(verdict.get("verified_by", "")),
                 [str(item) for item in verdict.get("evidence", [])],
+                str(event.get("reason") or ""),
+            )
+            _check_rerecord_artifacts(
+                str(event.get("event_type", "")),
+                [item for item in event.get("artifacts") or [] if isinstance(item, dict)],
             )
         except JournalError as exc:
             errors.append(f"{label}: semantic error: {exc}")

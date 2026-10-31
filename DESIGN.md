@@ -119,6 +119,7 @@ hash = sha256(prev_hash || canonical_json(event_without_hash))
 - `state.json` хранит `last_event_hash` и `event_count`, поэтому усечение хвоста видно;
 - `verify_chain` проверяет схему, seq, event_id, run_id, prev_hash, hash и семантику `PASS`;
 - `AUDIT_TRAIL.md` — производное зеркало с экранированием;
+- `ARTIFACT_RERECORD` — единственный законный способ изменить хеш уже принятого артефакта: событие с причиной и `old_sha256`, только от владельца, только `DRAFT`; `verify` берёт последнюю запись на путь, поэтому правка после re-record снова `tampered`;
 - цепочка не подписана; для защиты от пересчёта всей истории нужна внешняя контрольная точка (HMAC/Ed25519).
 
 ## 6. Brownfield

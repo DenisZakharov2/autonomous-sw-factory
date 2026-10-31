@@ -16,6 +16,7 @@ from .config import (
 )
 from .engine import (
     accept_risk,
+    artifact_rerecord,
     gate_approve,
     gate_reject,
     import_plan,
@@ -48,7 +49,7 @@ from .quarantine import (
 )
 from .state import load_state
 from .trace import build_matrix
-from .verify import doctor_report, verify_run
+from .verify import doctor_report, rerecord_summary, verify_run
 
 
 def _print_json(data: object) -> None:
@@ -237,6 +238,38 @@ def cmd_submit(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_artifact(args: argparse.Namespace) -> int:
+    event = artifact_rerecord(
+        args.run_id,
+        path=args.path,
+        role=args.role,
+        reason=args.reason,
+        evidence=args.evidence or [],
+        root=_runs_root(args),
+    )
+    item = event["artifacts"][0]
+    if getattr(args, "json", False):
+        _print_json(
+            {
+                "event_id": event["event_id"],
+                "stage": event["stage"],
+                "task_id": event["task_id"],
+                "role": event["role"],
+                "path": item["path"],
+                "old_sha256": item["old_sha256"],
+                "sha256": item["sha256"],
+                "reason": event["reason"],
+            }
+        )
+    else:
+        print(
+            f"RE-RECORDED {event['event_id']} {item['path']} "
+            f"{item['old_sha256'][:8]} -> {item['sha256'][:8]} "
+            f"stage={event['stage']} role={event['role']}"
+        )
+    return 0
+
+
 def cmd_task(args: argparse.Namespace) -> int:
     if args.task_command not in {"import", "list"} and not args.task_id:
         raise FactoryError("--task-id is required for this task command")
@@ -320,6 +353,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
     status = checkpoint_state(
         run_dir, Path(args.store) if args.store else None
     )
+    rerecords = rerecord_summary(run_dir)
     if args.json:
         _print_json(
             {
@@ -328,23 +362,32 @@ def cmd_verify(args: argparse.Namespace) -> int:
                 "ok": not errors,
                 "errors": errors,
                 "checkpoint": status,
+                "re_records": rerecords,
             }
         )
-    elif errors:
-        print("VERIFY FAILED:")
-        for error in errors:
-            print(f"- {error}")
     else:
-        print(f"VERIFY OK: {run_dir} stage={args.stage or 'current'}")
-        if status["status"] == "unsigned":
-            print("checkpoint: unsigned (factory sign --run-id ... anchors the journal head)")
-        elif status["status"] == "stale":
-            print(
-                f"checkpoint: stale (signed {status['signed_event_count']} events, "
-                f"journal has {status['event_count']}) - re-sign to move the anchor"
+        if rerecords:
+            total = sum(row["count"] for row in rerecords)
+            where = ", ".join(
+                f"{row['stage']}" + (f"/{row['task_id']}" if row["task_id"] else "") + f": {row['count']}"
+                for row in rerecords
             )
+            print(f"re-records: {total} artifact record(s) changed after acceptance ({where})")
+        if errors:
+            print("VERIFY FAILED:")
+            for error in errors:
+                print(f"- {error}")
         else:
-            print(f"checkpoint: {status['status']} ({status['event_count']} events)")
+            print(f"VERIFY OK: {run_dir} stage={args.stage or 'current'}")
+            if status["status"] == "unsigned":
+                print("checkpoint: unsigned (factory sign --run-id ... anchors the journal head)")
+            elif status["status"] == "stale":
+                print(
+                    f"checkpoint: stale (signed {status['signed_event_count']} events, "
+                    f"journal has {status['event_count']}) - re-sign to move the anchor"
+                )
+            else:
+                print(f"checkpoint: {status['status']} ({status['event_count']} events)")
     return 1 if errors else 0
 
 
@@ -442,6 +485,8 @@ def cmd_trace(args: argparse.Namespace) -> int:
         for row in matrix["requirements"]:
             mark = "OK" if row["covered"] else "GAP"
             print(f"  {mark} {row['req']}: tasks={row['tasks']} tests={row['tests']} acceptance={row['acceptance']!r}")
+            for problem in row.get("test_problems") or []:
+                print(f"      ! {problem}")
     return 0 if matrix["covered"] == matrix["total"] else 1
 
 
@@ -675,6 +720,22 @@ def build_parser() -> argparse.ArgumentParser:
     submit.add_argument("--task-id")
     submit.add_argument("--runs-root")
     submit.set_defaults(func=cmd_submit)
+
+    artifact = sub.add_parser(
+        "artifact", help="artifact commands (re-record an accepted artifact)"
+    )
+    artifact.add_argument(
+        "artifact_command", choices=["re-record"],
+        help="re-record: journal that an accepted artifact changed on purpose",
+    )
+    artifact.add_argument("--run-id", required=True)
+    artifact.add_argument("--path", required=True, help="path as written in the journal")
+    artifact.add_argument("--role", required=True, help="the role that owns the artifact")
+    artifact.add_argument("--reason", required=True, help="why the artifact changed")
+    artifact.add_argument("--evidence", action="append", help="evidence reference (repeatable)")
+    artifact.add_argument("--runs-root")
+    artifact.add_argument("--json", action="store_true")
+    artifact.set_defaults(func=cmd_artifact)
 
     task = sub.add_parser("task", help="task commands")
     task.add_argument("task_command", choices=["import", "list", "claim", "submit", "accept", "reject", "reset"])

@@ -26,8 +26,8 @@ from .config import (
     resolve_model,
     validate_against_schema,
 )
-from .errors import RunError, VerificationError
-from .journal import record_event, run_lock
+from .errors import JournalError, RunError, VerificationError
+from .journal import ARTIFACT_RECORDS, read_events, record_event, run_lock
 from .paths import run_dir as safe_run_dir
 from .paths import runs_root, validate_run_id, validate_task_id
 from .pipeline import effective_owner, effective_roles, stage_artifacts
@@ -737,6 +737,168 @@ def submit_work(
             verdict_status="DRAFT",
             verified_by=role,
             artifacts=entries,
+            model_tier=model["tier"],
+            model_id=model["model_id"],
+            reasoning_effort=model["effort"],
+        )
+        save_state(run_dir, state)
+        return event
+
+
+def _declared_for_path(
+    run_dir: Path,
+    pipeline: dict[str, Any],
+    registry: dict[str, Any],
+    state: dict[str, Any],
+    target: Path,
+    preferred_stage: str | None = None,
+) -> list[tuple[dict[str, Any], str, str | None]]:
+    """Every declaration whose path is `target`: (stage, owner, task_id).
+
+    The registry is walked directly instead of through `stage_artifacts`,
+    because per-task declarations (and their `{task.owner}`) are filtered out
+    there unless a task id is already known.
+    """
+    matches: list[tuple[dict[str, Any], str, str | None]] = []
+
+    def scan(stages: list[dict[str, Any]]) -> None:
+        for stage in stages:
+            for artifact_id in stage["artifacts"]:
+                spec = dict(registry["artifacts"][artifact_id])
+                spec["id"] = artifact_id
+                owner = effective_owner(
+                    pipeline, state["mode"], artifact_id, str(spec.get("owner", ""))
+                )
+                if spec.get("per_task"):
+                    for task in state["tasks"].values():
+                        if task.get("stage") != stage["id"]:
+                            continue
+                        base = artifact_path(run_dir, spec, task_id=str(task["task_id"]))
+                        if base == target:
+                            matches.append(
+                                (
+                                    stage,
+                                    str(task.get("owner") or owner),
+                                    str(task["task_id"]),
+                                )
+                            )
+                    continue
+                if spec.get("per_pattern"):
+                    for item in pattern_paths(run_dir, spec):
+                        resolved = item.resolve()
+                        if resolved == target or (
+                            resolved.is_dir() and resolved in target.parents
+                        ):
+                            matches.append((stage, owner, None))
+                    continue
+                base, is_dir = _declared_artifact_base(run_dir, spec)
+                if base == target or (is_dir and base in target.parents):
+                    matches.append((stage, owner, None))
+
+    if preferred_stage:
+        scan([stage for stage in pipeline["stages"] if stage["id"] == preferred_stage])
+    if not matches:
+        scan(pipeline["stages"])
+    return matches
+
+
+def artifact_rerecord(
+    run_id: str,
+    *,
+    path: str,
+    role: str,
+    reason: str,
+    evidence: list[str],
+    root: str | Path | None = None,
+) -> dict[str, Any]:
+    """Record that an already-accepted artifact changed, on purpose.
+
+    This is the legal alternative to a silent rewrite: the file is already on
+    disk with its new content, the owner states why, and the journal keeps both
+    the hash the gate approved and the hash that now binds.  It does not
+    reopen the gate, does not move any stage or task status, and does not
+    legitimise a later edit — any byte written after this event is tampering
+    again.
+    """
+    reason = str(reason or "").strip()
+    if not reason:
+        raise RunError("re-record requires a non-empty --reason")
+    evidence_list = [str(item) for item in evidence if str(item).strip()]
+    if not evidence_list:
+        raise RunError("re-record requires at least one --evidence reference")
+    run_dir = safe_run_dir(run_id, root)
+    pipeline = load_pipeline()
+    with run_lock(run_dir):
+        state = load_state(run_dir)
+        registry = load_artifacts(state["mode"])
+        roots = [
+            str(spec["path"])
+            for spec in registry["artifacts"].values()
+            if spec.get("root")
+        ]
+        entry = collect_artifact_entries(run_dir, [path], root_paths=roots)[0]
+        target = resolve_recorded_path(run_dir, str(entry["path"]), root_paths=roots)
+        events = read_events(run_dir / "blackbox.jsonl")
+        previous: dict[str, Any] | None = None
+        previous_stage = ""
+        for event in events:
+            if event.get("event_type") not in ARTIFACT_RECORDS:
+                continue
+            for item in event.get("artifacts") or []:
+                recorded = str(item.get("path", ""))
+                if not recorded:
+                    continue
+                if resolve_recorded_path(run_dir, recorded, root_paths=roots) == target:
+                    previous = item
+                    previous_stage = str(event.get("stage") or "")
+        if previous is None:
+            raise RunError(
+                f"artifact {path!r} was never recorded in this journal; "
+                "submit it through its stage instead of re-recording it"
+            )
+        matches = _declared_for_path(
+            run_dir, pipeline, registry, state, target, preferred_stage=previous_stage
+        )
+        if not matches:
+            raise RunError(f"artifact {entry['path']!r} is not declared by any stage or task")
+        stage, owner, task_id = matches[0]
+        if owner and owner != role:
+            raise JournalError(
+                f"artifact {entry['path']!r} is owned by {owner}, not {role}"
+            )
+        if state["stage_status"].get(stage["id"]) == "pending":
+            raise RunError(f"stage {stage['id']} is pending; nothing has been accepted there yet")
+        if task_id:
+            task = state["tasks"].get(task_id, {})
+            if task.get("status") == "pending":
+                raise RunError(f"{task_id} is pending; claim it before re-recording its artifacts")
+        old_hash = str(previous.get("sha256", ""))
+        new_hash = str(entry["sha256"])
+        # Keep the path exactly as the record being superseded wrote it: `verify`
+        # keys the "newest record wins" map by that string.
+        recorded_path = str(previous.get("path") or entry["path"])
+        if old_hash == new_hash:
+            raise RunError(
+                f"artifact {recorded_path!r} is unchanged ({new_hash[:8]}); nothing to re-record"
+            )
+        model = _model_for(role)
+        event = record_event(
+            run_dir,
+            state,
+            stage=stage["id"],
+            task_id=task_id,
+            role=role,
+            event_type="ARTIFACT_RERECORD",
+            why=reason,
+            for_what=f"Keep {stage['id']} auditable after the artifact changed",
+            action=(
+                f"Re-recorded {recorded_path} {old_hash[:8]} -> {new_hash[:8]}: {reason}"
+            ),
+            verdict_status="DRAFT",
+            verified_by=role,
+            artifacts=[{**entry, "path": recorded_path, "old_sha256": old_hash}],
+            evidence=evidence_list,
+            reason=reason,
             model_tier=model["tier"],
             model_id=model["model_id"],
             reasoning_effort=model["effort"],

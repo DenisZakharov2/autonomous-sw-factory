@@ -132,6 +132,7 @@ python -m unittest discover -s examples/nano-todo/product/tests -v
 | `factory stage reset --run-id ID --stage S --approver human:ID --reason T` | Сбросить эскалированную стадию |
 | `factory veto --run-id ID --stage S --role R --code C --evidence E` | Блокирующее вето роли |
 | `factory task import|list|claim|submit|accept|reject|reset` | Задачи `s4_build` |
+| `factory artifact re-record --run-id ID --path P --role R --reason T --evidence E` | Явно перезаписать хеш уже принятого артефакта: событие `ARTIFACT_RERECORD` с `old_sha256`, гейт не переоткрывается |
 | `factory quarantine scan PATH --lock skills-lock.json` | Прогнать SkillSpector и записать лок |
 | `factory quarantine verify-lock --lock skills-lock.json` | Обнаружить подмену скилла |
 | `factory trace --run-id ID` | Матрица `REQ → task → test → acceptance` |

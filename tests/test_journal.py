@@ -8,6 +8,7 @@ import pytest
 
 from factory.errors import JournalError
 from factory.journal import (
+    EVENT_TYPES,
     GENESIS_PREV_HASH,
     append_event,
     canonical_json,
@@ -187,3 +188,128 @@ def test_concurrent_appends_keep_chain(nano_run):
 
 def test_genesis_hash_is_zeroes():
     assert GENESIS_PREV_HASH == "0" * 64
+
+
+def test_event_types_and_schema_enum_move_together():
+    """A new event type must be in both places or the journal rejects it."""
+    from factory.config import load_json, SCHEMA_DIR
+
+    schema = load_json(SCHEMA_DIR / "event.schema.json")
+    assert set(schema["properties"]["event_type"]["enum"]) == EVENT_TYPES
+
+
+def _rerecord(run_dir: Path, **overrides):
+    payload = {
+        "stage": "s1_spec",
+        "task_id": None,
+        "role": "01-smart-interviewer",
+        "event_type": "ARTIFACT_RERECORD",
+        "why": "re-record",
+        "for_what": "test",
+        "action": "re-recorded",
+        "verdict_status": "DRAFT",
+        "verified_by": "01-smart-interviewer",
+        "artifacts": [],
+        "reason": "reviewed again",
+        "evidence": ["artifacts/acceptance.md#A-1"],
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_re_record_requires_a_reason(nano_run):
+    run_dir, _, _ = nano_run
+    payload = _rerecord(run_dir, reason="  ")
+    with pytest.raises(JournalError, match="non-empty reason"):
+        append_event(run_dir, **payload)
+
+
+def test_re_record_requires_evidence(nano_run):
+    run_dir, _, _ = nano_run
+    payload = _rerecord(run_dir, evidence=[])
+    with pytest.raises(JournalError, match="at least one evidence"):
+        append_event(run_dir, **payload)
+
+
+def test_re_record_cannot_carry_pass(nano_run):
+    run_dir, _, _ = nano_run
+    artifact = run_dir / "artifacts" / "spec.md"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text("# spec\n", encoding="utf-8")
+    payload = _rerecord(
+        run_dir,
+        verdict_status="PASS",
+        verified_by="02-independent-verifier",
+        role="02-independent-verifier",
+        artifacts=[
+            {
+                "path": "artifacts/spec.md",
+                "sha256": "a" * 64,
+                "bytes": 7,
+                "old_sha256": "b" * 64,
+            }
+        ],
+    )
+    with pytest.raises(JournalError, match="must use DRAFT"):
+        append_event(run_dir, **payload)
+
+
+def test_re_record_requires_both_hashes(nano_run):
+    run_dir, _, _ = nano_run
+    artifact = run_dir / "artifacts" / "spec.md"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text("# spec\n", encoding="utf-8")
+    payload = _rerecord(
+        run_dir,
+        artifacts=[{"path": "artifacts/spec.md", "sha256": "a" * 64, "bytes": 7}],
+    )
+    with pytest.raises(JournalError, match="old_sha256"):
+        append_event(run_dir, **payload)
+
+
+def test_re_record_with_an_unchanged_hash_is_rejected(nano_run):
+    run_dir, _, _ = nano_run
+    artifact = run_dir / "artifacts" / "spec.md"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text("# spec\n", encoding="utf-8")
+    digest = "a" * 64
+    payload = _rerecord(
+        run_dir,
+        artifacts=[
+            {"path": "artifacts/spec.md", "sha256": digest, "bytes": 7, "old_sha256": digest}
+        ],
+    )
+    with pytest.raises(JournalError, match="unchanged hash"):
+        append_event(run_dir, **payload)
+
+
+def test_valid_re_record_is_chained_and_carries_the_reason(nano_run):
+    run_dir, _, _ = nano_run
+    artifact = run_dir / "artifacts" / "spec.md"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text("# spec\n", encoding="utf-8")
+    event = append_event(
+        run_dir,
+        **_rerecord(
+            run_dir,
+            artifacts=[
+                {
+                    "path": "artifacts/spec.md",
+                    "sha256": "a" * 64,
+                    "bytes": 7,
+                    "old_sha256": "b" * 64,
+                }
+            ],
+        ),
+    )
+    assert event["reason"] == "reviewed again"
+    assert event["artifacts"][0]["old_sha256"] == "b" * 64
+    assert verify_chain(run_dir / "blackbox.jsonl", run_dir / "state.json") == []
+
+
+def test_events_without_a_reason_still_validate(nano_run):
+    """The optional `reason` key must not invalidate history written before it."""
+    run_dir, _, _ = nano_run
+    event = _event(run_dir, "no reason here")
+    assert "reason" not in event
+    assert verify_chain(run_dir / "blackbox.jsonl", run_dir / "state.json") == []

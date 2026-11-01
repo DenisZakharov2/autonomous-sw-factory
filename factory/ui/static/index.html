@@ -14,7 +14,7 @@
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
 body{
-  background:var(--bg); color:var(--fg); min-width:1280px;
+  background:var(--bg); color:var(--fg); min-width:min(1280px,100%);
   font:13px/1.45 -apple-system,"Segoe UI",Ubuntu,sans-serif;
   font-variant-numeric:tabular-nums;
 }
@@ -188,6 +188,14 @@ tbody tr:hover{background:#151926}
 .stat .k{color:var(--muted);font-size:10.5px;text-transform:uppercase;letter-spacing:.04em}
 .stat .v{font-size:15px;font-family:var(--mono);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .stat .v small{font-size:11px;color:var(--muted);font-family:inherit}
+.stat .v.multi{font-size:11.5px;line-height:1.55;white-space:normal}
+/* P8 fits nine values into its 6x3 default without scrolling */
+.panel[data-panel="p8"] .panel-body{padding:8px}
+.panel[data-panel="p8"] .stats{gap:6px;margin-bottom:0}
+.panel[data-panel="p8"] .stat{padding:3px 7px}
+.panel[data-panel="p8"] .stat .k{font-size:9.5px;line-height:1.25}
+.panel[data-panel="p8"] .stat .v{font-size:12.5px;line-height:1.25;margin-top:1px}
+.panel[data-panel="p8"] .stat .v.multi{font-size:10.5px}
 .bar{height:6px;background:#1b1f2b;border-radius:4px;overflow:hidden;margin-top:6px}
 .bar>span{display:block;height:100%;background:var(--accent)}
 .bar>span.warn{background:var(--warn)} .bar>span.err{background:var(--err)}
@@ -218,6 +226,7 @@ tbody tr:hover{background:#151926}
 .runs-table tbody tr{cursor:pointer}
 .runs-table tbody tr:hover{background:#171c29}
 .runs-table .proj{max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.runs-scroll{overflow-x:auto}
 
 /* ---------- toast ---------- */
 #toast{
@@ -311,22 +320,23 @@ tbody tr:hover{background:#151926}
 const POLL_MS = 2000;                     // §6: один опрос раз в 2 с, вкладка видима
 const STORAGE_KEY = "ftcs.layout.v1";
 const CUSTOM_KEY = "ftcs.layout.custom.v1";
-const PANEL_IDS = ["p2", "p3", "p4", "p5", "p6", "p7"];
+const PANEL_IDS = ["p2", "p3", "p4", "p5", "p6", "p7", "p8"];
 const META = {
   p2: { title: "Стадии", badge: "13" },
   p3: { title: "Сейчас", badge: "" },
   p4: { title: "Задачи", badge: "" },
   p5: { title: "Расход", badge: "usage.jsonl" },
   p6: { title: "Трассировка", badge: "REQ" },
-  p7: { title: "Журнал", badge: "50" }
+  p7: { title: "Журнал", badge: "50" },
+  p8: { title: "Метрики", badge: "9" }
 };
 const PRESETS = {
   operator: { label: "Оператор", order: ["p2", "p3", "p4", "p7"],
     size: { p2: [12, 3], p3: [4, 4], p4: [8, 4], p7: [12, 4] } },
   finops: { label: "FinOps", order: ["p2", "p5"],
     size: { p2: [12, 3], p5: [12, 4] } },
-  audit: { label: "Аудит", order: ["p2", "p6", "p7"],
-    size: { p2: [12, 2], p6: [12, 4], p7: [12, 4] } }
+  audit: { label: "Аудит", order: ["p2", "p6", "p8", "p7"],
+    size: { p2: [12, 2], p6: [12, 4], p8: [6, 3], p7: [12, 4] } }
 };
 const STATUS = {
   accepted: { ico: "✓", label: "принято", cls: "ok" },
@@ -409,8 +419,13 @@ function sanitizeLayout(raw) {
   if (Array.isArray(raw.order)) {
     for (const id of raw.order) if (PANEL_IDS.includes(id) && !order.includes(id)) order.push(id);
   }
-  for (const id of PANEL_IDS) if (!order.includes(id)) order.push(id);
   const hidden = Array.isArray(raw.hidden) ? raw.hidden.filter((id) => PANEL_IDS.includes(id)) : [];
+  for (const id of PANEL_IDS) {
+    if (order.includes(id)) continue;
+    order.push(id);
+    // a panel this stored layout predates starts hidden, not uninvited
+    if (Array.isArray(raw.order) && !hidden.includes(id)) hidden.push(id);
+  }
   const size = {};
   for (const id of PANEL_IDS) {
     const spec = raw.size && raw.size[id];
@@ -565,9 +580,9 @@ function renderRuns(data) {
       <td class="nowrap muted">${esc(shortTime(run.updated_at))}</td>
     </tr>`;
   }).join("");
-  $("#runs-body").innerHTML = `<table class="runs-table">
+  $("#runs-body").innerHTML = `<div class="runs-scroll"><table class="runs-table">
     <thead><tr><th>Проект</th><th>run_id</th><th>Режим</th><th>Стадия</th><th>Статус</th><th style="text-align:right">Токены</th><th>Обновлён</th></tr></thead>
-    <tbody>${rows}</tbody></table>`;
+    <tbody>${rows}</tbody></table></div>`;
   for (const row of document.querySelectorAll("#runs-body tbody tr")) {
     row.addEventListener("click", () => { location.search = `?run=${encodeURIComponent(row.dataset.run)}`; });
   }
@@ -722,6 +737,35 @@ function renderUsage(data) {
         : '<tr><td colspan="7" class="empty">в usage.jsonl нет записей</td></tr>'}
     </tbody></table>`;
   panelNode("p5").querySelector(".head-badge").textContent = groupBy;
+}
+
+function renderMetrics(data) {
+  const body = panelNode("p8").querySelector(".panel-body");
+  const metrics = data.metrics;
+  if (!metrics) { body.innerHTML = '<div class="empty">метрик нет</div>'; return; }
+  if (metrics.error) {
+    body.innerHTML = `<div class="warnbox">метрики не посчитались: ${esc(metrics.error)}</div>`;
+    return;
+  }
+  const pct = (value) => (value == null ? "не измерено" : `${Math.round(value * 100)}%`);
+  const minutes = (value) => (value == null ? "не измерено" : `${Number(value).toFixed(1)} мин`);
+  const usd = (value) => (value == null ? "не измерено" : `$${Number(value).toFixed(2)}`);
+  const reasons = (metrics.top_reject_reasons || []).slice(0, 3)
+    .map((row) => `${esc(row.reason_code)} × ${row.count}`).join("<br>") || "нет отказов";
+  const cells = [
+    ["первый проход", pct(metrics.first_pass_rate)],
+    ["переделки", pct(metrics.rework_rate)],
+    ["утекшие дефекты", pct(metrics.escaped_defect_rate)],
+    ["время цикла p50", minutes(metrics.cycle_time_p50_minutes)],
+    ["время цикла p90", minutes(metrics.cycle_time_p90_minutes)],
+    ["цена артефакта", usd(metrics.cost_per_artifact_usd)],
+    ["частые отказы", reasons],
+    ["покрытие проверкой", pct(metrics.verification_coverage)],
+    ["покрытие трассировкой", pct(metrics.traceability_coverage)]
+  ];
+  body.innerHTML = `<div class="stats">${cells.map(([label, value]) =>
+    `<div class="stat"><div class="k">${label}</div>
+      <div class="v${label === "частые отказы" ? " multi" : ""}">${value}</div></div>`).join("")}</div>`;
 }
 
 function qualityLine(metrics) {
@@ -881,6 +925,7 @@ function applyPayload(data) {
   renderNow(data);
   renderTasks(data);
   renderUsage(data);
+  renderMetrics(data);
   renderTrace(data);
   renderJournal(data);
   lastPollAt = Date.now();

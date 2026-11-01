@@ -574,7 +574,7 @@ def cmd_ui(args: argparse.Namespace) -> int:
     from .ui.server import serve
 
     return serve(
-        runs_dir=_runs_root(args),
+        runs_dir=args.runs_dir,
         host=args.host,
         port=args.port,
         open_browser=args.open,

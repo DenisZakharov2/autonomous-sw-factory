@@ -301,6 +301,38 @@ def test_trace_panel_reports_a_missing_spec_instead_of_failing(served):
     assert "spec.md" in payload["trace"]["error"]
 
 
+def test_metrics_panel_has_all_nine_values_including_honest_nulls():
+    payload = data.run_payload("nano-todo", root=EXAMPLE)
+    metrics = payload["metrics"]
+    assert {
+        "first_pass_rate", "rework_rate", "escaped_defect_rate",
+        "cycle_time_p50_minutes", "cycle_time_p90_minutes", "cost_per_artifact_usd",
+        "top_reject_reasons", "verification_coverage", "traceability_coverage",
+    } <= set(metrics)
+    assert metrics["escaped_defect_rate"] is None  # "не измерено", not zero
+    assert metrics["cost_per_artifact_usd"] is None
+    assert metrics["first_pass_rate"] == 1.0
+    assert metrics["traceability_coverage"] == 1.0
+
+
+def test_metrics_panel_is_catalogued_and_visible_in_the_audit_preset():
+    text = page_text()
+    assert 'const PANEL_IDS = ["p2", "p3", "p4", "p5", "p6", "p7", "p8"];' in text
+    assert 'p8: { title: "Метрики", badge: "9" }' in text
+    assert 'order: ["p2", "p6", "p8", "p7"]' in text
+    assert "renderMetrics(data);" in text
+    for label in ("первый проход", "переделки", "утекшие дефекты", "время цикла p50",
+                  "время цикла p90", "цена артефакта", "частые отказы",
+                  "покрытие проверкой", "покрытие трассировкой"):
+        assert label in text
+
+
+def test_runs_table_scrolls_inside_its_own_container():
+    text = page_text()
+    assert '<div class="runs-scroll"><table class="runs-table">' in text
+    assert ".runs-scroll{overflow-x:auto}" in text
+
+
 # -- A11: packaging, CLI, help ---------------------------------------------
 def test_static_page_is_reachable_from_the_installed_package():
     from importlib import resources
@@ -319,6 +351,16 @@ def test_cli_ui_help_lists_the_flags():
     assert (args.runs_dir, args.host, args.port, args.open) == (None, "127.0.0.1", 8420, False)
     parsed = build_parser().parse_args(["ui", "serve", "--port", "0", "--open", "--runs-dir", "/tmp/runs"])
     assert (parsed.port, parsed.open, parsed.runs_dir) == (0, True, "/tmp/runs")
+
+
+def test_cli_ui_passes_the_runs_dir_to_the_server(monkeypatch):
+    from factory.cli import build_parser, cmd_ui
+
+    seen = {}
+    monkeypatch.setattr("factory.ui.server.serve", lambda **kwargs: seen.update(kwargs) or 0)
+    args = build_parser().parse_args(["ui", "--runs-dir", "/tmp/factory-runs"])
+    assert cmd_ui(args) == 0
+    assert seen["runs_dir"] == "/tmp/factory-runs"
 
 
 # -- A12: CSV and .xlsx export ---------------------------------------------

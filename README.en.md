@@ -6,7 +6,18 @@
 
 ---
 
-**Version 1.0.3.**
+**Version 1.0.4.**
+
+## See a run
+
+```bash
+python -m pip install autonomous-sw-factory
+factory ui --runs-dir runs --open     # http://127.0.0.1:8420
+```
+
+The dashboard is read-only: it shows the runs under `runs/` and writes nothing there.
+
+---
 
 **Autonomous Software Factory makes building applications and writing code convenient, safe and transparent.** It is a set of tools and rules that move work through stages: interview, requirements, architecture, build, acceptance, release, documentation and lessons. Every stage has a document to submit, a check to pass, and an explicit decision — proceed or send it back.
 
@@ -118,7 +129,7 @@ Expected: `VERIFY OK`. The reference run has 33 events and 3/3 requirements cove
 - **38 templates and 13 JSON schemas**; templates never pre-fill `PASS`.
 - **A reference run** in `examples/nano-todo/`: 33 events, 2 tasks, 3 requirements, all gates closed, the product runs.
 
-The numbers: 4 modes (3 of them exercised on a real project), 5 reference examples, 353 tests, CI on Ubuntu, macOS and Windows (Python 3.10–3.13).
+The numbers: 4 modes (3 of them exercised on a real project), 5 reference examples, 357 tests, CI on Ubuntu, macOS and Windows (Python 3.10–3.13).
 
 ## Modes
 
@@ -191,8 +202,8 @@ In `nano`, role `01-smart-interviewer` also writes `spec.md`, `spec-human.md`, `
 
 ## Dashboard
 
-`factory ui` serves a local run console: a list of runs and a run screen with seven panels (header,
-13 stages with gates, "now", tasks, spend, `REQ` traceability, journal).
+`factory ui` serves a local run console: a list of runs and a run screen with eight panels (header,
+13 stages with gates, "now", tasks, spend, `REQ` traceability, metrics, journal).
 
 ```bash
 factory ui --runs-dir runs --open     # http://127.0.0.1:8420/?run=<id>
@@ -220,7 +231,9 @@ factory ui --port 0                   # a free port; the address is printed
   URLs: `/api/export/runs.csv`, `/api/runs/<id>/export/{journal,tasks,usage,trace}.csv`,
   `/api/runs/<id>/export.xlsx`.
 - **Expensive work is a button.** `verify_chain` (1.8 ms per event) runs from "Check the chain" and is
-  cached by `(mtime, size)`; `compute_metrics` is not called because no panel shows it.
+  cached by `(mtime, size)`. `compute_metrics` runs in every cold payload of a run and is cached by
+  `state.json`, the journal, requirements, acceptance, traceability and tests; the "Metrics" panel
+  shows all nine values, and `null` reads "not measured".
 
 ## Quarantine
 

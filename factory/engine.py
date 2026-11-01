@@ -412,7 +412,7 @@ def verification_report(
         return path, [f"missing artifact: {path}"], None, ""
     text = path.read_text(encoding="utf-8")
     errors = validate_markdown(path, list(spec.get("required_sections") or []))
-    errors.extend(validate_verification_report(path))
+    errors.extend(validate_verification_report(path, require_deterministic_check=task_id is None))
     verdict, verdict_errors = verification_verdict(text)
     return path, errors, verdict, verification_reason(text)
 
@@ -680,9 +680,11 @@ def _task_work_order(
         instructions = (
             f"Task {task['task_id']} is submitted and waits for independent verification. "
             f"Read (do not edit) {deliverables}. Run at least three adversarial checks — "
-            "one of them `factory verify` for the stage — and write "
-            f"`{report_rel}` with the commands, their real output and one verdict "
-            "`PASS` or `FAIL`. You may write only that report."
+            "one of them the task's own check command from `plan.md` — and write "
+            f"`{report_rel}` with the commands and their real output. In the "
+            "`- Вердикт:` line write exactly one word: `PASS` or `FAIL`. Leaving the "
+            "template's `PASS | FAIL` choice in place is invalid: the runtime rejects "
+            "the report and the step repeats. You may write only that report."
         )
         next_command = (
             f"factory task accept --run-id {run_id} --task-id {task['task_id']}"
@@ -825,8 +827,10 @@ def _stage_work_order(
                 "`02-independent-verifier`. Read (do not edit) " + (readable or "—")
                 + ". Run at least three adversarial checks — one of them "
                 f"`factory verify --run-id {run_id} --stage {stage['id']}` — and write "
-                f"`{report_rel}` with the commands, their real output and one verdict "
-                "`PASS` or `FAIL`. You may write only that report."
+                f"`{report_rel}` with the commands and their real output. In the "
+                "`- Вердикт:` line write exactly one word: `PASS` or `FAIL`. Leaving "
+                "the template's `PASS | FAIL` choice in place is invalid: the runtime "
+                "rejects the report and the step repeats. You may write only that report."
             )
             next_command = (
                 f"factory verify --run-id {run_id} --stage {stage['id']} && "

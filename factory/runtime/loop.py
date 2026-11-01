@@ -264,35 +264,44 @@ def _complete_verification(
     run_dir: Path,
     root: str | Path | None,
     registry: dict[str, Any],
-) -> str:
+) -> tuple[str, dict[str, Any] | None]:
     """Act on the verifier's report; return a note when the step did not land.
 
     PASS closes the task or advances the stage to its gate.  FAIL is not a
     crash and not an approval: the task or the stage goes back to rework with
-    the verifier's reason in the journal.
+    the verifier's reason in the journal.  An invalid report returns the
+    validation errors as well, so the loop can leave an evidence step: a retry
+    is otherwise invisible in the audit.
     """
     stage_id = str(order["stage"])
     task_id = str(order["task_id"]) if order.get("task_id") else None
-    _path, errors, verdict, reason = verification_report(
+    path, errors, verdict, reason = verification_report(
         run_dir, registry, stage_id=stage_id, task_id=task_id
     )
     if errors:
-        return "verification report is not valid: " + "; ".join(errors[:3])
+        try:
+            report_rel = path.relative_to(run_dir.resolve()).as_posix()
+        except ValueError:
+            report_rel = path.as_posix()
+        return (
+            "verification report is not valid: " + "; ".join(errors[:3]),
+            {"errors": errors, "report": report_rel},
+        )
     if task_id:
         if verdict == "FAIL":
             task_reject(
                 run_id, task_id, reason or "the verifier's report says FAIL", root=root
             )
-            return ""
+            return "", None
         try:
             task_accept(run_id, task_id, root=root)
         except FactoryError as exc:
-            return str(exc)
-        return ""
+            return str(exc), None
+        return "", None
     state = load_state(run_dir)
     submitted = _submit_order(run_id, order, run_dir, root, state, role=VERIFIER)
     if not submitted:
-        return "the verification report exists but was not submitted"
+        return "the verification report exists but was not submitted", None
     if verdict == "FAIL":
         gate_reject(
             run_id,
@@ -301,7 +310,7 @@ def _complete_verification(
             evidence=[f"verifier report FAIL: {reason or 'no reason given'}"],
             root=root,
         )
-    return ""
+    return "", None
 
 
 def _ready_build_tasks(state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -730,7 +739,15 @@ def run_loop(
         task = state["tasks"].get(str(order.get("task_id"))) if order.get("task_id") else None
         submit_note = ""
         if _is_verification_order(order):
-            submit_note = _complete_verification(run_id, order, run_dir, root, registry)
+            submit_note, invalid_report = _complete_verification(
+                run_id, order, run_dir, root, registry
+            )
+            if invalid_report:
+                # A retry after a rejected report must be visible in the audit,
+                # not only in the executor transcript.
+                evidence_store.write_step(
+                    step, order, {"status": "report_invalid", **invalid_report}
+                )
         else:
             submitted = _submit_order(
                 run_id, order, run_dir, root, state, role=order.get("next_role")

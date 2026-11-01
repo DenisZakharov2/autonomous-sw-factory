@@ -176,8 +176,9 @@ def test_budget_command_reports_engine_limits(tmp_path):
     assert data["default_max_attempts"] == 3
     assert data["mode"] == "nano"
     assert data["mode_budget"]["minutes"] == 120
-    # Measured on the real verifier run: worst green 4 131 427 + 25 %.
-    assert data["mode_budget"]["tokens"] == 5_200_000
+    # Measured on the real verifier run: worst completed 6 217 251 + 25 %,
+    # rounded up (was 5 200 000 when the verifier step did not exist).
+    assert data["mode_budget"]["tokens"] == 7_800_000
     assert data["enforced_by_engine"] == ["attempts", "veto_retries"]
     assert data["runtime_responsibility"] == ["minutes", "tokens", "usd"]
     assert data["attempts_used"] == {"gates": {}, "tasks": {}}
@@ -191,7 +192,8 @@ def test_budget_command_reports_engine_limits(tmp_path):
     )
     assert standard["mode"] == "standard"
     assert standard["mode_budget"]["minutes"] == 120
-    assert standard["mode_budget"]["tokens"] == 2_900_000
+    # Worst green standard run after the verifier step: 7 581 128 + 25 %.
+    assert standard["mode_budget"]["tokens"] == 9_500_000
 
     assert (
         cli("init", "--run-id", "demo-brownfield", "--mode", "brownfield", runs_root=tmp_path).returncode
@@ -201,8 +203,9 @@ def test_budget_command_reports_engine_limits(tmp_path):
         cli("budget", "--run-id", "demo-brownfield", runs_root=tmp_path).stdout
     )
     assert brownfield["mode"] == "brownfield"
-    assert brownfield["mode_budget"]["minutes"] == 30
-    assert brownfield["mode_budget"]["tokens"] == 4_500_000
+    # 44.2 measured minutes and 7 269 116 tokens, both + 25 % and rounded up.
+    assert brownfield["mode_budget"]["minutes"] == 60
+    assert brownfield["mode_budget"]["tokens"] == 9_100_000
 
 
 def test_brownfield_starts_at_s_in(tmp_path):

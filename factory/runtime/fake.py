@@ -24,7 +24,15 @@ from .base import ExecutionResult, RunContext
 
 FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "nano"
 PLACEHOLDER_RE = re.compile(r"\{\{([a-zA-Z0-9_.-]+)\}\}")
-SCENARIOS = ("ok", "break-artifact", "write-state", "escape", "slow", "verification-fail")
+SCENARIOS = (
+    "ok",
+    "break-artifact",
+    "write-state",
+    "escape",
+    "slow",
+    "verification-fail",
+    "verification-invalid",
+)
 
 
 def _within(path: Path, parent: Path) -> bool:
@@ -132,6 +140,7 @@ class FakeExecutor:
         self.sleep_seconds = sleep_seconds
         self.respect_roles = respect_roles
         self._failed_subjects: set[str] = set()
+        self._invalid_subjects: set[str] = set()
 
     # -- writing -------------------------------------------------------
     def _fixture(self, relative: str) -> str | None:
@@ -159,16 +168,22 @@ class FakeExecutor:
 
         if spec.get("report") == "verification":
             verdict = "PASS"
+            subject = f"{order.get('stage')}:{order.get('task_id') or '-'}"
             if self.scenario == "verification-fail":
                 # Fail the first report for each subject, then pass: the run
                 # must show a rework loop and still converge.
-                subject = f"{order.get('stage')}:{order.get('task_id') or '-'}"
                 if subject not in self._failed_subjects:
                     self._failed_subjects.add(subject)
                     verdict = "FAIL"
             text = _verification_report(
                 spec, order, run_dir, list(order.get("artifacts") or []), verdict
             )
+            if self.scenario == "verification-invalid" and subject not in self._invalid_subjects:
+                # The first report for a subject leaves the template's
+                # `PASS | FAIL` choice in place: not a decision, so the runtime
+                # must reject it, leave evidence and repeat the step.
+                self._invalid_subjects.add(subject)
+                text = text.replace("- Вердикт: PASS", "- Вердикт: PASS | FAIL")
             raw = str(spec.get("resolved_path") or spec.get("path") or "")
             return [self._write(Path(raw), text, run_dir)]
 

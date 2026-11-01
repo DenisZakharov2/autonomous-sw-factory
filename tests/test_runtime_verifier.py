@@ -30,9 +30,14 @@ from factory.journal import append_event, compute_event_hash, read_events
 from factory.runtime.base import ExecutionResult
 from factory.runtime.fake import FakeExecutor
 from factory.runtime.loop import _collect_writable_paths, run_loop
+from factory.runtime.prompt import build_prompt
 from factory.state import load_state, save_state
 from factory.verify import verification_policy_errors, verify_run
-from conftest import write_stage_verification, write_task_verification
+from conftest import (
+    verification_report_text,
+    write_stage_verification,
+    write_task_verification,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 EXAMPLE = ROOT / "examples" / "nano-todo"
@@ -637,3 +642,114 @@ def test_verification_fail_rework_converges(tmp_path, monkeypatch):
             event["event_type"] == "VERIFY" and event["stage"] == stage and not event.get("task_id")
             for event in events
         ), stage
+
+
+# --- the deterministic check is a rule, not a sentence ---------------------
+
+
+def test_a_stage_report_without_the_deterministic_check_is_not_a_report(tmp_path):
+    """`§3.3` promised one `factory verify` check; only the validator can keep it."""
+    path = tmp_path / "verification.md"
+    path.write_text(verification_report_text("stage s4_build"), encoding="utf-8")
+    assert validate_verification_report(path) == []
+
+    without = path.read_text(encoding="utf-8").replace(
+        "factory verify --run-id run-01 --stage s4_build", "rg -n TODO artifacts"
+    )
+    path.write_text(without, encoding="utf-8")
+    errors = validate_verification_report(path)
+    assert any("deterministic" in error for error in errors), errors
+    # The same report is fine as a task report: `factory verify` has no task
+    # scope, and the task's own check command is the deterministic evidence.
+    assert validate_verification_report(path, require_deterministic_check=False) == []
+
+
+def test_every_committed_example_report_satisfies_the_rule():
+    """The reference example is the CI-visible twin of the nine measured reports."""
+    stage_reports = sorted(EXAMPLE.glob("artifacts/verification/*/verification.md"))
+    task_reports = sorted(EXAMPLE.glob("tasks/*/verification/verification.md"))
+    assert len(stage_reports) + len(task_reports) == 9, (stage_reports, task_reports)
+    for path in stage_reports:
+        assert validate_verification_report(path) == [], path
+    for path in task_reports:
+        assert validate_verification_report(path, require_deterministic_check=False) == [], path
+
+
+def test_the_acceptance_prompt_requires_a_verbatim_pass(tmp_path, monkeypatch):
+    """`пройдено тестом` cost two runs a rework cycle; the prompt names the word."""
+    monkeypatch.setenv("FACTORY_ROOT", str(tmp_path))
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    monkeypatch.setenv("FACTORY_RUNS_ROOT", str(runs))
+    run_dir, _, _ = init_run("run-01", "nano", root=runs)
+    _advance_to(run_dir, "s5_acceptance")
+    order = next_action("run-01", root=runs)
+    prompt = build_prompt(order, run_dir=run_dir)
+    assert "дословно `PASS`" in prompt
+    assert "пройдено тестом" in prompt
+    assert "Предзаполнять `PASS` до проверки запрещено" in prompt
+
+
+def test_the_verifier_is_told_to_write_exactly_one_word(quarantine_run):
+    """The template's `PASS | FAIL` left in place is what made two steps repeat."""
+    submit_work(
+        "run-01",
+        stage_id="s15_quarantine",
+        role="00-orchestrator",
+        artifacts=["artifacts/security-review-skills.md", "skills-lock.json"],
+        root=quarantine_run.parent,
+    )
+    order = next_action("run-01", root=quarantine_run.parent)
+    assert order["action"] == "verify"
+    assert "`- Вердикт:` line write exactly one word" in order["instructions"]
+    assert "PASS | FAIL" in order["instructions"]
+    prompt = build_prompt(order, run_dir=quarantine_run)
+    assert "`- Вердикт:` line write exactly one word" in prompt
+    # The stage prompt runs the deterministic check the validator now requires.
+    assert "factory verify --run-id run-01 --stage s15_quarantine" in prompt
+
+
+def test_the_task_verifier_is_told_to_write_exactly_one_word(build_run):
+    order = next_action("run-01", root=build_run.parent)
+    assert order["action"] == "verify" and order["task_id"] == "TASK-001"
+    assert "`- Вердикт:` line write exactly one word" in order["instructions"]
+    assert "the task's own check command from `plan.md`" in order["instructions"]
+
+
+def test_an_invalid_report_leaves_evidence_and_retries(tmp_path, monkeypatch):
+    """A retry after a rejected report must be visible in the audit, not silent."""
+    monkeypatch.setenv("FACTORY_ROOT", str(tmp_path))
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    monkeypatch.setenv("FACTORY_RUNS_ROOT", str(runs))
+    init_run("run-01", "nano", root=runs)
+    executor = FakeExecutor(scenario="verification-invalid")
+    result = None
+    for _ in range(20):
+        result = run_loop("run-01", executor, max_steps=80, root=runs)
+        if result.code == 2:
+            gate_approve(
+                "run-01",
+                gate_id=result.order["gate"]["id"],
+                approver="human:test",
+                evidence=["test approval"],
+                root=runs,
+            )
+            continue
+        break
+    assert result is not None
+    assert result.code == 0, result.message
+
+    run_dir = runs / "run-01"
+    steps = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted((run_dir / "runtime" / "evidence").glob("*.json"))
+    ]
+    invalid = [step for step in steps if step.get("status") == "report_invalid"]
+    assert invalid, [step.get("status") for step in steps]
+    for step in invalid:
+        assert step["errors"], step
+        assert step["report"].endswith("verification.md"), step
+        assert not Path(step["report"]).is_absolute(), step
+    # The run continued after the invalid report and still converged.
+    assert verify_run(run_dir, "s9_learn", require_gate=True) == []

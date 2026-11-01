@@ -17,6 +17,12 @@ PLACEHOLDER_GUARD = re.compile(r"REQ-(?:###|NNN|\{)")
 MIN_SECTION_WORDS = 1
 REPORT_CHECKS_MIN = 3
 CHECK_HEADING_RE = re.compile(r"^###\s+Проверка\s+\d+\b.*$", re.MULTILINE)
+# The deterministic `factory verify` run is a promise the report made in prose
+# and nothing checked.  A stage report is only a witness if one of its checks
+# actually ran the stage's own deterministic verifier; a task report cannot,
+# because `factory verify` has no `--task` scope and the task's own check
+# command is the deterministic evidence there.
+VERIFY_COMMAND_RE = re.compile(r"\bverify\b")
 VERDICT_CHOICE_RE = re.compile(r"PASS\s*\|\s*FAIL")
 VERDICT_LINE_RE = re.compile(
     r"^\s*(?:[-*]\s*)?(?:`?\s*Вердикт\s*:\s*)?`?\s*(PASS|FAIL)\s*`?\s*$", re.MULTILINE
@@ -338,8 +344,15 @@ def verification_reason(text: str) -> str:
     return match.group(1).strip().strip("`").strip()
 
 
-def validate_verification_report(path: Path) -> list[str]:
-    """A verifier's report is only valid with three checks, outputs and a verdict."""
+def validate_verification_report(
+    path: Path, *, require_deterministic_check: bool = True
+) -> list[str]:
+    """A verifier's report is only valid with three checks, outputs and a verdict.
+
+    `require_deterministic_check` is set for a stage report: the prompt tells the
+    verifier to run `factory verify --stage`, and until now only prose said so.
+    A task report passes `False` — `factory verify` has no task scope.
+    """
     if not path.exists():
         return [f"missing artifact: {path}"]
     if not path.is_file():
@@ -359,10 +372,16 @@ def validate_verification_report(path: Path) -> list[str]:
                 errors.append(f"{path}: check {index} has no '{field}:' field")
             elif not value:
                 errors.append(f"{path}: check {index} has an empty '{field}:' value")
+    if require_deterministic_check and not any(
+        VERIFY_COMMAND_RE.search(_field_value(block, "Команда")[1]) for block in blocks
+    ):
+        errors.append(
+            f"{path}: none of the {len(blocks)} checks ran the deterministic "
+            "`factory verify`; at least one '- Команда:' must carry it"
+        )
     _verdict, verdict_errors = verification_verdict(text)
     errors.extend(f"{path}: {error}" for error in verdict_errors)
     return errors
-
 
 
 def validate_json_artifact(path: Path, schema_name: str) -> list[str]:
@@ -576,7 +595,9 @@ def validate_artifact(
             )
             errors.extend(validate_markdown(path, list(spec.get("required_sections", []))))
             if spec.get("report") == "verification" and path.is_file():
-                errors.extend(validate_verification_report(path))
+                # A task report carries the task's own check command; `factory
+                # verify` cannot be scoped to a task.
+                errors.extend(validate_verification_report(path, require_deterministic_check=False))
         return errors
     if spec.get("per_pattern"):
         paths = pattern_paths(run_dir, spec)

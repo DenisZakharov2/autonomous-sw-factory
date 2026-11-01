@@ -1,23 +1,28 @@
 """The dashboard: payload shape, read-only promise, HTTP surface, chain check.
 
-A1-A8 and A11 of the spec are tested here; A9-A10 (drag, resize, import/export)
-are JS behaviour and are checked in the browser -- the repository has no JS test
-harness and one file does not justify building one.
+A1-A8 and A11 of the spec are tested here, M1 export in A12; A9-A10 (drag,
+resize, layout import/export) are JS behaviour and are checked in the browser --
+the repository has no JS test harness and one file does not justify building one.
 """
+import csv
 import hashlib
+import io
 import json
+import sys
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
 from factory.engine import init_run
-from factory.ui import data
+from factory.ui import data, export
 from factory.ui.server import make_server
+from factory.usage_report import build_usage_report
 
 ROOT = Path(__file__).resolve().parent.parent
 EXAMPLE = ROOT / "examples"
@@ -314,3 +319,222 @@ def test_cli_ui_help_lists_the_flags():
     assert (args.runs_dir, args.host, args.port, args.open) == (None, "127.0.0.1", 8420, False)
     parsed = build_parser().parse_args(["ui", "serve", "--port", "0", "--open", "--runs-dir", "/tmp/runs"])
     assert (parsed.port, parsed.open, parsed.runs_dir) == (0, True, "/tmp/runs")
+
+
+# -- A12: CSV and .xlsx export ---------------------------------------------
+def csv_rows(body: bytes) -> list[list[str]]:
+    return list(csv.reader(io.StringIO(body.decode("utf-8-sig")), delimiter=";"))
+
+
+def today() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%d")
+
+
+def test_every_csv_is_utf8_bom_semicolon_and_crlf(served):
+    base, _root, _run = served
+    paths = [
+        "/api/export/runs.csv",
+        "/api/runs/run-01/export/journal.csv",
+        "/api/runs/run-01/export/tasks.csv",
+        "/api/runs/run-01/export/usage.csv",
+        "/api/runs/run-01/export/trace.csv",
+    ]
+    for path in paths:
+        status, headers, body = get(base, path)
+        assert status == 200, path
+        assert headers["Content-Type"] == "text/csv; charset=utf-8", path
+        assert headers["Content-Disposition"].startswith("attachment; filename="), path
+        # Excel in a Russian locale reads Cyrillic only with the BOM and CRLF.
+        assert body[:3] == b"\xef\xbb\xbf", path
+        text = body[3:].decode("utf-8")
+        assert text.endswith("\r\n"), path
+        assert "\n" not in text.replace("\r\n", ""), path
+
+
+def test_csv_filename_carries_run_dataset_and_date(served):
+    base, _root, _run = served
+    _status, headers, _body = get(base, "/api/runs/run-01/export/journal.csv")
+    assert headers["Content-Disposition"] == f'attachment; filename="run-01-journal-{today()}.csv"'
+    _status, headers, _body = get(base, "/api/export/runs.csv")
+    assert headers["Content-Disposition"] == f'attachment; filename="runs-{today()}.csv"'
+
+
+def test_runs_csv_has_one_row_per_run_directory(served):
+    base, root, _run = served
+    run_two, _state, _event = init_run("run-02", "nano", root=root)
+    (run_two / "idea.md").write_text("Второй прогон\n", encoding="utf-8")
+    data.clear_cache()
+    status, _headers, body = get(base, "/api/export/runs.csv")
+    assert status == 200
+    rows = csv_rows(body)
+    assert rows[0] == list(export.RUN_FIELDS)
+    directories = [entry for entry in root.iterdir() if (entry / "state.json").is_file()]
+    assert len(rows) - 1 == len(directories) == 2
+    by_id = {row[0]: row for row in rows[1:]}
+    assert by_id["run-01"][1] == "Нано- todo на stdlib"
+    assert by_id["run-02"][1] == "Второй прогон"
+    assert by_id["run-01"][4] == "pending"  # stage status from state.json
+
+
+def test_journal_export_is_the_whole_log_not_the_tail(served):
+    base, _root, run_dir = served
+    lines = [json.dumps({"seq": index, "event_type": "INIT", "why": f"event {index}"}) for index in range(80)]
+    (run_dir / "blackbox.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    state["event_count"] = 80
+    (run_dir / "state.json").write_text(json.dumps(state), encoding="utf-8")
+    data.clear_cache()
+    rows = csv_rows(get(base, "/api/runs/run-01/export/journal.csv")[2])
+    assert rows[0] == list(export.JOURNAL_FIELDS)
+    assert len(rows) - 1 == 80 == json.loads(get(base, "/api/runs/run-01")[2])["header"]["event_count"]
+    # The screen still shows 50; only the file carries all 80.
+    assert json.loads(get(base, "/api/runs/run-01")[2])["journal"]["limit"] == 50
+    limited = csv_rows(get(base, "/api/runs/run-01/export/journal.csv?limit=7")[2])
+    assert [row[0] for row in limited[1:]] == [str(index) for index in range(73, 80)]
+    status, _headers, body = get(base, "/api/runs/run-01/export/journal.csv?limit=0")
+    assert status == 400 and "positive integer" in json.loads(body)["error"]
+
+
+def test_usage_export_matches_the_usage_report(served):
+    base, root, run_dir = served
+    usage = run_dir / "runtime" / "usage.jsonl"
+    usage.parent.mkdir(parents=True, exist_ok=True)
+    usage.write_text(
+        "\n".join(
+            [
+                json.dumps({"stage": "s1_spec", "role": "01-smart-interviewer", "task_id": "TASK-001",
+                            "tokens_in": 100, "tokens_out": 20, "tokens_total": 120, "seconds": 4.5, "usd": None}),
+                json.dumps({"stage": "s1_spec", "role": "02-independent-verifier",
+                            "tokens_in": 50, "tokens_out": 10, "tokens_total": 60, "seconds": 1.25, "usd": None}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    data.clear_cache()
+    for query, grouping in (("", "stage"), ("?by=role", "role"), ("?by=task", "task")):
+        status, _headers, body = get(base, f"/api/runs/run-01/export/usage.csv{query}")
+        assert status == 200
+        rows = csv_rows(body)
+        assert rows[0] == list(export.USAGE_FIELDS)
+        report, _warning = build_usage_report("run-01", group_by=grouping, root=root)
+        expected = [
+            [group["key"]] + ["" if group[name] is None else str(group[name]) for name in export.USAGE_FIELDS[1:]]
+            for group in report["groups"]
+        ]
+        assert rows[1:] == expected, grouping
+    status, _headers, body = get(base, "/api/runs/run-01/export/usage.csv?by=nope")
+    assert status == 400
+    assert "unknown usage grouping" in json.loads(body)["error"]
+
+
+def test_tasks_export_has_one_row_per_task_with_joined_lists(served):
+    base, _root, run_dir = served
+    state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    state["tasks"] = {
+        "TASK-001": {
+            "task_id": "TASK-001", "stage": "s4_build", "owner": "12-fullstack-developer",
+            "reqs": ["REQ-001", "REQ-002"], "allowed_files": ["product/src/a.py", "product/src/b.py"],
+            "deps": [], "status": "review", "attempts": 2, "artifacts": [], "lease": None,
+            "reject_reasons": ["тесты не запускались"],
+        }
+    }
+    (run_dir / "state.json").write_text(json.dumps(state), encoding="utf-8")
+    data.clear_cache()
+    rows = csv_rows(get(base, "/api/runs/run-01/export/tasks.csv")[2])
+    assert rows[0] == list(export.TASK_FIELDS)
+    assert len(rows) == 2
+    row = dict(zip(rows[0], rows[1]))
+    assert row["reqs"] == "REQ-001; REQ-002"
+    assert row["allowed_files"] == "product/src/a.py; product/src/b.py"
+    assert row["deps"] == ""  # null, not the word "none"
+    assert row["reject_reasons"] == "тесты не запускались"
+
+
+def test_trace_export_has_one_row_per_requirement():
+    payload = data.run_payload("nano-todo", root=EXAMPLE)
+    fields, rows = export.trace_table(payload)
+    assert fields == export.TRACE_FIELDS
+    assert len(rows) == payload["trace"]["total"] == 3
+    parsed = csv_rows(export.csv_bytes(fields, rows))
+    assert parsed[0] == list(fields)
+    assert [row[0] for row in parsed[1:]] == [row["req"] for row in rows]
+
+
+def test_trace_export_without_a_spec_is_a_header_only_csv(served):
+    base, _root, _run = served
+    status, _headers, body = get(base, "/api/runs/run-01/export/trace.csv")
+    assert status == 200
+    assert csv_rows(body) == [list(export.TRACE_FIELDS)]
+
+
+def test_workbook_has_six_sheets_and_the_csv_headers(served):
+    openpyxl = pytest.importorskip("openpyxl")
+    base, _root, _run = served
+    status, headers, body = get(base, "/api/runs/run-01/export.xlsx")
+    assert status == 200
+    assert headers["Content-Type"] == (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    assert headers["Content-Disposition"] == f'attachment; filename="run-01-{today()}.xlsx"'
+    book = openpyxl.load_workbook(io.BytesIO(body))
+    assert book.sheetnames == ["Прогон", "Стадии", "Задачи", "Журнал", "Расход", "Трассировка"]
+    for sheet, fields in (
+        ("Прогон", export.RUN_FIELDS),
+        ("Стадии", export.STAGE_FIELDS),
+        ("Задачи", export.TASK_FIELDS),
+        ("Журнал", export.JOURNAL_FIELDS),
+        ("Расход", export.USAGE_FIELDS),
+        ("Трассировка", export.TRACE_FIELDS),
+    ):
+        assert [cell.value for cell in book[sheet][1]] == list(fields), sheet
+        assert book[sheet].freeze_panes == "A2", sheet
+    # A null is an empty cell, not the string "None".
+    journal = {cell.value: book["Журнал"].cell(row=2, column=index).value for index, cell in enumerate(book["Журнал"][1], 1)}
+    assert journal["task_id"] is None
+
+
+def test_xlsx_without_openpyxl_is_501_with_the_extra_name(served, monkeypatch):
+    base, _root, _run = served
+    monkeypatch.setitem(sys.modules, "openpyxl", None)
+    status, headers, body = get(base, "/api/runs/run-01/export.xlsx")
+    assert status == 501
+    assert headers["Content-Type"].startswith("application/json")
+    assert "autonomous-sw-factory[xlsx]" in json.loads(body)["error"]
+
+
+def test_exports_leave_the_run_byte_identical(served):
+    base, _root, run_dir = served
+    usage = run_dir / "runtime" / "usage.jsonl"
+    usage.parent.mkdir(parents=True, exist_ok=True)
+    usage.write_text(json.dumps({"stage": "s1_spec", "tokens_total": 10, "seconds": 1.5}) + "\n", encoding="utf-8")
+    data.clear_cache()
+    watched = [run_dir / "state.json", run_dir / "blackbox.jsonl", usage]
+
+    def digest():
+        return {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in watched}
+
+    before = digest()
+    for _ in range(2):
+        for path in (
+            "/api/export/runs.csv",
+            "/api/runs/run-01/export/journal.csv",
+            "/api/runs/run-01/export/tasks.csv",
+            "/api/runs/run-01/export/usage.csv",
+            "/api/runs/run-01/export/trace.csv",
+        ):
+            assert get(base, path)[0] == 200, path
+        # The CI `build` job has no openpyxl: a 501 must not touch the run either.
+        assert get(base, "/api/runs/run-01/export.xlsx")[0] in (200, 501)
+    assert digest() == before
+
+
+def test_export_is_one_icon_menu_in_the_header():
+    text = page_text()
+    assert text.count('id="menu-export"') == 1
+    assert 'aria-label="Экспорт ▾"' in text
+    assert text.count('id="btn-export"') == 1
+    for dataset in ("journal", "tasks", "usage", "trace", "xlsx", "runs"):
+        assert f'data-export="{dataset}"' in text
+    # The icon keeps the bar on one line: no text button next to it.
+    assert ".btn.icon{width:28px;height:28px" in text

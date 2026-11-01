@@ -16,7 +16,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from ..errors import FactoryError
-from . import data
+from . import data, export
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8420
@@ -83,17 +83,24 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler contract
         parts = urlsplit(self.path)
         path = parts.path
+        query = parse_qs(parts.query)
         if path in ("/", "/index.html"):
             return self._page()
         if path == "/api/runs":
             return self._runs()
+        if path == "/api/export/runs.csv":
+            return self._export_runs()
         segments = [segment for segment in path.split("/") if segment]
         if len(segments) >= 3 and segments[0] == "api" and segments[1] == "runs":
             run_id = segments[2]
             if len(segments) == 3:
                 return self._run(run_id)
             if len(segments) == 4 and segments[3] == "chain":
-                return self._chain(run_id, parse_qs(parts.query))
+                return self._chain(run_id, query)
+            if len(segments) == 4 and segments[3] == "export.xlsx":
+                return self._export_xlsx(run_id)
+            if len(segments) == 5 and segments[3] == "export":
+                return self._export_csv(run_id, segments[4], query)
         self._json(HTTPStatus.NOT_FOUND, {"error": "not found", "path": path})
 
     def _write_refused(self) -> None:
@@ -166,6 +173,101 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc), "run_id": run_id}
             )
         self._json(HTTPStatus.OK, report)
+
+    # -- exports ----------------------------------------------------------
+    def _download(
+        self,
+        body: bytes,
+        filename: str,
+        content_type: str = "text/csv; charset=utf-8",
+    ) -> None:
+        self._send(
+            HTTPStatus.OK,
+            body,
+            content_type=content_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    def _export_runs(self) -> None:
+        try:
+            fields, rows = export.runs_table(self.runs_dir)
+        except FactoryError as exc:
+            return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
+        self._download(export.csv_bytes(fields, rows), export.csv_filename("runs"))
+
+    def _export_csv(self, run_id: str, name: str, query: dict[str, list[str]]) -> None:
+        dataset = name[: -len(".csv")] if name.endswith(".csv") else name
+        if dataset not in export.DATASETS:
+            return self._json(
+                HTTPStatus.NOT_FOUND, {"error": "unknown export dataset", "dataset": dataset}
+            )
+        try:
+            run_path = data.run_path(run_id, self.runs_dir)
+        except data.RunNotFound as exc:
+            return self._json(HTTPStatus.NOT_FOUND, {"error": str(exc), "run_id": run_id})
+        by = (query.get("by") or ["stage"])[0]
+        if dataset == "usage" and by not in export.GROUPINGS:
+            return self._json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": f"unknown usage grouping: {by!r} (stage, role or task)", "by": by},
+            )
+        limit = None
+        if dataset == "journal":
+            raw = (query.get("limit") or [""])[0]
+            if raw:
+                if not raw.isdigit() or int(raw) < 1:
+                    return self._json(
+                        HTTPStatus.BAD_REQUEST,
+                        {"error": f"limit must be a positive integer, got {raw!r}", "limit": raw},
+                    )
+                limit = int(raw)
+        try:
+            if dataset == "journal":
+                fields, rows = export.journal_table(run_path, limit)
+            else:
+                payload = data.run_payload(run_id, self.runs_dir)
+                if dataset == "tasks":
+                    fields, rows = export.tasks_table(payload)
+                elif dataset == "usage":
+                    fields, rows = export.usage_table(payload, by)
+                else:
+                    fields, rows = export.trace_table(payload)
+        except data.RunNotFound as exc:
+            return self._json(HTTPStatus.NOT_FOUND, {"error": str(exc), "run_id": run_id})
+        except FactoryError as exc:
+            return self._json(
+                HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc), "run_id": run_id}
+            )
+        self._download(export.csv_bytes(fields, rows), export.csv_filename(dataset, run_id))
+
+    def _export_xlsx(self, run_id: str) -> None:
+        try:
+            run_path = data.run_path(run_id, self.runs_dir)
+            payload = data.run_payload(run_id, self.runs_dir)
+            sheets = {
+                "Прогон": (export.RUN_FIELDS, [export.run_row(payload)]),
+                "Стадии": export.stages_table(payload),
+                "Задачи": export.tasks_table(payload),
+                "Журнал": export.journal_table(run_path),
+                "Расход": export.usage_table(payload, "stage"),
+                "Трассировка": export.trace_table(payload),
+            }
+            body = export.xlsx_bytes(sheets)
+        except export.ExportUnavailable as exc:
+            return self._json(
+                HTTPStatus.NOT_IMPLEMENTED, {"error": str(exc), "extra": "xlsx"}
+            )
+        except data.RunNotFound as exc:
+            return self._json(HTTPStatus.NOT_FOUND, {"error": str(exc), "run_id": run_id})
+        except FactoryError as exc:
+            return self._json(
+                HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc), "run_id": run_id}
+            )
+        self._download(
+            body,
+            export.xlsx_filename(run_id),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
 
     def _not_modified_response(self, etag: str) -> None:
         self.send_response(HTTPStatus.NOT_MODIFIED)

@@ -35,14 +35,14 @@ a{color:var(--accent)}
 }
 body[data-tone="err"] .topbar{box-shadow:inset 0 -2px 0 rgba(239,68,68,.6), 0 4px 14px rgba(0,0,0,.35)}
 body[data-tone="warn"] .topbar{box-shadow:inset 0 -2px 0 rgba(245,158,11,.55), 0 4px 14px rgba(0,0,0,.35)}
-.brand{display:flex;flex-direction:column;gap:3px;min-width:240px;flex:1 1 380px;max-width:560px}
+.brand{display:flex;flex-direction:column;gap:3px;min-width:240px;flex:1 1 280px;max-width:280px}
 .brand .project{font-size:15px;font-weight:600;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .brand .meta{display:flex;gap:6px;align-items:center;color:var(--muted);font-size:11.5px;white-space:nowrap;overflow:hidden}
 .brand .meta .run{font-family:var(--mono);color:#aab0c2}
 .brand .meta .back{color:var(--muted);text-decoration:none;border-bottom:1px dotted #3a4157;margin-left:4px}
 .brand .meta .back:hover{color:var(--fg)}
 .brand .meta .sep{opacity:.5}
-.stageblock{display:flex;flex-direction:column;gap:3px;min-width:0;flex:0 1 auto;max-width:340px}
+.stageblock{display:flex;flex-direction:column;gap:3px;min-width:0;flex:0 1 auto;max-width:300px}
 .stageblock .stage{font-size:14px;font-weight:600;display:flex;gap:8px;align-items:center;white-space:nowrap}
 .stageblock .stage #h-stage{overflow:hidden;text-overflow:ellipsis}
 .stageblock .sub{color:var(--muted);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -56,6 +56,7 @@ body[data-tone="warn"] .topbar{box-shadow:inset 0 -2px 0 rgba(245,158,11,.55), 0
 .btn:hover{background:#1d2230;border-color:#2f3547}
 .btn:focus-visible,select:focus-visible,input:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .btn.primary{border-color:#3b3f88;background:#1b1f3a}
+.btn.icon{width:28px;height:28px;padding:0;display:inline-flex;align-items:center;justify-content:center}
 select,.input{background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:3px 7px;font-size:12px}
 .live{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:11.5px;white-space:nowrap}
 .menu-wrap{position:relative}
@@ -65,6 +66,7 @@ select,.input{background:var(--panel2);border:1px solid var(--line);border-radiu
 }
 .menu button{background:transparent;border:0;text-align:left;padding:6px 8px;border-radius:6px;font-size:12px;color:var(--fg)}
 .menu button:hover{background:#1b2130}
+.menu-sep{height:1px;background:var(--line);margin:4px 2px}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 0 rgba(16,185,129,.5)}
 .dot.fresh{animation:pulse 1.2s ease-out}
 .dot.paused{background:var(--idle)}
@@ -242,6 +244,7 @@ tbody tr:hover{background:#151926}
     <h1>Factory</h1><span class="muted">прогоны</span>
     <span class="muted" id="runs-count"></span>
     <span class="live" style="margin-left:auto"><i class="dot" id="runs-dot"></i><span id="runs-live">обновляется</span></span>
+    <a class="btn" href="/api/export/runs.csv" style="align-self:center" title="Экспорт списка прогонов в CSV">CSV</a>
   </div>
   <div id="runs-body"><div class="empty">Загрузка…</div></div>
 </section>
@@ -273,6 +276,20 @@ tbody tr:hover{background:#151926}
         <div class="catalog" id="catalog" hidden></div>
       </div>
       <button class="btn" id="btn-pause" aria-pressed="false">Пауза</button>
+      <div class="menu-wrap" id="export-wrap">
+        <button class="btn icon" id="btn-export" aria-expanded="false" aria-haspopup="true" aria-label="Экспорт ▾" title="Экспорт ▾">
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false"><path d="M7 1.5v6.5M4.2 5.6 7 8.4l2.8-2.8M2.5 11.5h9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="menu" id="menu-export" hidden>
+          <button type="button" data-export="journal">Журнал · CSV</button>
+          <button type="button" data-export="tasks">Задачи · CSV</button>
+          <button type="button" data-export="usage">Расход · CSV</button>
+          <button type="button" data-export="trace">Трассировка · CSV</button>
+          <button type="button" data-export="xlsx">Книга · XLSX</button>
+          <div class="menu-sep"></div>
+          <button type="button" data-export="runs">Все прогоны · CSV</button>
+        </div>
+      </div>
       <div class="menu-wrap">
         <button class="btn" id="btn-layout" aria-expanded="false" title="Экспорт, импорт и сброс раскладки">Раскладка ▾</button>
         <div class="menu" id="menu-layout" hidden>
@@ -928,6 +945,16 @@ function toast(message, isError) {
   box._timer = setTimeout(() => { box.className = ""; }, 4000);
 }
 
+function download(url) {
+  // No `download` attribute: the server's Content-Disposition names the file,
+  // and an attachment response saves instead of navigating away.
+  const link = document.createElement("a");
+  link.href = url;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
 function exportLayout() {
   const blob = new Blob([JSON.stringify(layout, null, 2)], { type: "application/json" });
   const link = document.createElement("a");
@@ -997,7 +1024,26 @@ function editionWiring() {
     const menu = $("#menu-layout");
     menu.hidden = !menu.hidden;
     $("#btn-layout").setAttribute("aria-expanded", String(!menu.hidden));
+    if (!menu.hidden) { $("#menu-export").hidden = true; $("#btn-export").setAttribute("aria-expanded", "false"); }
   });
+  $("#btn-export").addEventListener("click", () => {
+    const menu = $("#menu-export");
+    menu.hidden = !menu.hidden;
+    $("#btn-export").setAttribute("aria-expanded", String(!menu.hidden));
+    if (!menu.hidden) { $("#menu-layout").hidden = true; $("#btn-layout").setAttribute("aria-expanded", "false"); }
+  });
+  for (const item of document.querySelectorAll("#menu-export [data-export]")) {
+    item.addEventListener("click", () => {
+      $("#menu-export").hidden = true;
+      $("#btn-export").setAttribute("aria-expanded", "false");
+      const kind = item.dataset.export;
+      if (kind === "runs") { download("/api/export/runs.csv"); return; }
+      if (!payload) { toast("прогон ещё не загружен", true); return; }
+      const base = "/api/runs/" + encodeURIComponent(payload.run_id);
+      if (kind === "xlsx") { download(base + "/export.xlsx"); toast("книга .xlsx собирается"); }
+      else { download(base + "/export/" + kind + ".csv"); toast("скачивается CSV"); }
+    });
+  }
   for (const item of document.querySelectorAll("#menu-layout [data-layout]")) {
     item.addEventListener("click", () => {
       $("#menu-layout").hidden = true;
@@ -1024,6 +1070,10 @@ function editionWiring() {
     if (!ev.target.closest(".menu-wrap")) {
       $("#menu-layout").hidden = true;
       $("#btn-layout").setAttribute("aria-expanded", "false");
+    }
+    if (!ev.target.closest("#export-wrap")) {
+      $("#menu-export").hidden = true;
+      $("#btn-export").setAttribute("aria-expanded", "false");
     }
     if (!ev.target.closest(".panel-settings") && !ev.target.closest('[data-act="settings"]')) {
       for (const box of document.querySelectorAll(".panel-settings")) box.hidden = true;

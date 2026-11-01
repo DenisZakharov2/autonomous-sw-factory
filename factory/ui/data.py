@@ -308,6 +308,11 @@ def _run_path(run_id: str, root: str | Path | None) -> Path:
     return path
 
 
+def run_path(run_id: str, root: str | Path | None = None) -> Path:
+    """Validated run directory for callers outside this module (the exporter)."""
+    return _run_path(run_id, root)
+
+
 def revision(run_id: str, root: str | Path | None = None) -> str | None:
     """Cheap `revision` for `If-None-Match`: a raw `state.json` read and three stats.
 

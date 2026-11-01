@@ -570,6 +570,17 @@ def cmd_models(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ui(args: argparse.Namespace) -> int:
+    from .ui.server import serve
+
+    return serve(
+        runs_dir=_runs_root(args),
+        host=args.host,
+        port=args.port,
+        open_browser=args.open,
+    )
+
+
 def cmd_budget(args: argparse.Namespace) -> int:
     budget = load_budget()
     pipeline = load_pipeline()
@@ -873,6 +884,14 @@ def build_parser() -> argparse.ArgumentParser:
     budget.add_argument("--run-id")
     budget.add_argument("--runs-root")
     budget.set_defaults(func=cmd_budget)
+
+    ui = sub.add_parser("ui", help="serve the read-only dashboard (GET only, 127.0.0.1)")
+    ui.add_argument("ui_command", nargs="?", default="serve", choices=["serve"])
+    ui.add_argument("--runs-dir", help="runs directory to read (default: $FACTORY_RUNS_ROOT or ./runs)")
+    ui.add_argument("--host", default="127.0.0.1", help="bind address; keep 127.0.0.1, never expose the port")
+    ui.add_argument("--port", type=int, default=8420, help="port (0 picks a free one)")
+    ui.add_argument("--open", action="store_true", help="open the dashboard in the default browser")
+    ui.set_defaults(func=cmd_ui)
     return parser
 
 

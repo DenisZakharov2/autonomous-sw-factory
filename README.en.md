@@ -118,7 +118,7 @@ Expected: `VERIFY OK`. The reference run has 33 events and 3/3 requirements cove
 - **38 templates and 13 JSON schemas**; templates never pre-fill `PASS`.
 - **A reference run** in `examples/nano-todo/`: 33 events, 2 tasks, 3 requirements, all gates closed, the product runs.
 
-The numbers: 4 modes (3 of them exercised on a real project), 5 reference examples, 282 tests, CI on Ubuntu, macOS and Windows (Python 3.10–3.13).
+The numbers: 4 modes (3 of them exercised on a real project), 5 reference examples, 341 tests, CI on Ubuntu, macOS and Windows (Python 3.10–3.13).
 
 ## Modes
 
@@ -176,6 +176,7 @@ In `nano`, role `01-smart-interviewer` also writes `spec.md`, `spec-human.md`, `
 | `factory usage --run-id ID [--by stage\|task\|role] [--json]` | Spend from `runtime/usage.jsonl` by stage, task or role; `null` is not turned into zero |
 | `factory budget [--run-id ID]` | Attempt limits, mode budget, used attempts |
 | `factory artifacts` | Artifact registry |
+| `factory ui [serve] [--runs-dir D] [--host H] [--port P] [--open]` | Local run dashboard: read-only, `GET` only, `127.0.0.1` only |
 
 ## Journal and trust
 
@@ -187,6 +188,31 @@ In `nano`, role `01-smart-interviewer` also writes `spec.md`, `spec-human.md`, `
 - A producer cannot record `PASS`; the rule is enforced at append time and at verification time.
 - `AUDIT_TRAIL.md` is rendered from JSONL with `|` and newlines escaped.
 - The chain itself is **not signed**: it detects accidental edits and naive tampering, not a determined attacker who recomputes every hash. For that threat model there is `factory sign`, an HMAC checkpoint outside `runs/`.
+
+## Dashboard
+
+`factory ui` serves a local run console: a list of runs and a run screen with seven panels (header,
+13 stages with gates, "now", tasks, spend, `REQ` traceability, journal).
+
+```bash
+factory ui --runs-dir runs --open     # http://127.0.0.1:8420/?run=<id>
+factory ui --port 0                   # a free port; the address is printed
+```
+
+- **Read-only.** The server answers `GET` only: `POST`, `PUT` and `DELETE` get `405`, and nothing is
+  written under `runs/`. Gate decisions stay in the terminal (`factory gate approve|reject`); the
+  server never reads `FACTORY_APPROVAL_KEY`.
+- **Localhost only.** Binds `127.0.0.1:8420`; do not expose the port to the network.
+- **No internet.** The page ships inside the package (`factory/ui/static/index.html`), with no CDN,
+  external fonts or telemetry.
+- **Live updates.** Polling every 2 s, only while the tab is visible; every answer carries a
+  `revision` and an unchanged run is served as `304`. "Pause" stops the polling.
+- **Free layout.** A 12-column grid with 56 px rows: drag a panel by its header, resize it by the
+  corner (3-12 columns, 1-4 rows), hide panels from the catalogue, switch presets
+  (Operator / FinOps / Audit / Custom) and export or import the layout as `.json`. The layout lives in
+  the browser's `localStorage`; the server knows nothing about it.
+- **Expensive work is a button.** `verify_chain` (1.8 ms per event) runs from "Check the chain" and is
+  cached by `(mtime, size)`; `compute_metrics` is not called because no panel shows it.
 
 ## Quarantine
 
@@ -216,6 +242,10 @@ factory/                 # engine and configs
   artifacts.py           # registry, Markdown/JSON checks
   pipeline.py            # stages, modes, owners
   quarantine.py          # SkillSpector adapter
+  ui/                    # read-only run dashboard
+    data.py              # panel payload from core read functions, cached by mtime
+    server.py            # ThreadingHTTPServer: GET only, static page, 304
+    static/index.html    # 12-column grid, panels, drag/resize, presets
   runtime/               # the executable loop
     base.py              # Executor protocol
     loop.py              # order → executor → verify → submit → gate

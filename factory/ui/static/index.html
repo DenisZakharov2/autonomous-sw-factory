@@ -1,0 +1,1121 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Factory — пульт прогона</title>
+<style>
+:root{
+  --bg:#0B0D12; --panel:#12151E; --panel2:#171B26; --line:#232837;
+  --fg:#E7E9F0; --muted:#8B91A5;
+  --accent:#6366F1; --ok:#10B981; --warn:#F59E0B; --err:#EF4444; --idle:#64748B;
+  --radius:10px; --mono:ui-monospace,"JetBrains Mono",Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--fg); min-width:1280px;
+  font:13px/1.45 -apple-system,"Segoe UI",Ubuntu,sans-serif;
+  font-variant-numeric:tabular-nums;
+}
+h1,h2,h3{margin:0;font-weight:600}
+button,select,input{font:inherit;color:inherit}
+button{cursor:pointer}
+a{color:var(--accent)}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}
+.nowrap{white-space:nowrap}
+.num{text-align:right;font-family:var(--mono)}
+
+/* ---------- top bar (P1, fixed) ---------- */
+.topbar{
+  position:sticky; top:0; z-index:40; display:flex; gap:24px; align-items:center;
+  padding:12px 24px; background:var(--panel); border-bottom:1px solid var(--line);
+  box-shadow:0 4px 14px rgba(0,0,0,.35);
+}
+.brand{display:flex;flex-direction:column;gap:2px;min-width:320px;max-width:520px}
+.brand .project{font-size:15px;font-weight:600;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.brand .ids{display:flex;gap:8px;align-items:center;color:var(--muted);font-size:12px}
+.brand .ids .run{font-family:var(--mono);color:var(--fg);opacity:.85}
+.stageblock{display:flex;flex-direction:column;gap:2px;min-width:220px}
+.stageblock .stage{font-size:15px;font-weight:600;display:flex;gap:8px;align-items:center}
+.stageblock .sub{color:var(--muted);font-size:12px}
+.topright{margin-left:auto;display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:flex-end}
+.toolbar{display:flex;gap:6px;align-items:center}
+.btn{
+  background:var(--panel2); border:1px solid var(--line); color:var(--fg);
+  border-radius:8px; padding:5px 10px; line-height:1.2; transition:background .15s ease-out,border-color .15s ease-out;
+}
+.btn:hover{background:#1d2230;border-color:#2f3547}
+.btn:focus-visible,select:focus-visible,input:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn.primary{border-color:#3b3f88;background:#1b1f3a}
+select,.input{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:4px 8px}
+.live{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 0 rgba(16,185,129,.5)}
+.dot.fresh{animation:pulse 1.2s ease-out}
+.dot.paused{background:var(--idle)}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(16,185,129,.45)}100%{box-shadow:0 0 0 7px rgba(16,185,129,0)}}
+.badge{
+  display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;
+  border:1px solid var(--line);background:var(--panel2);font-size:12px;white-space:nowrap
+}
+.badge.ok{color:var(--ok);border-color:rgba(16,185,129,.4);background:rgba(16,185,129,.08)}
+.badge.warn{color:var(--warn);border-color:rgba(245,158,11,.4);background:rgba(245,158,11,.08)}
+.badge.err{color:var(--err);border-color:rgba(239,68,68,.4);background:rgba(239,68,68,.08)}
+.badge.idle{color:var(--muted)}
+.badge.active{color:var(--accent);border-color:rgba(99,102,241,.5);background:rgba(99,102,241,.1)}
+.badge .ico{font-size:11px}
+
+/* ---------- grid ---------- */
+.grid{
+  display:grid; grid-template-columns:repeat(12,1fr); grid-auto-rows:56px;
+  grid-auto-flow:row dense; gap:12px; padding:16px 24px 40px;
+}
+.panel{
+  background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+  display:flex; flex-direction:column; min-width:0; overflow:hidden; position:relative;
+  transition:border-color .15s ease-out,opacity .15s ease-out;
+}
+.panel[hidden]{display:none}
+.panel.dragging{opacity:.45}
+.panel.drop-before::before,.panel.drop-after::after{
+  content:""; position:absolute; left:0; right:0; height:3px; background:var(--accent); z-index:5; border-radius:2px;
+}
+.panel.drop-before::before{top:-8px}
+.panel.drop-after::after{bottom:-8px}
+.panel-head{
+  display:flex; align-items:center; gap:8px; height:32px; padding:0 8px 0 10px;
+  border-bottom:1px solid var(--line); background:var(--panel2);
+  cursor:grab; user-select:none; flex:none;
+}
+.panel-head:active{cursor:grabbing}
+.panel-head h2{font-size:13px;font-weight:600}
+.panel-head .grip{color:#3d4459;font-size:11px;letter-spacing:-1px}
+.panel-head .head-badge{margin-left:auto;color:var(--muted);font-size:11px;font-family:var(--mono)}
+.panel-actions{display:flex;gap:2px;align-items:center}
+.icon-btn{
+  background:transparent;border:1px solid transparent;border-radius:6px;color:var(--muted);
+  width:22px;height:22px;line-height:1;display:inline-flex;align-items:center;justify-content:center;padding:0
+}
+.icon-btn:hover{background:#20263a;color:var(--fg)}
+.panel-body{flex:1;min-height:0;overflow:auto;padding:12px}
+.resize{
+  position:absolute; right:0; bottom:0; width:16px; height:16px; cursor:nwse-resize; touch-action:none;
+  background:linear-gradient(135deg,transparent 50%,#333a4f 50%,#333a4f 60%,transparent 60%,transparent 72%,#333a4f 72%,#333a4f 82%,transparent 82%);
+  opacity:.7;
+}
+.resize:hover{opacity:1}
+.panel-settings{
+  position:absolute; top:34px; right:8px; z-index:20; background:#0e1119;
+  border:1px solid #2c3243; border-radius:8px; padding:8px; display:flex; flex-direction:column; gap:6px;
+  box-shadow:0 8px 24px rgba(0,0,0,.5); font-size:12px;
+}
+.panel-settings label{display:flex;justify-content:space-between;gap:12px;align-items:center}
+
+/* ---------- shared bits ---------- */
+table{border-collapse:collapse;width:100%;font-size:12px}
+th{position:sticky;top:0;background:var(--panel);text-align:left;color:var(--muted);font-weight:500;padding:4px 8px;border-bottom:1px solid var(--line);white-space:nowrap;z-index:2}
+td{padding:4px 8px;border-bottom:1px solid #1b1f2b;vertical-align:top}
+tr:last-child td{border-bottom:none}
+tbody tr:hover{background:#151926}
+.empty{color:var(--muted);padding:8px 0}
+.errbox{border:1px solid rgba(239,68,68,.4);background:rgba(239,68,68,.07);color:#ffb4b4;border-radius:8px;padding:8px 10px;margin:8px 0}
+.warnbox{border:1px solid rgba(245,158,11,.35);background:rgba(245,158,11,.07);color:#ffd79a;border-radius:8px;padding:8px 10px;margin:8px 0}
+
+/* ---------- stages ---------- */
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{
+  display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:8px;
+  border:1px solid var(--line);background:var(--panel2);font-size:12px;line-height:1.2;
+}
+.chip .ico{font-size:11px}
+.chip .g{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.chip .m{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.chip.ok{border-color:rgba(16,185,129,.35)}
+.chip.ok .ico{color:var(--ok)}
+.chip.active{border-color:var(--accent);box-shadow:0 0 0 1px rgba(99,102,241,.35) inset;animation:breathe 2.6s ease-in-out infinite}
+.chip.active .ico{color:var(--accent)}
+.chip.warn{border-color:rgba(245,158,11,.4)} .chip.warn .ico{color:var(--warn)}
+.chip.err{border-color:rgba(239,68,68,.45)} .chip.err .ico{color:var(--err)}
+.chip.idle .ico{color:var(--idle)}
+.chip.na{opacity:.45;border-style:dashed}
+@keyframes breathe{0%,100%{box-shadow:0 0 0 1px rgba(99,102,241,.25) inset}50%{box-shadow:0 0 0 3px rgba(99,102,241,.28) inset}}
+
+/* ---------- P3 ---------- */
+.now-grid{display:flex;flex-direction:column;gap:10px}
+.now-title{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.now-event{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--panel2)}
+.now-event .line1{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px}
+.now-event .seq{font-family:var(--mono);color:var(--muted)}
+.now-event .meaning{color:#cfd3e0}
+.counters{display:flex;flex-wrap:wrap;gap:6px}
+.counter{display:flex;gap:6px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:3px 8px;font-size:12px}
+.counter b{font-family:var(--mono)}
+
+/* ---------- stats ---------- */
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.stat{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--panel2)}
+.stat .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.03em}
+.stat .v{font-size:16px;font-family:var(--mono);margin-top:2px}
+.stat .v small{font-size:11px;color:var(--muted);font-family:inherit}
+.bar{height:6px;background:#1b1f2b;border-radius:4px;overflow:hidden;margin-top:6px}
+.bar>span{display:block;height:100%;background:var(--accent)}
+.bar>span.warn{background:var(--warn)} .bar>span.err{background:var(--err)}
+.budget{margin-bottom:12px}
+.budget .row{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:2px}
+
+/* ---------- trace ---------- */
+.cover{display:flex;gap:14px;align-items:center;margin-bottom:10px}
+.cover .big{font-size:22px;font-family:var(--mono)}
+.cover .bar{flex:1;margin-top:0}
+.reqs{font-family:var(--mono);font-size:11px}
+.tag{border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:11px;font-family:var(--mono);color:var(--muted);display:inline-block;margin:1px 2px 1px 0}
+.tag.err{color:#ffb4b4;border-color:rgba(239,68,68,.45)}
+.tag.ok{color:#8ff0c8;border-color:rgba(16,185,129,.35)}
+
+/* ---------- runs list ---------- */
+.runs-view{padding:24px}
+.runs-head{display:flex;align-items:baseline;gap:14px;margin-bottom:14px}
+.runs-head h1{font-size:18px}
+.runs-table td,.runs-table th{padding:7px 10px;font-size:13px}
+.runs-table tbody tr{cursor:pointer}
+.runs-table tbody tr:hover{background:#171c29}
+.runs-table .proj{max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ---------- toast ---------- */
+#toast{
+  position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:90;
+  background:#0e1119;border:1px solid #2c3243;border-radius:8px;padding:8px 14px;font-size:12px;
+  box-shadow:0 8px 24px rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity .15s ease-out;max-width:70vw
+}
+#toast.show{opacity:1}
+#toast.err{border-color:rgba(239,68,68,.5);color:#ffb4b4}
+
+.catalog{position:absolute;right:0;top:34px;z-index:60;background:#0e1119;border:1px solid #2c3243;border-radius:8px;padding:8px;min-width:190px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+.catalog label{display:flex;gap:8px;align-items:center;padding:3px 4px;font-size:12px}
+.catalog .hint{color:var(--muted);font-size:11px;padding:4px;border-top:1px solid var(--line);margin-top:6px}
+.rel{position:relative}
+@media (prefers-reduced-motion:reduce){
+  *{animation:none !important;transition:none !important}
+}
+</style>
+</head>
+<body>
+
+<section id="view-runs" class="runs-view" hidden>
+  <div class="runs-head">
+    <h1>Factory</h1><span class="muted">прогоны</span>
+    <span class="muted" id="runs-count"></span>
+    <span class="live" style="margin-left:auto"><i class="dot" id="runs-dot"></i><span id="runs-live">обновляется</span></span>
+  </div>
+  <div id="runs-body"><div class="empty">Загрузка…</div></div>
+</section>
+
+<section id="view-run" hidden>
+  <header class="topbar">
+    <div class="brand">
+      <div class="project" id="h-project">—</div>
+      <div class="ids"><span class="run" id="h-run">—</span><span>·</span><span id="h-mode">—</span>
+        <a href="/" id="h-back" style="margin-left:6px">все прогоны</a></div>
+    </div>
+    <div class="stageblock">
+      <div class="stage"><span id="h-stage-status" class="badge idle">—</span><span id="h-stage">—</span></div>
+      <div class="sub"><span id="h-expected">—</span> · <span id="h-age" class="mono">—</span></div>
+    </div>
+    <div class="topright">
+      <span class="badge idle" id="h-chain"><span class="ico">◇</span><span>цепочка не проверена</span></span>
+      <span class="live"><i class="dot" id="live-dot"></i><span id="live-text">—</span></span>
+      <div class="toolbar rel">
+        <select id="preset" title="Пресет раскладки">
+          <option value="operator">Оператор</option>
+          <option value="finops">FinOps</option>
+          <option value="audit">Аудит</option>
+          <option value="custom">Свой</option>
+        </select>
+        <button class="btn" id="btn-catalog" aria-expanded="false">Панели</button>
+        <button class="btn" id="btn-pause" aria-pressed="false">Пауза</button>
+        <button class="btn" id="btn-export" title="Экспорт раскладки в .json">Экспорт</button>
+        <button class="btn" id="btn-import" title="Импорт раскладки из .json">Импорт</button>
+        <button class="btn" id="btn-default" title="Раскладка по умолчанию">По умолчанию</button>
+        <div class="catalog" id="catalog" hidden></div>
+      </div>
+    </div>
+  </header>
+  <div class="grid" id="grid"></div>
+</section>
+
+<input type="file" id="import-file" accept=".json,application/json" hidden>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+"use strict";
+const POLL_MS = 2000;                     // §6: один опрос раз в 2 с, вкладка видима
+const STORAGE_KEY = "ftcs.layout.v1";
+const CUSTOM_KEY = "ftcs.layout.custom.v1";
+const PANEL_IDS = ["p2", "p3", "p4", "p5", "p6", "p7"];
+const META = {
+  p2: { title: "Стадии", badge: "13" },
+  p3: { title: "Сейчас", badge: "" },
+  p4: { title: "Задачи", badge: "" },
+  p5: { title: "Расход", badge: "usage.jsonl" },
+  p6: { title: "Трассировка", badge: "REQ" },
+  p7: { title: "Журнал", badge: "50" }
+};
+const PRESETS = {
+  operator: { label: "Оператор", order: ["p2", "p3", "p4", "p7"],
+    size: { p2: [12, 3], p3: [6, 4], p4: [6, 4], p7: [12, 4] } },
+  finops: { label: "FinOps", order: ["p2", "p5"],
+    size: { p2: [12, 3], p5: [12, 4] } },
+  audit: { label: "Аудит", order: ["p2", "p6", "p7"],
+    size: { p2: [12, 2], p6: [12, 4], p7: [12, 4] } }
+};
+const STATUS = {
+  accepted: { ico: "✓", label: "принято", cls: "ok" },
+  approved: { ico: "✓", label: "одобрен", cls: "ok" },
+  in_progress: { ico: "●", label: "в работе", cls: "active" },
+  review: { ico: "◷", label: "на проверке", cls: "warn" },
+  needs_human: { ico: "◷", label: "нужен человек", cls: "warn" },
+  blocked: { ico: "✕", label: "вето", cls: "err" },
+  escalated: { ico: "✕", label: "эскалация", cls: "err" },
+  rejected: { ico: "✕", label: "отклонён", cls: "err" },
+  pending: { ico: "○", label: "ожидает", cls: "idle" },
+  PASS: { ico: "✓", label: "PASS", cls: "ok" },
+  FAIL: { ico: "✕", label: "FAIL", cls: "err" },
+  VETO: { ico: "✕", label: "VETO", cls: "err" },
+  ACCEPTED_RISK: { ico: "◷", label: "риск принят", cls: "warn" },
+  DRAFT: { ico: "○", label: "draft", cls: "idle" }
+};
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const esc = (value) => String(value == null ? "" : value)
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const nf = new Intl.NumberFormat("ru-RU");
+const num = (v) => (v == null ? "—" : nf.format(Math.round(v)));
+
+function statusBadge(value, id) {
+  const attr = id ? ` id="${id}"` : "";
+  const st = STATUS[value];
+  if (!st) return `<span class="badge idle"${attr}><span class="ico">·</span><span>${esc(value || "—")}</span></span>`;
+  return `<span class="badge ${st.cls}"${attr}><span class="ico">${st.ico}</span><span>${esc(st.label)}</span></span>`;
+}
+function numCell(v) {
+  if (v == null) return '<span class="muted">не измерено</span>';
+  if (typeof v === "number" && !Number.isInteger(v)) return v.toFixed(2);
+  return num(v);
+}
+function secondsLabel(sec) {
+  if (sec == null) return "—";
+  if (sec < 90) return `${Math.round(sec)} с`;
+  if (sec < 5400) return `${Math.round(sec / 60)} мин`;
+  const hours = Math.floor(sec / 3600);
+  return `${hours} ч ${Math.round((sec % 3600) / 60)} мин`;
+}
+function ageLabel(sec) {
+  if (sec == null) return "—";
+  if (sec < 120) return `${Math.round(sec)} с назад`;
+  if (sec < 7200) return `${Math.round(sec / 60)} мин назад`;
+  if (sec < 172800) return `${Math.round(sec / 3600)} ч назад`;
+  return `${Math.round(sec / 86400)} дн назад`;
+}
+function shortTime(stamp) {
+  if (!stamp) return "—";
+  const d = new Date(stamp);
+  if (Number.isNaN(d.getTime())) return String(stamp);
+  return d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+// ---------------- layout model ----------------
+function defaultSettings() {
+  return { p2: { view: "chips" }, p5: { groupBy: "stage" }, p7: { filter: "all", limit: 50 } };
+}
+function presetLayout(name) {
+  const preset = PRESETS[name] || PRESETS.operator;
+  const visible = preset.order.slice();
+  const rest = PANEL_IDS.filter((id) => !visible.includes(id));
+  const size = {};
+  for (const id of PANEL_IDS) {
+    const spec = preset.size[id] || [6, 3];
+    size[id] = [clamp(spec[0], 3, 12), clamp(spec[1], 1, 4)];
+  }
+  return {
+    version: 1, preset: PRESETS[name] ? name : "operator",
+    order: visible.concat(rest), hidden: rest.slice(), size, settings: defaultSettings()
+  };
+}
+function sanitizeLayout(raw) {
+  if (!raw || typeof raw !== "object" || raw.version !== 1) return null;
+  const order = [];
+  if (Array.isArray(raw.order)) {
+    for (const id of raw.order) if (PANEL_IDS.includes(id) && !order.includes(id)) order.push(id);
+  }
+  for (const id of PANEL_IDS) if (!order.includes(id)) order.push(id);
+  const hidden = Array.isArray(raw.hidden) ? raw.hidden.filter((id) => PANEL_IDS.includes(id)) : [];
+  const size = {};
+  for (const id of PANEL_IDS) {
+    const spec = raw.size && raw.size[id];
+    if (Array.isArray(spec) && spec.length === 2) {
+      size[id] = [clamp(Math.round(Number(spec[0])) || 6, 3, 12), clamp(Math.round(Number(spec[1])) || 3, 1, 4)];
+    }
+  }
+  const settings = defaultSettings();
+  const given = raw.settings && typeof raw.settings === "object" ? raw.settings : {};
+  if (given.p2 && ["chips", "table"].includes(given.p2.view)) settings.p2.view = given.p2.view;
+  if (given.p5 && ["stage", "role", "task"].includes(given.p5.groupBy)) settings.p5.groupBy = given.p5.groupBy;
+  if (given.p7) {
+    if (["all", "FAIL", "VETO"].includes(given.p7.filter)) settings.p7.filter = given.p7.filter;
+    if (given.p7.limit != null) settings.p7.limit = clamp(Math.round(Number(given.p7.limit)) || 50, 10, 50);
+  }
+  const preset = ["operator", "finops", "audit", "custom"].includes(raw.preset) ? raw.preset : "custom";
+  return { version: 1, preset, order, hidden, size, settings };
+}
+function readStored(key) {
+  try { return sanitizeLayout(JSON.parse(localStorage.getItem(key) || "null")); }
+  catch (err) { return null; }
+}
+function writeStored(key) {
+  try { localStorage.setItem(key, JSON.stringify(layout)); }
+  catch (err) { toast("Не удалось сохранить раскладку: " + err.message, true); }
+}
+
+let layout = presetLayout("operator");
+let payload = null;
+let chain = null;
+let runId = null;
+let etag = null;
+let paused = false;
+let timer = null;
+let ticker = null;
+let lastPollAt = 0;
+let dragId = null;
+
+// ---------------- panel scaffolding ----------------
+function buildPanel(id) {
+  const panel = document.createElement("section");
+  panel.className = "panel";
+  panel.dataset.panel = id;
+  panel.tabIndex = 0;
+  panel.innerHTML = `
+    <div class="panel-head" draggable="true">
+      <span class="grip" aria-hidden="true">⠿</span>
+      <h2>${esc(META[id].title)}</h2>
+      <span class="head-badge">${esc(META[id].badge)}</span>
+      <span class="panel-actions" draggable="false">
+        <button class="icon-btn" data-act="settings" title="Настройки панели" aria-label="Настройки панели ${esc(META[id].title)}">⋯</button>
+        <button class="icon-btn" data-act="hide" title="Скрыть панель" aria-label="Скрыть панель ${esc(META[id].title)}">✕</button>
+      </span>
+    </div>
+    <div class="panel-body"><div class="empty">загрузка…</div></div>
+    <div class="panel-settings" hidden></div>
+    <div class="resize" title="Изменить размер" role="separator" aria-label="Изменить размер панели ${esc(META[id].title)}"></div>`;
+  return panel;
+}
+
+function panelNode(id) { return document.querySelector(`.panel[data-panel="${id}"]`); }
+
+function applyLayout() {
+  const grid = $("#grid");
+  if (!grid) return;
+  if (!grid.children.length) for (const id of PANEL_IDS) grid.appendChild(buildPanel(id));
+  for (const id of layout.order) {
+    const panel = panelNode(id);
+    if (!panel) continue;
+    const spec = layout.size[id] || [6, 3];
+    panel.style.gridColumn = `span ${spec[0]}`;
+    panel.style.gridRow = `span ${spec[1]}`;
+    panel.hidden = layout.hidden.includes(id);
+    grid.appendChild(panel);
+  }
+  $("#preset").value = layout.preset;
+}
+
+function markCustom() {
+  layout.preset = "custom";
+  writeStored(CUSTOM_KEY);
+}
+function saveLayout() { writeStored(STORAGE_KEY); applyLayout(); $("#preset").value = layout.preset; }
+
+function movePanel(id, targetId, after) {
+  const order = layout.order.filter((item) => item !== id);
+  const index = order.indexOf(targetId);
+  if (index < 0) return;
+  order.splice(after ? index + 1 : index, 0, id);
+  layout.order = order;
+  markCustom(); saveLayout();
+}
+function setSize(id, width, height) {
+  layout.size[id] = [clamp(width, 3, 12), clamp(height, 1, 4)];
+  markCustom(); saveLayout();
+}
+function toggleHidden(id, hidden) {
+  layout.hidden = hidden
+    ? Array.from(new Set(layout.hidden.concat([id])))
+    : layout.hidden.filter((item) => item !== id);
+  markCustom(); saveLayout();
+  renderCatalog();
+}
+
+// ---------------- runs view ----------------
+async function loadRuns() {
+  try {
+    const headers = {};
+    if (runsEtag) headers["If-None-Match"] = runsEtag;
+    const res = await fetch("/api/runs", { headers });
+    if (res.status === 304) { flashDot("runs-dot"); scheduleRuns(); return; }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    runsEtag = res.headers.get("ETag");
+    const data = await res.json();
+    renderRuns(data);
+    flashDot("runs-dot");
+  } catch (err) {
+    $("#runs-body").innerHTML = `<div class="errbox">Не удалось прочитать список прогонов: ${esc(err.message)}</div>`;
+  }
+  scheduleRuns();
+}
+let runsEtag = null;
+let runsTimer = null;
+function scheduleRuns() {
+  if (document.visibilityState !== "visible") return;
+  clearTimeout(runsTimer);
+  runsTimer = setTimeout(loadRuns, POLL_MS);
+}
+function renderRuns(data) {
+  const runs = data.runs || [];
+  $("#runs-count").textContent = `${runs.length} прогонов`;
+  if (!runs.length) {
+    $("#runs-body").innerHTML = '<div class="empty">прогонов нет — запустите <span class="mono">factory run</span></div>';
+    return;
+  }
+  const rows = runs.map((run) => {
+    if (run.error) {
+      return `<tr data-run="${esc(run.run_id)}"><td class="proj">${esc(run.project)}</td><td class="mono">${esc(run.run_id)}</td>
+        <td colspan="2"><span class="badge err"><span class="ico">✕</span><span>state.json не читается</span></span></td>
+        <td>—</td><td>—</td><td class="muted">${esc(run.error)}</td></tr>`;
+    }
+    const stageCell = run.stage
+      ? `<span class="mono">${esc(run.stage)}</span>`
+      : '<span class="muted">завершён</span>';
+    return `<tr data-run="${esc(run.run_id)}">
+      <td class="proj" title="${esc(run.project)}">${esc(run.project)}</td>
+      <td class="mono">${esc(run.run_id)}</td>
+      <td>${esc(run.mode || "—")}</td>
+      <td>${stageCell}</td>
+      <td>${run.stage_status ? statusBadge(run.stage_status) : '<span class="badge idle"><span class="ico">○</span><span>завершён</span></span>'}</td>
+      <td class="num">${run.tokens == null ? '<span class="muted">не измерено</span>' : num(run.tokens)}</td>
+      <td class="nowrap muted">${esc(shortTime(run.updated_at))}</td>
+    </tr>`;
+  }).join("");
+  $("#runs-body").innerHTML = `<table class="runs-table">
+    <thead><tr><th>Проект</th><th>run_id</th><th>Режим</th><th>Стадия</th><th>Статус</th><th style="text-align:right">Токены</th><th>Обновлён</th></tr></thead>
+    <tbody>${rows}</tbody></table>`;
+  for (const row of document.querySelectorAll("#runs-body tbody tr")) {
+    row.addEventListener("click", () => { location.search = `?run=${encodeURIComponent(row.dataset.run)}`; });
+  }
+}
+
+// ---------------- payload rendering ----------------
+function renderHeader(data) {
+  const head = data.header;
+  $("#h-project").textContent = head.project;
+  $("#h-project").title = head.project;
+  $("#h-run").textContent = data.run_id;
+  $("#h-mode").textContent = `режим ${head.mode}`;
+  $("#h-stage").textContent = head.current_stage ? `${head.current_stage} · ${head.stage_title}` : "прогон завершён";
+  $("#h-stage-status").outerHTML = statusBadge(head.stage_status, "h-stage-status");
+  $("#h-expected").textContent = `${data.now.expected}${head.gate ? " · гейт " + head.gate + (head.gate_status ? " (" + head.gate_status + ")" : "") : ""}`;
+  $("#h-age").textContent = eventAge();
+  renderChainBadge();
+}
+
+function renderStages(data) {
+  const view = layout.settings.p2.view;
+  const body = panelNode("p2").querySelector(".panel-body");
+  const head = panelNode("p2").querySelector(".head-badge");
+  head.textContent = `${data.stages.filter((s) => s.applicable).length}/13`;
+  if (!data.stages.length) { body.innerHTML = '<div class="empty">стадий нет</div>'; return; }
+  if (view === "table") {
+    body.innerHTML = `<table><thead><tr><th>Стадия</th><th>Статус</th><th>Гейт</th><th>Попытки</th>
+      <th class="num">Токены</th><th class="num">Секунды</th></tr></thead><tbody>
+      ${data.stages.map((stage) => {
+        const st = STATUS[stage.status] || { ico: "○", label: stage.status || "—", cls: "idle" };
+        const cls = stage.applicable ? st.cls : "idle";
+        return `<tr><td class="mono">${esc(stage.id)}</td>
+          <td>${stage.applicable
+            ? `<span class="badge ${cls}"><span class="ico">${st.ico}</span><span>${esc(st.label)}</span></span>`
+            : '<span class="badge idle" style="border-style:dashed"><span class="ico">–</span><span>не применима</span></span>'}</td>
+          <td class="mono">${esc(stage.gate)} ${stage.gate_status ? `<span class="muted">${esc(stage.gate_status)}</span>` : ""}</td>
+          <td class="mono">${stage.attempts}/${stage.max_attempts ?? "—"}</td>
+          <td class="num">${numCell(stage.tokens)}</td><td class="num">${stage.seconds == null ? "—" : Number(stage.seconds).toFixed(1)}</td></tr>`;
+      }).join("")}</tbody></table>`;
+    return;
+  }
+  body.innerHTML = `<div class="chips">${data.stages.map((stage) => {
+    const st = STATUS[stage.status] || { ico: "○", label: stage.status || "—", cls: "idle" };
+    const active = data.header.current_stage === stage.id;
+    const cls = [stage.applicable ? st.cls : "idle na", active ? "active" : ""].join(" ").trim();
+    const title = `${stage.id} — ${stage.title}\nстатус: ${stage.applicable ? st.label : "не применима"}\nгейт: ${stage.gate}${stage.gate_status ? " (" + stage.gate_status + ")" : ""}\nпопытки: ${stage.attempts}/${stage.max_attempts ?? "—"}\nтокены: ${stage.tokens == null ? "—" : num(stage.tokens)} · ${stage.seconds == null ? "—" : Number(stage.seconds).toFixed(1) + " с"}`;
+    return `<span class="chip ${cls}" title="${esc(title)}">
+      <span class="ico" aria-hidden="true">${stage.applicable ? st.ico : "–"}</span>
+      <span>${esc(stage.id)}</span>
+      <span class="g">${esc(stage.gate)}</span>
+      <span class="m">${stage.attempts}/${stage.max_attempts ?? "—"}</span>
+      ${stage.seconds == null ? "" : `<span class="m">${secondsLabel(stage.seconds)}</span>`}
+    </span>`;
+  }).join("")}</div>`;
+}
+
+function renderNow(data) {
+  const body = panelNode("p3").querySelector(".panel-body");
+  const now = data.now;
+  const last = now.last_event;
+  const eventHtml = last ? `<div class="now-event">
+      <div class="line1"><span class="seq">#${esc(last.seq)}</span>
+        <span class="mono">${esc(last.event_type)}</span>
+        ${last.verdict ? `<span class="badge ${(STATUS[last.verdict] || {}).cls || "idle"}"><span class="ico">${(STATUS[last.verdict] || {}).ico || "·"}</span><span>${esc(last.verdict)}</span></span>` : ""}
+        <span class="muted nowrap">${esc(shortTime(last.timestamp_utc))}</span></div>
+      <div class="meaning">${esc(last.meaning || "—")}</div>
+      <div class="muted" style="margin-top:4px">роль <span class="mono">${esc(last.role || "—")}</span>
+        · стадия <span class="mono">${esc(last.stage || "—")}</span>
+        · ${ageLabel(data.header.seconds_since_event)}</div>
+      ${last.action ? `<div class="muted" style="margin-top:2px">действие: ${esc(last.action)}</div>` : ""}
+    </div>` : '<div class="empty">событий пока нет</div>';
+  const counters = Object.entries(now.task_counts).sort().map(([status, count]) => {
+    const st = STATUS[status] || { ico: "·", cls: "idle" };
+    return `<span class="counter ${st.cls}"><span>${st.ico}</span><span class="muted">${esc(status)}</span><b>${count}</b></span>`;
+  }).join("");
+  body.innerHTML = `<div class="now-grid">
+    <div><div class="now-title">ожидаемое действие</div><div style="font-size:14px">${esc(now.expected)}</div></div>
+    <div><div class="now-title">последнее событие</div>${eventHtml}</div>
+    <div><div class="now-title">задачи (${now.task_total})</div><div class="counters">${counters || '<span class="muted">задач нет</span>'}</div></div>
+  </div>`;
+  panelNode("p3").querySelector(".head-badge").textContent = last ? `#${last.seq}` : "";
+}
+
+function renderTasks(data) {
+  const body = panelNode("p4").querySelector(".panel-body");
+  panelNode("p4").querySelector(".head-badge").textContent = String(data.tasks.length);
+  if (!data.tasks.length) { body.innerHTML = '<div class="empty">задач пока нет</div>'; return; }
+  body.innerHTML = `<table><thead><tr><th>Задача</th><th>Владелец</th><th>REQ</th><th>Статус</th>
+    <th>Попытки</th><th>Lease</th><th>Отказы</th><th>Файлы</th></tr></thead><tbody>
+    ${data.tasks.map((task) => {
+      const st = STATUS[task.status] || { ico: "○", label: task.status, cls: "idle" };
+      const files = task.allowed_files || [];
+      const shown = files.slice(0, 2).map((f) => `<span class="tag">${esc(f)}</span>`).join("");
+      const more = files.length > 2 ? `<span class="tag">+${files.length - 2}</span>` : "";
+      const reasons = (task.reject_reasons || []).map((r) => `<div class="tag err">${esc(r)}</div>`).join("");
+      return `<tr><td class="mono">${esc(task.task_id)}</td>
+        <td class="mono">${esc(task.owner)}</td>
+        <td class="reqs">${(task.reqs || []).map((r) => `<span class="tag">${esc(r)}</span>`).join("")}</td>
+        <td><span class="badge ${st.cls}"><span class="ico">${st.ico}</span><span>${esc(st.label)}</span></span></td>
+        <td class="mono">${task.attempts}</td>
+        <td class="mono muted">${task.lease ? esc(String(task.lease).slice(0, 16)) : "—"}</td>
+        <td>${reasons || '<span class="muted">—</span>'}</td>
+        <td style="max-width:260px">${shown}${more}${files.length ? ' <span class="muted" title="' + esc(files.join("\n")) + '">ⓘ</span>' : ""}</td></tr>`;
+    }).join("")}</tbody></table>`;
+}
+
+function usageGroup(data, groupBy) {
+  if (groupBy === "role") return data.usage.by_role;
+  if (groupBy === "task") return data.usage.by_task;
+  return data.usage.by_stage;
+}
+
+function renderUsage(data) {
+  const body = panelNode("p5").querySelector(".panel-body");
+  const totals = data.usage.totals || {};
+  const groupBy = layout.settings.p5.groupBy;
+  const groups = usageGroup(data, groupBy) || [];
+  const budget = data.usage.budget || {};
+  const budgetRow = (label, used, limit, fmt) => {
+    if (limit == null) return "";
+    const ratio = limit ? clamp(used / limit, 0, 1) : 0;
+    const cls = ratio > 0.95 ? "err" : ratio > 0.8 ? "warn" : "";
+    return `<div class="budget"><div class="row"><span>${label}</span><span class="mono">${fmt(used)} / ${fmt(limit)}</span></div>
+      <div class="bar"><span class="${cls}" style="width:${(ratio * 100).toFixed(1)}%"></span></div></div>`;
+  };
+  const cells = [
+    ["tokens_in", "вход"], ["cache_read", "из кэша"], ["tokens_out", "выход"],
+    ["tokens_billable", "к оплате"], ["tokens", "всего токенов"], ["seconds", "секунды"]
+  ].map(([key, label]) =>
+    `<div class="stat"><div class="k">${label}</div><div class="v">${key === "seconds" ? secondsLabel(totals[key]) : numCell(totals[key])}</div></div>`).join("");
+  const usd = totals.usd == null || totals.usd === 0 ? '<span class="muted">не измерено</span>' : `$${Number(totals.usd).toFixed(4)}`;
+  body.innerHTML = `
+    ${budgetRow("лимит токенов", totals.tokens || 0, budget.tokens, (v) => num(v))}
+    ${budgetRow("лимит минут", (totals.seconds || 0) / 60, budget.minutes, (v) => Number(v).toFixed(0))}
+    <div class="stats">${cells}<div class="stat"><div class="k">USD</div><div class="v">${usd}</div></div>
+      <div class="stat"><div class="k">шагов</div><div class="v">${numCell(totals.steps)}</div></div>
+      <div class="stat"><div class="k">API-вызовов</div><div class="v">${numCell(totals.api_calls)}</div></div></div>
+    <table><thead><tr><th>${groupBy === "role" ? "роль" : groupBy === "task" ? "задача" : "стадия"}</th>
+      <th class="num">шаги</th><th class="num">вход</th><th class="num">кэш</th><th class="num">выход</th>
+      <th class="num">к оплате</th><th class="num">секунды</th></tr></thead><tbody>
+      ${groups.length ? groups.map((g) => `<tr><td class="mono">${esc(g.key)}</td><td class="num">${g.steps}</td>
+        <td class="num">${numCell(g.tokens_in)}</td><td class="num">${numCell(g.cache_read)}</td>
+        <td class="num">${numCell(g.tokens_out)}</td><td class="num">${numCell(g.tokens_billable)}</td>
+        <td class="num">${g.seconds == null ? "—" : Number(g.seconds).toFixed(1)}</td></tr>`).join("")
+        : '<tr><td colspan="7" class="empty">в usage.jsonl нет записей</td></tr>'}
+    </tbody></table>`;
+  panelNode("p5").querySelector(".head-badge").textContent = groupBy;
+}
+
+function qualityLine(metrics) {
+  if (!metrics) return "";
+  if (metrics.error) return `<div class="warnbox">метрики не посчитались: ${esc(metrics.error)}</div>`;
+  const pct = (value) => (value == null ? "—" : `${Math.round(value * 100)}%`);
+  const worst = (metrics.top_reject_reasons || [])[0];
+  return `<div class="muted" style="margin-top:8px">качество: first-pass ${pct(metrics.first_pass_rate)}
+    · покрытие стадий ${pct(metrics.verification_coverage)}
+    · частый отказ ${worst ? esc(worst.reason_code) + " × " + worst.count : "—"}</div>`;
+}
+
+function renderTrace(data) {
+  const body = panelNode("p6").querySelector(".panel-body");
+  const trace = data.trace;
+  if (!trace.available) {
+    body.innerHTML = `<div class="warnbox">матрица не собрана: ${esc(trace.error)}</div>`;
+    return;
+  }
+  const pct = Math.round((trace.coverage || 0) * 100);
+  body.innerHTML = `
+    <div class="cover"><div class="big">${pct}%</div>
+      <div class="bar"><span class="${pct === 100 ? "" : pct === 0 ? "err" : "warn"}" style="width:${pct}%"></span></div>
+      <div class="muted nowrap">${trace.covered} из ${trace.total} REQ</div></div>
+    ${trace.uncovered.length ? `<div style="margin-bottom:8px"><span class="muted">не покрыты:</span> ${trace.uncovered.map((r) => `<span class="tag err">${esc(r)}</span>`).join("")}</div>` : ""}
+    <table><thead><tr><th>REQ</th><th>задачи</th><th>тесты</th><th>приёмка</th><th>проблемы</th></tr></thead><tbody>
+    ${trace.rows.map((row) => `<tr><td class="mono">${esc(row.req)}</td>
+      <td>${row.tasks_ok ? '<span class="tag ok">ok</span>' : '<span class="tag err">нет</span>'}</td>
+      <td>${row.tests_ok ? '<span class="tag ok">ok</span>' : '<span class="tag err">нет</span>'}</td>
+      <td>${row.acceptance_ok ? '<span class="tag ok">ok</span>' : '<span class="tag err">нет</span>'}</td>
+      <td class="reqs">${(row.test_problems || []).map((p) => `<div class="tag err">${esc(p)}</div>`).join("") || '<span class="muted">—</span>'}</td></tr>`).join("")}
+    </tbody></table>
+    ${qualityLine(data.metrics)}`;
+  panelNode("p6").querySelector(".head-badge").textContent = `${pct}%`;
+}
+
+function renderChainBadge() {
+  const badge = $("#h-chain");
+  if (!chain) {
+    badge.className = "badge idle";
+    badge.innerHTML = '<span class="ico">◇</span><span>цепочка не проверена</span>';
+    return;
+  }
+  const ok = chain.status === "OK";
+  badge.className = "badge " + (ok ? "ok" : "err");
+  badge.innerHTML = `<span class="ico">${ok ? "✓" : "✕"}</span><span>${ok ? "цепочка цела" : "TAMPERED · seq " + esc(chain.seq ?? "?")}</span>`;
+}
+
+function renderJournal(data) {
+  const body = panelNode("p7").querySelector(".panel-body");
+  const settings = layout.settings.p7;
+  const events = (data.journal.events || [])
+    .filter((event) => settings.filter === "all" || event.verdict === settings.filter)
+    .slice(-settings.limit);
+  const chainBlock = chain ? `<div class="${chain.status === "OK" ? "warnbox" : "errbox"}">
+      цепочка: <b>${chain.status}</b>${chain.seq ? ` · первая ошибка в seq ${chain.seq}` : ""}
+      <div class="muted" style="margin-top:4px">${esc(chain.checked_at || "")}</div>
+      ${(chain.errors || []).slice(0, 5).map((e) => `<div class="mono" style="font-size:11px">${esc(e)}</div>`).join("")}
+    </div>` : "";
+  body.innerHTML = `
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+      <button class="btn" id="btn-chain">Проверить цепочку</button>
+      <span class="muted">фильтр: ${esc(settings.filter)} · показано ${events.length}</span>
+    </div>
+    ${chainBlock}
+    ${events.length ? `<table><thead><tr><th>seq</th><th>время</th><th>стадия</th><th>роль</th><th>тип</th><th>вердикт</th><th>смысл</th></tr></thead><tbody>
+      ${events.slice().reverse().map((event) => `<tr><td class="mono">${esc(event.seq)}</td>
+        <td class="mono nowrap">${esc(shortTime(event.timestamp_utc))}</td>
+        <td class="mono">${esc(event.stage || "—")}</td>
+        <td class="mono">${esc(event.role || "—")}</td>
+        <td class="mono">${esc(event.event_type)}</td>
+        <td>${event.verdict ? `<span class="badge ${(STATUS[event.verdict] || {}).cls || "idle"}"><span class="ico">${(STATUS[event.verdict] || {}).ico || "·"}</span><span>${esc(event.verdict)}</span></span>` : '<span class="muted">—</span>'}</td>
+        <td>${esc(event.meaning || "")}</td></tr>`).join("")}
+    </tbody></table>` : '<div class="empty">событий пока нет</div>'}`;
+  panelNode("p7").querySelector(".head-badge").textContent = String(events.length);
+  const btn = $("#btn-chain");
+  if (btn) btn.addEventListener("click", checkChain);
+}
+
+async function checkChain() {
+  const btn = $("#btn-chain");
+  if (btn) { btn.disabled = true; btn.textContent = "Проверяю…"; }
+  try {
+    const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/chain?refresh=1`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    chain = data;
+  } catch (err) {
+    toast("Проверка цепочки не удалась: " + err.message, true);
+  }
+  renderChainBadge();
+  if (payload) renderJournal(payload);
+}
+
+function renderSettings(id) {
+  const box = panelNode(id).querySelector(".panel-settings");
+  const settings = layout.settings;
+  let html = "";
+  if (id === "p2") {
+    html = `<label>вид<select data-setting="p2.view">
+      <option value="chips"${settings.p2.view === "chips" ? " selected" : ""}>чипы</option>
+      <option value="table"${settings.p2.view === "table" ? " selected" : ""}>таблица</option></select></label>`;
+  } else if (id === "p5") {
+    html = `<label>группировка<select data-setting="p5.groupBy">
+      <option value="stage"${settings.p5.groupBy === "stage" ? " selected" : ""}>стадии</option>
+      <option value="role"${settings.p5.groupBy === "role" ? " selected" : ""}>роли</option>
+      <option value="task"${settings.p5.groupBy === "task" ? " selected" : ""}>задачи</option></select></label>`;
+  } else if (id === "p7") {
+    html = `<label>вердикт<select data-setting="p7.filter">
+      <option value="all"${settings.p7.filter === "all" ? " selected" : ""}>все</option>
+      <option value="FAIL"${settings.p7.filter === "FAIL" ? " selected" : ""}>FAIL</option>
+      <option value="VETO"${settings.p7.filter === "VETO" ? " selected" : ""}>VETO</option></select></label>
+      <label>строк<input class="input" type="number" min="10" max="50" step="10" style="width:64px"
+        data-setting="p7.limit" value="${settings.p7.limit}"></label>`;
+  } else {
+    html = '<div class="muted">у этой панели настроек нет</div>';
+  }
+  box.innerHTML = html;
+  box.hidden = false;
+}
+
+// ---------------- wiring ----------------
+function buildCatalog() {
+  const box = $("#catalog");
+  box.innerHTML = PANEL_IDS.map((id) => `<label><input type="checkbox" data-cat="${id}"
+    ${layout.hidden.includes(id) ? "" : "checked"}> ${esc(META[id].title)}</label>`).join("") +
+    '<div class="hint">P1 «шапка» закреплена</div>';
+  for (const input of box.querySelectorAll("input[data-cat]")) {
+    input.addEventListener("change", () => toggleHidden(input.dataset.cat, !input.checked));
+  }
+}
+function renderCatalog() { if (!$("#catalog").hidden) buildCatalog(); }
+
+function flashDot(id) {
+  const dot = document.getElementById(id);
+  if (!dot) return;
+  dot.classList.remove("fresh");
+  void dot.offsetWidth;
+  dot.classList.add("fresh");
+}
+
+function applyPayload(data) {
+  payload = data;
+  renderHeader(data);
+  renderStages(data);
+  renderNow(data);
+  renderTasks(data);
+  renderUsage(data);
+  renderTrace(data);
+  renderJournal(data);
+  lastPollAt = Date.now();
+}
+
+async function poll() {
+  clearTimeout(timer);
+  if (paused) return;
+  if (document.visibilityState !== "visible") { schedule(); return; }
+  try {
+    const headers = etag ? { "If-None-Match": etag } : {};
+    const res = await fetch(`/api/runs/${encodeURIComponent(runId)}`, { headers });
+    if (res.status === 304) {
+      lastPollAt = Date.now();
+      $("#live-dot").classList.remove("paused");
+      flashDot("live-dot");
+    } else if (res.ok) {
+      etag = res.headers.get("ETag");
+      applyPayload(await res.json());
+      $("#live-dot").classList.remove("paused");
+      flashDot("live-dot");
+    } else {
+      const text = await res.text();
+      throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+    }
+  } catch (err) {
+    $("#live-text").textContent = "ошибка обновления: " + err.message;
+    $("#live-dot").classList.add("paused");
+  }
+  schedule();
+}
+function schedule() {
+  if (paused) return;
+  clearTimeout(timer);
+  timer = setTimeout(poll, POLL_MS);
+}
+
+function eventAge() {
+  const last = payload && payload.now && payload.now.last_event;
+  if (!last || !last.timestamp_utc) return "событий нет";
+  const when = Date.parse(last.timestamp_utc);
+  if (Number.isNaN(when)) return "—";
+  return "событие " + ageLabel((Date.now() - when) / 1000);
+}
+
+function tick() {
+  if (!payload || !payload.header) return;
+  const age = document.getElementById("h-age");
+  if (age) age.textContent = eventAge();
+  const live = $("#live-text");
+  if (paused) { live.textContent = "пауза"; return; }
+  if (!lastPollAt) { live.textContent = "—"; return; }
+  const ago = Math.round((Date.now() - lastPollAt) / 1000);
+  live.textContent = ago < 1 ? "только что" : `${ago} с назад`;
+}
+
+function toast(message, isError) {
+  const box = $("#toast");
+  box.textContent = message;
+  box.className = "show" + (isError ? " err" : "");
+  clearTimeout(box._timer);
+  box._timer = setTimeout(() => { box.className = ""; }, 4000);
+}
+
+function exportLayout() {
+  const blob = new Blob([JSON.stringify(layout, null, 2)], { type: "application/json" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "factory-layout.json";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  toast("раскладка выгружена");
+}
+
+function importLayout(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    let parsed;
+    try {
+      parsed = JSON.parse(String(reader.result));
+    } catch (err) {
+      toast("битый JSON: " + err.message, true);
+      return;
+    }
+    const clean = sanitizeLayout(parsed);
+    if (!clean) { toast("это не раскладка dashboard (нет version: 1)", true); return; }
+    layout = clean;
+    saveLayout();
+    buildCatalog();
+    if (payload) applyPayload(payload);
+    toast("раскладка импортирована");
+  };
+  reader.onerror = () => toast("файл не прочитался", true);
+  reader.readAsText(file);
+}
+
+function switchPreset(name) {
+  if (name === "custom") {
+    const custom = readStored(CUSTOM_KEY);
+    if (!custom) { toast("своя раскладка ещё не сохранена"); $("#preset").value = layout.preset; return; }
+    layout = custom;
+  } else {
+    const next = presetLayout(name);
+    next.settings = layout.settings;   // настройки панелей — предпочтение, не раскладка
+    layout = next;
+  }
+  saveLayout();
+  buildCatalog();
+  if (payload) applyPayload(payload);
+}
+
+function editionWiring() {
+  $("#preset").addEventListener("change", (ev) => switchPreset(ev.target.value));
+  $("#btn-catalog").addEventListener("click", () => {
+    const box = $("#catalog");
+    box.hidden = !box.hidden;
+    $("#btn-catalog").setAttribute("aria-expanded", String(!box.hidden));
+    if (!box.hidden) buildCatalog();
+  });
+  $("#btn-pause").addEventListener("click", () => {
+    paused = !paused;
+    $("#btn-pause").textContent = paused ? "Продолжить" : "Пауза";
+    $("#btn-pause").setAttribute("aria-pressed", String(paused));
+    $("#live-dot").classList.toggle("paused", paused);
+    if (paused) { clearTimeout(timer); tick(); }
+    else { poll(); }
+  });
+  $("#btn-export").addEventListener("click", exportLayout);
+  $("#btn-import").addEventListener("click", () => $("#import-file").click());
+  $("#import-file").addEventListener("change", (ev) => {
+    const file = ev.target.files && ev.target.files[0];
+    if (file) importLayout(file);
+    ev.target.value = "";
+  });
+  $("#btn-default").addEventListener("click", () => {
+    layout = presetLayout("operator");
+    saveLayout();
+    buildCatalog();
+    if (payload) applyPayload(payload);
+    toast("раскладка по умолчанию");
+  });
+  document.addEventListener("click", (ev) => {
+    if (!ev.target.closest(".rel")) { $("#catalog").hidden = true; }
+    if (!ev.target.closest(".panel-settings") && !ev.target.closest('[data-act="settings"]')) {
+      for (const box of document.querySelectorAll(".panel-settings")) box.hidden = true;
+    }
+  });
+}
+
+function panelWiring() {
+  const grid = $("#grid");
+  for (const panel of document.querySelectorAll(".panel")) {
+    const id = panel.dataset.panel;
+    const header = panel.querySelector(".panel-head");
+    header.addEventListener("dragstart", (ev) => {
+      dragId = id;
+      panel.classList.add("dragging");
+      ev.dataTransfer.effectAllowed = "move";
+      try { ev.dataTransfer.setData("text/plain", id); } catch (err) { /* Firefox needs a payload */ }
+    });
+    header.addEventListener("dragend", () => {
+      dragId = null;
+      panel.classList.remove("dragging");
+      for (const node of document.querySelectorAll(".panel")) node.classList.remove("drop-before", "drop-after");
+    });
+    panel.addEventListener("dragover", (ev) => {
+      if (!dragId || dragId === id) return;
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = "move";
+      const box = panel.getBoundingClientRect();
+      const after = ev.clientY > box.top + box.height / 2;
+      panel.classList.toggle("drop-after", after);
+      panel.classList.toggle("drop-before", !after);
+    });
+    panel.addEventListener("dragleave", () => panel.classList.remove("drop-before", "drop-after"));
+    panel.addEventListener("drop", (ev) => {
+      if (!dragId || dragId === id) return;
+      ev.preventDefault();
+      const box = panel.getBoundingClientRect();
+      const after = ev.clientY > box.top + box.height / 2;
+      const source = dragId;
+      panel.classList.remove("drop-before", "drop-after");
+      movePanel(source, id, after);
+    });
+
+    panel.querySelector('[data-act="hide"]').addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      toggleHidden(id, true);
+    });
+    panel.querySelector('[data-act="settings"]').addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const box = panel.querySelector(".panel-settings");
+      const wasHidden = box.hidden;
+      for (const other of document.querySelectorAll(".panel-settings")) other.hidden = true;
+      if (wasHidden) renderSettings(id);
+    });
+    panel.querySelector(".panel-settings").addEventListener("change", (ev) => {
+      const key = ev.target.dataset.setting;
+      if (!key) return;
+      const [panelId, name] = key.split(".");
+      let value = ev.target.value;
+      if (name === "limit") value = clamp(Math.round(Number(value)) || 50, 10, 50);
+      layout.settings[panelId][name] = value;
+      markCustom(); saveLayout();
+      if (payload) {
+        if (panelId === "p2") renderStages(payload);
+        if (panelId === "p5") renderUsage(payload);
+        if (panelId === "p7") renderJournal(payload);
+      }
+    });
+
+    // resize
+    const handle = panel.querySelector(".resize");
+    handle.addEventListener("pointerdown", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      try { handle.setPointerCapture(ev.pointerId); } catch (err) { /* synthetic or stale pointer */ }
+      const box = panel.getBoundingClientRect();
+      const gridBox = grid.getBoundingClientRect();
+      const gridStyle = getComputedStyle(grid);
+      const content = gridBox.width - parseFloat(gridStyle.paddingLeft) - parseFloat(gridStyle.paddingRight);
+      const gap = parseFloat(gridStyle.columnGap) || 12;
+      const colUnit = (content - 11 * gap) / 12 + gap;
+      const rowUnit = parseFloat(gridStyle.gridAutoRows) + gap;
+      const startX = ev.clientX;
+      const startY = ev.clientY;
+      const startW = box.width;
+      const startH = box.height;
+      const [curW, curH] = layout.size[id] || [6, 3];
+      let next = [curW, curH];
+      const onMove = (moveEv) => {
+        const width = startW + (moveEv.clientX - startX);
+        const height = startH + (moveEv.clientY - startY);
+        const cols = clamp(Math.round((width + 12) / colUnit), 3, 12);
+        const rows = clamp(Math.round((height + 12) / rowUnit), 1, 4);
+        next = [cols, rows];
+        panel.style.gridColumn = `span ${cols}`;
+        panel.style.gridRow = `span ${rows}`;
+      };
+      const onUp = () => {
+        handle.removeEventListener("pointermove", onMove);
+        handle.removeEventListener("pointerup", onUp);
+        handle.removeEventListener("pointercancel", onUp);
+        if (next[0] !== curW || next[1] !== curH) setSize(id, next[0], next[1]);
+      };
+      handle.addEventListener("pointermove", onMove);
+      handle.addEventListener("pointerup", onUp);
+      handle.addEventListener("pointercancel", onUp);
+    });
+
+    panel.addEventListener("keydown", (ev) => {
+      if (!ev.altKey) return;
+      const [width, height] = layout.size[id] || [6, 3];
+      if (ev.key === "ArrowUp" && !ev.shiftKey) { reorderBy(id, -1); }
+      else if (ev.key === "ArrowDown" && !ev.shiftKey) { reorderBy(id, 1); }
+      else if (ev.key === "ArrowLeft") { setSize(id, width - 1, height); }
+      else if (ev.key === "ArrowRight") { setSize(id, width + 1, height); }
+      else if (ev.key === "ArrowUp" && ev.shiftKey) { setSize(id, width, height - 1); }
+      else if (ev.key === "ArrowDown" && ev.shiftKey) { setSize(id, width, height + 1); }
+      else return;
+      ev.preventDefault();
+    });
+  }
+}
+
+function reorderBy(id, delta) {
+  const order = layout.order.slice();
+  const index = order.indexOf(id);
+  const target = index + delta;
+  if (target < 0 || target >= order.length) return;
+  order.splice(index, 1);
+  order.splice(target, 0, id);
+  layout.order = order;
+  markCustom(); saveLayout();
+  panelNode(id).focus();
+}
+
+// ---------------- boot ----------------
+function boot() {
+  const params = new URLSearchParams(location.search);
+  runId = params.get("run");
+  if (!runId) {
+    $("#view-runs").hidden = false;
+    loadRuns();
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") loadRuns();
+    });
+    return;
+  }
+  $("#view-run").hidden = false;
+  const stored = readStored(STORAGE_KEY);
+  if (stored) {
+    layout = stored;
+  } else {
+    const preset = params.get("preset");
+    layout = presetLayout(PRESETS[preset] ? preset : "operator");
+    writeStored(STORAGE_KEY);
+  }
+  applyLayout();
+  editionWiring();
+  panelWiring();
+  buildCatalog();
+  poll();
+  ticker = setInterval(tick, 1000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && !paused) poll();
+  });
+}
+
+boot();
+</script>
+</body>
+</html>

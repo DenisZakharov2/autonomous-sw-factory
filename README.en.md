@@ -6,7 +6,7 @@
 
 ---
 
-**Version 1.0.1.**
+**Version 1.0.2.**
 
 **Autonomous Software Factory makes building applications and writing code convenient, safe and transparent.** It is a set of tools and rules that move work through stages: interview, requirements, architecture, build, acceptance, release, documentation and lessons. Every stage has a document to submit, a check to pass, and an explicit decision — proceed or send it back.
 

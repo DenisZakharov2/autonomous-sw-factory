@@ -5,6 +5,12 @@ Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.0.2] — 2026-11-01
+
+Роль `02-independent-verifier` стала настоящим шагом рантайма, а требования,
+которые держались только на тексте промпта, — проверками кода. Бюджеты
+режимов перемерены после того, как верификатор добавил работы.
+
 ### Added
 
 - **Независимый верификатор — реальный шаг, а не подпись.** Роль
@@ -107,6 +113,21 @@ Semantic Versioning.
   три кандидата на удешевление — в `handoff.md`, раздел «Стоимость
   brownfield». Промпты в этой сессии не менялись: эффект удешевления без
   реального прогона не доказан.
+
+### Verified
+
+- CI run `41282195622` на `d9f75e5` — 14/14 jobs (ubuntu/macOS/Windows ×
+  Python 3.10–3.13, eval, build). CI на релизном коммите — тоже 14/14; номер
+  прогона — в описании релиза `v1.0.2`.
+- Локально: 311 тестов, `factory doctor` — OK, `tests/test_docs.py` — 9
+  passed, fake eval `nano-todo` 22/48 и `standard-mini` 24/50 — `match`,
+  `examples/nano-todo`: `VERIFY OK`, `trace` 3/3, `log verify` CHAIN OK,
+  продукт-тесты 3 OK.
+- Реальный прогон пяти eval-кейсов на Hermes: 2 из 5 зелёные
+  (`brownfield-proxy-mini`, `product-mini`); `nano-todo` и `nano-product-mini`
+  красные по покрытию `REQ` в `traceability.json`, `standard-mini`
+  эскалировался на `s4_build`. `eval/baseline-hermes.json` поэтому не
+  перезаписан — это записано, а не замазано.
 
 ## [1.0.1] — 2026-10-31
 

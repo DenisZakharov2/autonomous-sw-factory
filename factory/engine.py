@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import os
 import re
 import shutil
@@ -14,6 +15,7 @@ from .artifacts import (
     artifact_path,
     collect_artifact_entries,
     pattern_paths,
+    plan_rows,
     policy_allows,
     resolve_recorded_path,
     substitute_path,
@@ -542,6 +544,10 @@ def _record_verification_locked(
         model_tier=model["tier"],
         model_id=model["model_id"],
         reasoning_effort=model["effort"],
+        # Only a FAIL carries a reason worth replaying: a PASS report's
+        # `Причина` line is template noise, and leaving it out keeps a passing
+        # VERIFY byte-identical to the one 1.0.2 wrote.
+        reason=reason if verdict == "FAIL" else "",
     )
 
 
@@ -573,6 +579,103 @@ def record_verification(
         )
         save_state(run_dir, state)
         return event
+
+
+def _verify_fail_reason(event: dict[str, Any]) -> str:
+    """The verifier's own words for a FAIL: the event field, or the pre-1.0.3 line."""
+    reason = str(event.get("reason") or "").strip()
+    if reason:
+        return reason
+    for item in (event.get("verdict") or {}).get("evidence") or []:
+        text = str(item)
+        if "reason: " in text:
+            return text.split("reason: ", 1)[1].strip()
+    return ""
+
+
+def _feedback(
+    run_dir: Path, *, stage_id: str, task_id: str | None = None
+) -> list[str]:
+    """The verifier's last FAIL for this task and for its stage, from the journal.
+
+    The producer is the only role that can repair a rejection, and until now
+    the reason lived only in `GATE_DECISION.evidence` — invisible in the next
+    work order and lost on restart.  Reading the journal (not the report on
+    disk) keeps the note even when the report is about older bytes.
+    """
+    events = read_events(run_dir / "blackbox.jsonl")
+    subjects: list[tuple[str | None, str]] = []
+    if task_id:
+        subjects.append((task_id, f"задача {task_id}"))
+    subjects.append((None, f"стадия {stage_id}"))
+    notes: list[str] = []
+    for subject, label in subjects:
+        latest = _latest_verify(events, stage_id=stage_id, task_id=subject)
+        if latest is None or str((latest.get("verdict") or {}).get("status")) != "FAIL":
+            continue
+        reason = _verify_fail_reason(latest) or "вердикт FAIL без причины"
+        notes.append(f"{label}: {reason} (VERIFY FAIL, {latest.get('event_id')})")
+    return notes
+
+
+def _declared_tests(run_dir: Path, task: dict[str, Any]) -> list[str]:
+    """The test references `traceability.json` froze for this task's REQs.
+
+    The matrix is written at `s1_spec`, before any code exists, so these names
+    are a contract: a builder that invents its own names leaves the REQ
+    uncovered while every check stays green.
+    """
+    path = run_dir / "artifacts" / "traceability.json"
+    if not path.is_file():
+        return []
+    try:
+        requirements = json.loads(path.read_text(encoding="utf-8")).get("requirements") or {}
+    except (OSError, json.JSONDecodeError):
+        return []
+    reqs = set(task.get("reqs") or [])
+    tests: list[str] = []
+    for req, item in requirements.items():
+        if req not in reqs or not isinstance(item, dict):
+            continue
+        tests.extend(str(ref) for ref in item.get("tests") or [] if ref)
+    return list(dict.fromkeys(tests))
+
+
+def _report_is_current(
+    run_dir: Path, *, stage_id: str, task_id: str | None, report_path: Path
+) -> bool:
+    """True when no producer submission came after this exact report was submitted.
+
+    A stage sits in `review` either because the verifier submitted its report
+    or because a producer submitted a fix.  Only the first may reach a gate: a
+    verdict that predates the bytes it judges is history, and `verification_is_stale`
+    cannot tell the two apart — it has no VERIFY event to compare with yet.
+    """
+    if not report_path.is_file():
+        return False
+    relative = _relative(run_dir, report_path)
+    digest = sha256_file(report_path)
+    report_seq = producer_seq = 0
+    for event in read_events(run_dir / "blackbox.jsonl"):
+        if event.get("event_type") != "ARTIFACT_SUBMIT":
+            continue
+        if str(event.get("stage") or "") != stage_id:
+            continue
+        if task_id is not None and str(event.get("task_id") or "") != task_id:
+            continue
+        # A stage report covers the whole product tree, so a task's submission
+        # invalidates it too; a task report is only about that task.
+        seq = int(event.get("seq") or 0)
+        if str(event.get("role") or "") == VERIFIER:
+            if any(
+                str(item.get("path")) == relative and str(item.get("sha256")) == digest
+                for item in event.get("artifacts") or []
+                if isinstance(item, dict)
+            ):
+                report_seq = max(report_seq, seq)
+        else:
+            producer_seq = max(producer_seq, seq)
+    return report_seq > producer_seq
 
 
 def _task_deliverable_errors(
@@ -665,10 +768,15 @@ def _task_work_order(
         verification_policy=policy,
     )
     status = task["status"]
+    # A producer never gets the verifier's report: it is the witness, not an
+    # input to the work it judges.  Only a verifier step carries it.
+    if status == "review":
+        artifacts = [spec for spec in artifacts if spec.get("id") == "task_verification"]
+    else:
+        artifacts = [spec for spec in artifacts if spec.get("id") not in VERIFICATION_IDS]
     if status == "review":
         # The verifier writes one report and gets nothing else writable: the
         # producer's deliverable and files are listed read-only on purpose.
-        artifacts = [spec for spec in artifacts if spec.get("id") == "task_verification"]
         report = run_dir / "tasks" / str(task["task_id"]) / "verification" / "verification.md"
         report_rel = _relative(run_dir, report)
         deliverables = ", ".join(
@@ -689,6 +797,8 @@ def _task_work_order(
         next_command = (
             f"factory task accept --run-id {run_id} --task-id {task['task_id']}"
         )
+        feedback: list[str] = []
+        declared: list[str] = []
     elif status == "in_progress":
         action = "produce"
         roles = [task["owner"]]
@@ -700,6 +810,8 @@ def _task_work_order(
             f"factory task submit --run-id {run_id} --task-id {task['task_id']} "
             f"--role {task['owner']} --artifact <path>"
         )
+        feedback = _feedback(run_dir, stage_id=stage["id"], task_id=str(task["task_id"]))
+        declared = _declared_tests(run_dir, task)
     else:
         action = "produce"
         roles = [task["owner"]]
@@ -711,6 +823,13 @@ def _task_work_order(
             f"factory task claim --run-id {run_id} --task-id {task['task_id']} "
             f"--role {task['owner']}"
         )
+        feedback = _feedback(run_dir, stage_id=stage["id"], task_id=str(task["task_id"]))
+        declared = _declared_tests(run_dir, task)
+    pending_task = _pending_artifacts(run_dir, state, stage, pipeline, registry, task=task)
+    if status != "review":
+        # The producer's debt only; the verifier's report is not something this
+        # role can or should produce.
+        pending_task = [item for item in pending_task if item["id"] not in VERIFICATION_IDS]
     return {
         "schema_version": "1.0.0",
         "action": action,
@@ -720,11 +839,11 @@ def _task_work_order(
         "roles": roles,
         "task_id": task["task_id"],
         "artifacts": artifacts,
-        "pending_artifacts": _pending_artifacts(
-            run_dir, state, stage, pipeline, registry, task=task
-        ),
+        "pending_artifacts": pending_task,
         "next_role": _next_role([], {"action": action}, stage, task),
         "instructions": instructions,
+        "feedback": feedback,
+        "declared_tests": declared,
         "gate": stage["gate"],
         "next_command": next_command,
     }
@@ -745,11 +864,46 @@ def _stage_work_order(
     gate = state["gate_status"].get(stage["gate"]["id"], {})
     status = state["stage_status"].get(stage["id"])
     approver = str(stage["gate"]["approver"])
+    feedback: list[str] = []
     report_path, report_errors, report_verdict, _reason = (
         verification_report(run_dir, registry, stage_id=stage["id"])
         if policy == "role" and stage_declares_verification(registry, stage)
         else (run_dir, ["verification is not part of this run"], None, "")
     )
+    declares_witness = (
+        policy == "role"
+        and approver == VERIFIER
+        and stage_declares_verification(registry, stage)
+    )
+
+    def verifier_step() -> tuple[str, list[dict[str, Any]], str, str]:
+        """The verifier's order: one report spec, so only its directory is writable."""
+        report_rel = _relative(run_dir, report_path)
+        readable = ", ".join(
+            f"`{spec['path']}`" for spec in artifacts if spec.get("id") != "verification"
+        )
+        instructions = (
+            f"Stage {stage['id']} artifacts validate; now verify them as "
+            "`02-independent-verifier`. Read (do not edit) " + (readable or "—")
+            + ". Run at least three adversarial checks — one of them "
+            f"`factory verify --run-id {run_id} --stage {stage['id']}` — and write "
+            f"`{report_rel}` with the commands and their real output. In the "
+            "`- Вердикт:` line write exactly one word: `PASS` or `FAIL`. Leaving "
+            "the template's `PASS | FAIL` choice in place is invalid: the runtime "
+            "rejects the report and the step repeats. You may write only that report."
+        )
+        next_command = (
+            f"factory verify --run-id {run_id} --stage {stage['id']} && "
+            f"factory submit --run-id {run_id} --stage {stage['id']} "
+            f"--role {VERIFIER} --artifact {report_rel}"
+        )
+        return (
+            "verify",
+            [spec for spec in artifacts if spec.get("id") == "verification"],
+            instructions,
+            next_command,
+        )
+
     if gate.get("status") == "needs_human":
         action = "gate"
         instructions = f"Gate {stage['gate']['id']} needs a human decision."
@@ -779,6 +933,16 @@ def _stage_work_order(
                 artifacts = [
                     spec for spec in artifacts if spec.get("id") not in VERIFICATION_IDS
                 ]
+        elif declares_witness and (
+            report_errors
+            or not _report_is_current(
+                run_dir, stage_id=stage["id"], task_id=None, report_path=report_path
+            )
+        ):
+            # A verdict that predates the bytes it judges is not a licence:
+            # the verifier has to look at what the producer just submitted,
+            # and the gate cannot close on an older revision.
+            action, artifacts, instructions, next_command = verifier_step()
         else:
             action = "gate"
             instructions = "All required artifacts validate. Ask the gate approver to decide."
@@ -798,45 +962,14 @@ def _stage_work_order(
         producer_errors = validate_stage(
             run_dir, stage, registry, state["tasks"], verification_policy=None
         )
-        if (
-            policy == "role"
-            and approver == VERIFIER
-            and stage_declares_verification(registry, stage)
-            and not producer_pending
-            and not producer_errors
-            and (
-                report_errors
-                or report_verdict != "PASS"
-                or verification_is_stale(run_dir, stage_id=stage["id"])
-            )
-        ):
-            # Every producer artifact validates; the only missing witness is
-            # the verifier's own report.  The order carries that one spec, so
-            # the runtime opens exactly the report's directory writable.
-            action = "verify"
-            artifacts = [spec for spec in artifacts if spec.get("id") == "verification"]
-            report_rel = _relative(run_dir, report_path)
-            readable = ", ".join(
-                f"`{spec['path']}`" for spec in stage_artifacts(
-                    pipeline, registry, state["mode"], stage, run_dir=run_dir,
-                    verification_policy=policy,
-                ) if spec.get("id") != "verification"
-            )
-            instructions = (
-                f"Stage {stage['id']} artifacts validate; now verify them as "
-                "`02-independent-verifier`. Read (do not edit) " + (readable or "—")
-                + ". Run at least three adversarial checks — one of them "
-                f"`factory verify --run-id {run_id} --stage {stage['id']}` — and write "
-                f"`{report_rel}` with the commands and their real output. In the "
-                "`- Вердикт:` line write exactly one word: `PASS` or `FAIL`. Leaving "
-                "the template's `PASS | FAIL` choice in place is invalid: the runtime "
-                "rejects the report and the step repeats. You may write only that report."
-            )
-            next_command = (
-                f"factory verify --run-id {run_id} --stage {stage['id']} && "
-                f"factory submit --run-id {run_id} --stage {stage['id']} "
-                f"--role {VERIFIER} --artifact {report_rel}"
-            )
+        # The one rule for both branches: the stage moves on only with a valid
+        # report that is newer than the last producer submission.  A FAIL the
+        # producer has not answered yet is rework, not another verification.
+        verify_due = bool(report_errors) or not _report_is_current(
+            run_dir, stage_id=stage["id"], task_id=None, report_path=report_path
+        )
+        if declares_witness and not producer_pending and not producer_errors and verify_due:
+            action, artifacts, instructions, next_command = verifier_step()
         else:
             action = "produce"
             # A producer never gets the verifier's report writable: the report
@@ -844,6 +977,7 @@ def _stage_work_order(
             artifacts = [
                 spec for spec in artifacts if spec.get("id") not in VERIFICATION_IDS
             ]
+            feedback = _feedback(run_dir, stage_id=stage["id"])
             instructions = (
                 f"Stage {stage['id']}: produce the listed artifacts using the templates, "
                 "then submit them. Do not write outside your role's scope."
@@ -866,6 +1000,7 @@ def _stage_work_order(
         "pending_artifacts": [],
         "next_role": None,
         "instructions": instructions,
+        "feedback": feedback,
         "gate": stage["gate"],
         "next_command": next_command,
     }
@@ -883,6 +1018,21 @@ def _stage_work_order(
             ]
     order["next_role"] = _next_role(order["pending_artifacts"], order, stage, None)
     return order
+
+
+def _reopen_stage_tasks(state: dict[str, Any], stage_id: str) -> None:
+    """Return every closed or open task of a stage to `pending`, lease released.
+
+    A rejection of the stage is a rejection of the work its tasks produced:
+    leaving them `accepted` means nobody is asked to fix anything, and the
+    next step is a fresh verification of the same bytes.
+    """
+    for task in state["tasks"].values():
+        if task.get("stage") == stage_id and task.get("status") in {
+            "accepted", "review", "in_progress",
+        }:
+            task["status"] = "pending"
+            task["lease"] = None
 
 
 def _reset_rework_chain(
@@ -908,13 +1058,7 @@ def _reset_rework_chain(
         gate["decided_by"] = None
         gate["decided_at"] = None
         gate["evidence"] = []
-    if target_id == "s4_build":
-        for task in state["tasks"].values():
-            if task.get("stage") == "s4_build" and task.get("status") in {
-                "accepted", "review", "in_progress",
-            }:
-                task["status"] = "pending"
-                task["lease"] = None
+    _reopen_stage_tasks(state, target_id)
 
 
 def _blocked_reason(state: dict[str, Any], stage: dict[str, Any]) -> tuple[str, str | None]:
@@ -1434,6 +1578,13 @@ def gate_reject(
         else:
             if stage["rework_to"] != stage["id"]:
                 _reset_rework_chain(state, pipeline, stage["rework_to"], stage)
+            else:
+                # A stage that reworks into itself (`s4_build` and every
+                # verifier stage) used to keep its tasks accepted: the next
+                # order asked the verifier to look at the same files again and
+                # the gate escalated after `max_attempts`.  The stage is already
+                # `in_progress` (gate_record); its tasks go back to `pending`.
+                _reopen_stage_tasks(state, stage["id"])
             summary = f"Gate {gate_id} rejected by {approver}; rework returned to {stage['rework_to']}"
         current_stage(state, pipeline)
         model = _model_for("00-orchestrator" if approver.startswith("human:") else approver)
@@ -1690,22 +1841,6 @@ def veto(
         return event
 
 
-def _plan_rows(run_dir: Path) -> list[list[str]]:
-    plan = run_dir / "artifacts" / "plan.md"
-    if not plan.exists():
-        return []
-    rows: list[list[str]] = []
-    for line in plan.read_text(encoding="utf-8").splitlines():
-        if not line.strip().startswith("|") or "TASK-" not in line:
-            continue
-        cells = [cell.strip().strip("`") for cell in line.strip().strip("|").split("|")]
-        if len(cells) < 5:
-            continue
-        if re.fullmatch(r"TASK-[A-Z0-9][A-Z0-9-]*", cells[0]):
-            rows.append(cells)
-    return rows
-
-
 def _validate_plan_graph(tasks: list[dict[str, Any]], mode_roles: list[str]) -> None:
     ids = {task["task_id"] for task in tasks}
     owners = {task["task_id"]: task.get("owner", "") for task in tasks}
@@ -1748,7 +1883,7 @@ def _prepare_plan(run_dir: Path, state: dict[str, Any]) -> list[dict[str, Any]]:
     mode_roles = effective_roles(
         pipeline, state["mode"], find_stage(pipeline, "s4_build")
     )
-    rows = _plan_rows(run_dir)
+    rows = plan_rows(run_dir)
     if not rows:
         return []
     parsed: list[dict[str, Any]] = []

@@ -13,10 +13,11 @@ from pathlib import Path
 
 import pytest
 
-from factory.artifacts import validate_verification_report, verification_verdict
+from factory.artifacts import validate_plan, validate_verification_report, verification_verdict
 from factory.config import load_pipeline
 from factory.engine import (
     gate_approve,
+    gate_reject,
     import_plan,
     init_run,
     next_action,
@@ -642,6 +643,23 @@ def test_verification_fail_rework_converges(tmp_path, monkeypatch):
             event["event_type"] == "VERIFY" and event["stage"] == stage and not event.get("task_id")
             for event in events
         ), stage
+    # The old behaviour never asked a producer to act on a stage FAIL: the run
+    # that reproduced this (standard-mini, 2026-11-01) verified the same bytes
+    # three times and escalated.  After a stage FAIL the next thing that
+    # happens on that stage is work, not another verification.
+    build = [event for event in events if event.get("stage") == "s4_build"]
+    for index, event in enumerate(build):
+        if (
+            event["event_type"] != "VERIFY"
+            or event["verdict"]["status"] != "FAIL"
+            or event.get("task_id")
+        ):
+            continue
+        following = [
+            item for item in build[index + 1:]
+            if item["event_type"] in {"VERIFY", "ARTIFACT_SUBMIT", "TASK_CLAIM", "TASK_DONE"}
+        ]
+        assert following and following[0]["event_type"] != "VERIFY", following[:1]
 
 
 # --- the deterministic check is a rule, not a sentence ---------------------
@@ -753,3 +771,155 @@ def test_an_invalid_report_leaves_evidence_and_retries(tmp_path, monkeypatch):
         assert not Path(step["report"]).is_absolute(), step
     # The run continued after the invalid report and still converged.
     assert verify_run(run_dir, "s9_learn", require_gate=True) == []
+
+
+# --- a rejection reaches the producer ---------------------------------------
+
+
+def _reject_s4(run_dir: Path, reason: str = "тесты не покрывают REQ-003") -> None:
+    """Close TASK-001, then reject the stage the way the verifier's runtime does."""
+    write_task_verification(run_dir, "TASK-001")
+    task_accept("run-01", "TASK-001", root=run_dir.parent)
+    write_stage_verification(run_dir, "s4_build", verdict="FAIL", reason=reason)
+    gate_reject(
+        "run-01",
+        gate_id="gate_s4",
+        approver=VERIFIER,
+        evidence=[f"verifier report FAIL: {reason}"],
+        root=run_dir.parent,
+    )
+
+
+def test_a_stage_reject_reopens_the_tasks_it_closed(build_run):
+    """`s4_build` reworks into itself; a rejected stage used to keep every task.
+
+    On `standard-mini` (2026-11-01) that produced three identical FAILs and
+    `s4_build escalated`: no producer was ever asked to fix anything.
+    """
+    _reject_s4(build_run)
+    state = load_state(build_run)
+    assert state["tasks"]["TASK-001"]["status"] == "pending"
+    assert state["tasks"]["TASK-001"]["lease"] is None
+    assert state["stage_status"]["s4_build"] == "in_progress"
+
+    order = next_action("run-01", root=build_run.parent)
+    assert order["action"] == "produce"
+    assert order["task_id"] == "TASK-001"
+    assert order["next_role"] == "12-fullstack-developer"
+    # The witness is not part of the repair's write scope — neither as a spec
+    # nor as a directory the runtime mounts writable.
+    assert "verification" not in [spec.get("id") for spec in order["artifacts"]]
+    entries = _collect_writable_paths(order, build_run, state["tasks"]["TASK-001"])
+    assert not any("verification" in str(path) for path in entries), entries
+
+
+def test_the_verifier_reason_reaches_the_producer_prompt(build_run):
+    """The reason lived only in `GATE_DECISION.evidence`, invisible to the producer."""
+    reason = "тесты product/tests не покрывают REQ-003"
+    _reject_s4(build_run, reason=reason)
+    order = next_action("run-01", root=build_run.parent)
+    assert order["feedback"], order["feedback"]
+    assert reason in order["feedback"][0]
+
+    prompt = build_prompt(order, run_dir=build_run)
+    assert "# Замечания предыдущей проверки" in prompt
+    assert reason in prompt
+    # The stage has nothing pending by shape; the producer still has a scope.
+    assert "`product/src/todo.py`" in prompt
+
+
+def test_the_run_loop_hands_the_stage_fail_to_a_producer(build_run):
+    """Order and runtime agree: the step after a stage FAIL is a producer's."""
+    reason = "REQ-003 не покрыт тестом"
+    _reject_s4(build_run, reason=reason)
+
+    class Recorder:
+        name = "recorder"
+
+        def __init__(self) -> None:
+            self.orders: list[dict] = []
+            self.prompts: list[str] = []
+
+        def execute(self, order, context):
+            self.orders.append(order)
+            self.prompts.append(context.prompt)
+            return ExecutionResult(exit_code=0)
+
+    recorder = Recorder()
+    run_loop("run-01", recorder, max_steps=1, root=build_run.parent)
+    assert recorder.orders, "no step ran"
+    first = recorder.orders[0]
+    assert (first["action"], first["task_id"]) == ("produce", "TASK-001")
+    assert reason in recorder.prompts[0]
+
+
+# --- the declared test names are a contract --------------------------------
+
+
+def _write_traceability(run_dir: Path, *, tests: list[str], tasks: list[str] | None = None) -> None:
+    _write(
+        run_dir,
+        "artifacts/traceability.json",
+        json.dumps(
+            {
+                "schema_version": "1.0.0",
+                "requirements": {
+                    "REQ-001": {
+                        "spec": "artifacts/spec.md#REQ-001",
+                        "tasks": tasks or ["TASK-001"],
+                        "tests": tests,
+                        "acceptance": "A-1",
+                    }
+                },
+            }
+        ),
+    )
+
+
+def test_the_task_order_carries_the_declared_test_names(build_run):
+    """The names are frozen at `s1_spec`; a builder that invents its own breaks REQ coverage."""
+    _write_traceability(
+        build_run, tests=["product/tests/test_todo.py::test_req_001_add_creates_task"]
+    )
+    _reject_s4(build_run)
+    order = next_action("run-01", root=build_run.parent)
+    assert order["declared_tests"] == [
+        "product/tests/test_todo.py::test_req_001_add_creates_task"
+    ]
+    prompt = build_prompt(order, run_dir=build_run)
+    assert "# Тесты, объявленные в `traceability.json`" in prompt
+    assert "test_req_001_add_creates_task" in prompt
+    assert "объяви в тестах ровно эти имена" in prompt
+
+
+def test_the_verifier_order_does_not_carry_the_declared_test_names(build_run):
+    """`declared_tests` is a builder's contract, not a reviewer's checklist."""
+    _write_traceability(
+        build_run, tests=["product/tests/test_todo.py::test_req_001_add_creates_task"]
+    )
+    order = next_action("run-01", root=build_run.parent)
+    assert order["action"] == "verify" and order["task_id"] == "TASK-001"
+    assert order["declared_tests"] == []
+
+
+def test_a_plan_must_give_a_declared_test_file_to_a_task_that_owns_the_req(build_run):
+    """A test name no task may write can never be honoured — the plan gate says so."""
+    _write(
+        build_run,
+        "artifacts/spec.md",
+        "## 1. Требования\n\nREQ-001.\n## 2. Приёмка\n\nREQ-001 PASS.\n",
+    )
+    _write(build_run, "product/tests/test_todo.py", "def test_req_001_add_creates_task():\n    assert True\n")
+    _write_traceability(
+        build_run, tests=["product/tests/test_todo.py::test_req_001_add_creates_task"]
+    )
+    errors = validate_plan(build_run)
+    assert any("outside the Allowed Files" in error for error in errors), errors
+
+    plan = (build_run / "artifacts" / "plan.md").read_text(encoding="utf-8")
+    plan = plan.replace(
+        "`product/src/todo.py` | `true`",
+        "`product/src/todo.py`, `product/tests/test_todo.py` | `true`",
+    )
+    _write(build_run, "artifacts/plan.md", plan)
+    assert validate_plan(build_run) == []

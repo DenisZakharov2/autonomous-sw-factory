@@ -497,6 +497,59 @@ def _trace_link_errors(run_dir: Path, requirements: dict[str, Any]) -> list[str]
     return errors
 
 
+def plan_rows(run_dir: Path) -> list[list[str]]:
+    """The task table of `plan.md` as cell lists, one row per `TASK-*`."""
+    plan = run_dir / "artifacts" / "plan.md"
+    if not plan.exists():
+        return []
+    rows: list[list[str]] = []
+    for line in plan.read_text(encoding="utf-8").splitlines():
+        if not line.strip().startswith("|") or "TASK-" not in line:
+            continue
+        cells = [cell.strip().strip("`") for cell in line.strip().strip("|").split("|")]
+        if len(cells) < 5:
+            continue
+        if re.fullmatch(r"TASK-[A-Z0-9][A-Z0-9-]*", cells[0]):
+            rows.append(cells)
+    return rows
+
+
+def _declared_test_writable_errors(
+    run_dir: Path, requirements: dict[str, Any]
+) -> list[str]:
+    """Every test `traceability.json` names must be writable by a task owning its REQ.
+
+    The matrix is frozen at `s1_spec`, before any task exists.  A test name
+    whose file no task may write can never be honoured: the build writes its
+    own names, every check stays green, and only the coverage matrix reports
+    the REQ as uncovered — after the whole run was paid for.
+    """
+    rows = plan_rows(run_dir)
+    if not rows:
+        return []
+    allowed: dict[str, list[str]] = {
+        cells[0]: [item.strip().strip("`") for item in re.split(r"[,<]", cells[4]) if item.strip()]
+        for cells in rows
+    }
+    errors: list[str] = []
+    for req, item in requirements.items():
+        files = [str(ref).split("::", 1)[0] for ref in item.get("tests") or [] if ref]
+        if not files:
+            continue
+        writable = [entry for task in item.get("tasks") or [] for entry in allowed.get(str(task), [])]
+        for file_part in dict.fromkeys(files):
+            if any(
+                file_part == entry.rstrip("/") or file_part.startswith(entry.rstrip("/") + "/")
+                for entry in writable
+            ):
+                continue
+            errors.append(
+                f"traceability {req}: test {file_part} is outside the Allowed Files of "
+                f"{item.get('tasks') or 'any task'}"
+            )
+    return errors
+
+
 def validate_plan(run_dir: Path) -> list[str]:
     plan = run_dir / "artifacts" / "plan.md"
     spec = run_dir / "artifacts" / "spec.md"
@@ -518,7 +571,9 @@ def validate_plan(run_dir: Path) -> list[str]:
         except json.JSONDecodeError as exc:
             errors.append(f"traceability.json is not valid JSON: {exc}")
         else:
-            errors.extend(_trace_link_errors(run_dir, data.get("requirements", {})))
+            requirements = data.get("requirements", {})
+            errors.extend(_trace_link_errors(run_dir, requirements))
+            errors.extend(_declared_test_writable_errors(run_dir, requirements))
     return errors
 
 

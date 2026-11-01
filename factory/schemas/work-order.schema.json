@@ -30,6 +30,8 @@
     },
     "next_role": {"type": ["string", "null"]},
     "instructions": {"type": "string"},
+    "feedback": {"type": "array", "items": {"type": "string"}},
+    "declared_tests": {"type": "array", "items": {"type": "string"}},
     "gate": {"type": ["object", "null"]},
     "next_command": {"type": "string"}
   }

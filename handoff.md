@@ -1,5 +1,129 @@
 # Handoff
 
+## Отказ верификатора доходит до продюсера, а имена тестов — до сборки
+
+Состояние на 1 ноября 2026. Ветка `main`, база — `0c45b25` (`VERSION` 1.0.2,
+тег `v1.0.2`), правки этой сессии не закоммичены: `factory/engine.py`,
+`factory/artifacts.py`, `factory/runtime/prompt.py`,
+`factory/schemas/work-order.schema.json`, `tests/test_runtime_verifier.py`,
+`CHANGELOG.md`, `handoff.md`. Тестов 317 (было 311): 6 новых в
+`tests/test_runtime_verifier.py`, ни один существующий не ослаблен.
+
+### A. Почему отказ верификатора не доходил до продюсера
+
+Разрывов было два, и второй нашёлся только потому, что fake-прогон
+`verification-fail` после первой правки начал эскалироваться.
+
+1. **`rework_to == stage_id` не переоткрывал задачи.** `gate_reject` вызывал
+   `_reset_rework_chain` только при `rework_to != stage_id`; у `s4_build`
+   `rework_to` — он сам, поэтому задачи оставались `accepted`, заказ уходил
+   верификатору, тот проверял те же файлы, и после `max_attempts` стадия
+   эскалировалась. На `runs/standard-mini-verify-role-b2` это события 34–42:
+   три `VERIFY FAIL` подряд и `s4_build escalated`.
+2. **Гейт читал отчёт, написанный до последней сдачи продюсера.** После
+   `submit_work` стадия уходит в `review`, а `validate_stage` проверяет только
+   грамматику отчёта, не его давность: гейт видел старый `FAIL` и отвергал
+   стадию, не спрашивая верификатора заново. Это второй способ получить два
+   одинаковых вердикта на одни и те же байты.
+
+Правки:
+
+- `_reopen_stage_tasks(state, stage_id)` — `accepted`/`review`/`in_progress` →
+  `pending`, lease снимается; вызывается из `gate_reject` при self-rework и из
+  `_reset_rework_chain` (`s5_acceptance`/`s6_security` → `s4_build`, эта ветка
+  не изменилась).
+- `_report_is_current(run_dir, stage_id, task_id, report_path)` — отчёт
+  «свежий», если после его сдачи не было сдачи продюсера. Для стадии сдачей
+  продюсера считается и задача: отчёт стадии судит всё дерево `product/`.
+  Одно правило на обе ветки `_stage_work_order`: гейт и верификатор получают
+  шаг только при валидном и свежем отчёте, а `FAIL`, на который продюсер ещё
+  не ответил, — это rework, а не повторная проверка.
+- Причина отказа: `VERIFY` пишет поле `reason` (только для `FAIL`, поэтому
+  `PASS`-события остаются байт-в-байт такими же, как в 1.0.2); `_feedback`
+  читает последний `VERIFY FAIL` по задаче и по стадии прямо из журнала (это
+  переживает перезапуск, в отличие от памяти цикла); заказ несёт `feedback`;
+  `build_prompt` печатает его в разделе «Замечания предыдущей проверки».
+  Причина на реальном прогоне — цитата из `runs/standard-mini-verify-role-b2`:
+  «критерий выхода стадии «tests pass in a clean checkout» не выполняется…»
+  (полный текст — в `artifacts/verification/s4_build/verification.md`); теперь
+  он доезжает до заказа, а не только до `GATE_DECISION.evidence`.
+- Заодно закрыта дыра: заказ задачи отдавал продюсеру `verification` и
+  `task_verification` в `artifacts`, то есть рантайм открывал продюсеру запись
+  в каталог отчёта верификатора. Теперь отчёт есть только в заказе
+  верификатора — и в `artifacts`, и в `pending_artifacts`.
+
+### B. Имена тестов
+
+Гипотеза подтверждена кодом и данными: `traceability.json` пишется на
+`s1_spec` и замораживается, а `_task_work_order`/`build_prompt` имена тестов
+продюсеру не передавали. На `runs/nano-todo-verify-role-b2` объявлены
+`test_req_003_done_marks_task_completed` и `…_unknown_id_and_corrupt_file`, а
+написаны `…_marks_only_target_task` и `…_unknown_id_leaves_file_unchanged`;
+REQ-001 и REQ-002 при этом совпали — поэтому кейс зелёный по всем проверкам и
+красный по покрытию.
+
+- Заказ продюсера несёт `declared_tests` — ссылки `path::symbol` для `REQ`
+  этой задачи; `build_prompt` печатает раздел «Тесты, объявленные в
+  `traceability.json`» с требованием объявить ровно эти имена. Верификатору
+  поле не отдаётся: это контракт сборки, а не чек-лист проверки.
+- `s3_plan` проверяет исполнимость: файл объявленного теста обязан входить в
+  `Allowed Files` задачи, несущей `REQ`. На `runs/nano-todo-verify-role-b2`
+  план отдал `product/tests/test_todo.py` только `TASK-002`, а тесты
+  REQ-001/REQ-002 объявлены за `TASK-001` — такое имя объявить физически
+  некому.
+- Проверено на исторических данных: пять baseline-прогонов и
+  `examples/nano-todo` проходят `validate_plan` под новым правилом; краснеют
+  только прогоны 1.0.2 (`nano-todo-verify-role-b2`,
+  `standard-mini-verify-role-b2`) — правило бьёт точно по дефекту.
+- `build_matrix` не ослаблен. Отдельного дефекта для Rust нет: проба на файле
+  с `#[cfg(test)] mod tests` и `#[test]`/`#[tokio::test]` резолвится; в
+  `runs/nano-product-mini-verify-role-b2` из восьми объявленных имён два
+  находятся в `product/src/config.rs` и `product/src/engine/router.rs`, а
+  шесть — нет, потому что продюсер объявил свои. Это тот же разрыв B, а не
+  поиск тестов.
+
+### Реальные данные
+
+- `runs/standard-mini-verify-role-b2`, события 34–42: три `VERIFY FAIL` и
+  `s4_build escalated` — исходный дефект.
+- Replay того же журнала на исправленном движке: копия прогона, журнал обрезан
+  до события 35 (первый `VERIFY FAIL`), `state.json` откачен к значениям,
+  которые следуют из событий (`s4_build` — `review`, гейт `gate_s4` —
+  `pending`, attempts 0). `gate_reject` на этом состоянии переоткрывает обе
+  задачи (`accepted` → `pending`), ставит стадию в `in_progress` и attempts 1,
+  а `factory next` отдаёт `produce TASK-001` для `12-fullstack-developer`:
+  в `feedback` — дословная причина верификатора из реального журнала, в
+  `declared_tests` — два имени. Новых шагов модели не делалось: это
+  проверка на записанном журнале, а не новый прогон.
+- `_feedback` читает причину и из событий 1.0.2, где поля `reason` ещё нет —
+  разбирает хвост `…; reason: …` в `verdict.evidence` (на
+  `standard-mini-verify-role-b2` это проверено).
+
+### Реальный прогон nano-todo (1 ноября 2026)
+
+`runs/nano-todo-20261101-083132`, `factory eval --executor hermes --case
+nano-todo`: `complete`, 22 шага, 48 событий, 3 953 296 токенов (671 120
+billable), 31.6 мин, `EVAL OK`. В 1.0.2 тот же кейс: 23 шага, 48 событий,
+3 925 927 (753 063) — цена не выросла.
+
+- `_requirement_errors` — `[]`, `factory trace` — 3/3 (100%): продюсер объявил
+  дословно `test_req_001_add_writes_task`,
+  `test_req_002_list_prints_tasks`, `test_req_003_done_marks_task`. Раздел
+  «Тесты, объявленные в `traceability.json`» есть в промпте TASK-001
+  (`runtime/ev-0021-…prompt.md`); продукт руками не правился.
+- `factory verify --stage s9_learn --require-gate` — OK, `factory log verify` —
+  CHAIN OK, 11 тестов продукта зелёные.
+- `s3_plan` прошёл новый gate с первой попытки: план отдал
+  `test_add.py`/`test_list.py` задаче `TASK-001`, `test_done.py`/`test_errors.py`
+  — `TASK-002`.
+- Ни одного `VERIFY FAIL` в этом прогоне не было, поэтому путь «FAIL → шаг
+  продюсера» здесь не наблюдался; он подтверждён replay стандартного журнала
+  (выше) и fake-сценарием `verification-fail` — в нём после каждого `FAIL`
+  идёт шаг продюсера, и прогон сходится без эскалации (120 событий).
+- Полный прогон `standard-mini` на реальной модели в этой сессии **не
+  делался**: проверка A на реальном журнале сделана replay'ем, а не новым
+  прогоном.
+
 ## Независимый верификатор как шаг рантайма (1.0.2)
 
 Состояние на 1 ноября 2026. Ветка `main`, `VERSION` — `1.0.2`, тег `v1.0.2`

@@ -10,10 +10,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ..artifacts import validate_stage
+from ..artifacts import plan_rows, validate_stage
 from ..config import PACKAGE_ROOT, load_pipeline
 from ..pipeline import effective_roles
-from ..engine import _plan_rows  # one parser, one truth about plan.md
 from ..state import find_stage, load_state
 
 ROLE_CARD_LIMIT = 4500
@@ -65,7 +64,7 @@ def _role_card(role: str) -> tuple[str, str]:
 
 
 def _task_row(run_dir: Path, task_id: str) -> list[str]:
-    for row in _plan_rows(run_dir):
+    for row in plan_rows(run_dir):
         if row[0] == task_id:
             return row
     return []
@@ -218,6 +217,17 @@ def build_prompt(
         lines.append("- Не меняй файлы других задач и не выходи за разрешённые файлы.")
     lines.append("")
 
+    declared = [str(item) for item in order.get("declared_tests") or []]
+    if declared and order.get("action") == "produce":
+        lines.append("# Тесты, объявленные в `traceability.json`")
+        lines.append(
+            "Матрица требований заморожена: объяви в тестах ровно эти имена. "
+            "Переименованный тест разрывает покрытие `REQ`, и ни одна проверка "
+            "стадии этого не покажет."
+        )
+        lines.extend(f"- `{item}`" for item in declared)
+        lines.append("")
+
     stage_errors: list[str] = []
     if stage is not None:
         stage_errors = validate_stage(
@@ -294,6 +304,11 @@ def build_prompt(
         lines.append("# Чего не хватает у тебя")
         if foreign:
             lines.append("Твои артефакты на месте; стадия ждёт другие роли:")
+        elif order.get("feedback"):
+            lines.append(
+                "Артефакты на месте, но проверка вернула FAIL: исправь замечания ниже, "
+                "перезаписав соответствующие файлы."
+            )
         elif stage_errors:
             lines.append(
                 "Артефакты на месте, но стадия не проходит проверку: исправь ошибки выше, "
@@ -309,15 +324,18 @@ def build_prompt(
         )
         lines.append("")
 
-    if evidence:
+    if evidence or order.get("feedback"):
+        # The verifier's last FAIL is the order's `feedback`; `evidence` is the
+        # loop's per-step note.  Same heading, never the same line twice.
+        notes = list(dict.fromkeys([*(order.get("feedback") or []), *(evidence or [])]))
         lines.append("# Замечания предыдущей проверки")
-        lines.extend(f"- {item}" for item in evidence)
+        lines.extend(f"- {item}" for item in notes)
         lines.append("")
 
     lines.append("# Разрешённые пути")
     lines.append(f"Работай только внутри `{workspace}`. Разрешено писать:")
     pending_paths = [str(item.get("path")) for item in own]
-    if not pending_paths and (stage_errors or evidence):
+    if not pending_paths and (stage_errors or evidence or order.get("feedback")):
         # A gate can reject a stage whose artifacts already exist (for example
         # a plan whose tasks share a file without a dependency).  The rework
         # step then has nothing pending, and an empty "allowed" list told the

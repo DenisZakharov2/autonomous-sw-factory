@@ -415,6 +415,132 @@ def chain_report(run_id: str, root: str | Path | None = None, refresh: bool = Fa
     return report
 
 
+def compare_runs(run_id_a: str, run_id_b: str, root: str | Path | None = None) -> dict[str, Any]:
+    """Compare two runs and return deltas for metrics, stages, and traceability.
+
+    Raises ``RunNotFound`` if either run does not exist, or ``ValueError`` if
+    ``run_id_a == run_id_b``.
+    """
+    path_a = _run_path(run_id_a, root)
+    path_b = _run_path(run_id_b, root)
+    if run_id_a == run_id_b:
+        raise ValueError("run ids must differ")
+
+    payload_a = run_payload(run_id_a, root)
+    payload_b = run_payload(run_id_b, root)
+
+    def _delta(a_val: Any, b_val: Any) -> dict[str, Any] | None:
+        if a_val is None and b_val is None:
+            return None
+        if a_val is None:
+            return {"a": None, "b": b_val, "delta": None, "delta_pct": None}
+        if b_val is None:
+            return {"a": a_val, "b": None, "delta": None, "delta_pct": None}
+        if isinstance(a_val, (int, float)) and isinstance(b_val, (int, float)):
+            delta = b_val - a_val
+            delta_pct = None
+            if a_val != 0:
+                delta_pct = round(delta / abs(a_val) * 100, 1)
+            return {"a": a_val, "b": b_val, "delta": delta, "delta_pct": delta_pct}
+        return {"a": a_val, "b": b_val, "delta": None, "delta_pct": None}
+
+    # Metrics delta
+    metrics_a = payload_a.get("metrics", {})
+    metrics_b = payload_b.get("metrics", {})
+    metric_keys = set(metrics_a.keys()) | set(metrics_b.keys())
+    metrics_delta = {}
+    for key in sorted(metric_keys):
+        delta = _delta(metrics_a.get(key), metrics_b.get(key))
+        if delta is not None:
+            metrics_delta[key] = delta
+
+    # Stages delta
+    stages_a = {s["id"]: s for s in payload_a.get("stages", [])}
+    stages_b = {s["id"]: s for s in payload_b.get("stages", [])}
+    stage_ids = sorted(set(stages_a.keys()) | set(stages_b.keys()))
+    stages_delta = []
+    for stage_id in stage_ids:
+        sa = stages_a.get(stage_id)
+        sb = stages_b.get(stage_id)
+        stage_delta = {"stage_id": stage_id}
+        if sa and sb:
+            for field in ("status", "gate_status", "tokens", "seconds", "attempts"):
+                a_val = sa.get(field)
+                b_val = sb.get(field)
+                d = _delta(a_val, b_val)
+                if d is not None:
+                    stage_delta[f"a_{field}"] = a_val
+                    stage_delta[f"b_{field}"] = b_val
+                    stage_delta[f"delta_{field}"] = d.get("delta")
+                    stage_delta[f"delta_{field}_pct"] = d.get("delta_pct")
+        elif sa:
+            stage_delta["a_status"] = sa.get("status")
+            stage_delta["a_gate_status"] = sa.get("gate_status")
+            stage_delta["a_tokens"] = sa.get("tokens")
+            stage_delta["a_seconds"] = sa.get("seconds")
+            stage_delta["a_attempts"] = sa.get("attempts")
+        else:
+            # sb is guaranteed to exist here (not in sa and not in both)
+            stage_delta["b_status"] = sb.get("status") if sb else None
+            stage_delta["b_gate_status"] = sb.get("gate_status") if sb else None
+            stage_delta["b_tokens"] = sb.get("tokens") if sb else None
+            stage_delta["b_seconds"] = sb.get("seconds") if sb else None
+            stage_delta["b_attempts"] = sb.get("attempts") if sb else None
+        stages_delta.append(stage_delta)
+
+    # Traceability delta
+    trace_a = payload_a.get("trace", {})
+    trace_b = payload_b.get("trace", {})
+    trace_delta = {
+        "a": {
+            "coverage": trace_a.get("coverage"),
+            "covered": trace_a.get("covered"),
+            "total": trace_a.get("total"),
+            "uncovered": trace_a.get("uncovered", []),
+        },
+        "b": {
+            "coverage": trace_b.get("coverage"),
+            "covered": trace_b.get("covered"),
+            "total": trace_b.get("total"),
+            "uncovered": trace_b.get("uncovered", []),
+        },
+    }
+    # Delta for numeric trace fields
+    for field in ("coverage", "covered", "total"):
+        av = trace_a.get(field)
+        bv = trace_b.get(field)
+        if isinstance(av, (int, float)) and isinstance(bv, (int, float)):
+            delta = bv - av
+            delta_pct = None
+            if av != 0:
+                delta_pct = round(delta / abs(av) * 100, 1)
+            trace_delta[f"delta_{field}"] = delta
+            trace_delta[f"delta_{field}_pct"] = delta_pct
+
+    # Totals delta (usage)
+    usage_a = payload_a.get("usage", {}).get("totals", {})
+    usage_b = payload_b.get("usage", {}).get("totals", {})
+    totals_delta = {}
+    for field in ("tokens", "seconds", "usd", "api_calls", "steps"):
+        av = usage_a.get(field)
+        bv = usage_b.get(field)
+        if isinstance(av, (int, float)) and isinstance(bv, (int, float)):
+            delta = bv - av
+            delta_pct = None
+            if av != 0:
+                delta_pct = round(delta / abs(av) * 100, 1)
+            totals_delta[field] = {"a": av, "b": bv, "delta": delta, "delta_pct": delta_pct}
+
+    return {
+        "a": {"run_id": run_id_a, "project": payload_a["header"]["project"]},
+        "b": {"run_id": run_id_b, "project": payload_b["header"]["project"]},
+        "metrics": metrics_delta,
+        "stages": stages_delta,
+        "trace": trace_delta,
+        "totals": totals_delta,
+    }
+
+
 def _run_path(run_id: str, root: str | Path | None) -> Path:
     try:
         path = safe_run_dir(run_id, root)
@@ -461,6 +587,15 @@ def _revision(run_path: Path, state: dict[str, Any]) -> str:
     for name in ("state.json", "blackbox.jsonl", "runtime/usage.jsonl"):
         parts.append(f"{name}={_stamp(run_path / name)}")
     return hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:20]
+
+
+def compare_revision(run_id_a: str, run_id_b: str, root: str | Path | None = None) -> str | None:
+    """ETag for /api/compare: hash of the two run revisions."""
+    rev_a = revision(run_id_a, root)
+    rev_b = revision(run_id_b, root)
+    if not rev_a or not rev_b:
+        return None
+    return hashlib.sha1(f"{rev_a}|{rev_b}".encode("utf-8")).hexdigest()[:20]
 
 
 def run_payload(run_id: str, root: str | Path | None = None,

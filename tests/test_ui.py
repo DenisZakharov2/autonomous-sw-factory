@@ -654,3 +654,93 @@ def test_export_is_one_icon_menu_in_the_header():
         assert f'data-export="{dataset}"' in text
     # The icon keeps the bar on one line: no text button next to it.
     assert ".btn.icon{width:28px;height:28px" in text
+
+
+# -- A13: compare endpoint --------------------------------------------------
+def test_compare_requires_both_params(served):
+    base, _root, _run = served
+    status, _headers, body = get(base, "/api/compare")
+    assert status == 400
+    assert "both 'a' and 'b'" in json.loads(body)["error"]
+    status, _headers, body = get(base, "/api/compare?a=run-01")
+    assert status == 400
+    status, _headers, body = get(base, "/api/compare?b=run-01")
+    assert status == 400
+
+
+def test_compare_same_run_returns_400(served):
+    base, _root, _run = served
+    status, _headers, body = get(base, "/api/compare?a=run-01&b=run-01")
+    assert status == 400
+    assert "differ" in json.loads(body)["error"]
+
+
+def test_compare_unknown_run_returns_404(served):
+    base, _root, _run = served
+    status, _headers, body = get(base, "/api/compare?a=run-01&b=nonexistent")
+    assert status == 404
+
+
+def test_compare_returns_deltas(served):
+    base, root, _run = served
+    # Create a second run with some data
+    run2_dir, _state2, _event2 = init_run("run-02", "nano", root=root)
+    (run2_dir / "idea.md").write_text("Второй прогон\n", encoding="utf-8")
+    # Add some usage data to both runs
+    for run_id in ("run-01", "run-02"):
+        usage = root / run_id / "runtime" / "usage.jsonl"
+        usage.parent.mkdir(parents=True, exist_ok=True)
+        usage.write_text(
+            json.dumps({
+                "stage": "s1_spec",
+                "role": "01-smart-interviewer",
+                "task_id": "TASK-001",
+                "tokens_in": 100,
+                "tokens_out": 20,
+                "tokens_total": 120,
+                "seconds": 4.5,
+                "usd": None,
+            }) + "\n",
+            encoding="utf-8",
+        )
+    data.clear_cache()
+
+    status, headers, body = get(base, "/api/compare?a=run-01&b=run-02")
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["a"]["run_id"] == "run-01"
+    assert payload["b"]["run_id"] == "run-02"
+    assert "metrics" in payload
+    assert "stages" in payload
+    assert "trace" in payload
+    assert "totals" in payload
+    # ETag should be present
+    assert headers.get("ETag")
+
+    # 304 on repeat with same ETag
+    etag = headers["ETag"]
+    status, _headers, _body = get(base, "/api/compare?a=run-01&b=run-02", headers={"If-None-Match": etag})
+    assert status == 304
+
+
+def test_compare_ui_elements_in_page():
+    text = page_text()
+    # Compare view section
+    assert 'id="view-compare"' in text
+    assert 'id="c-title"' in text
+    assert 'id="c-metrics-body"' in text
+    assert 'id="c-totals-body"' in text
+    assert 'id="c-stages-body"' in text
+    assert 'id="c-trace-body"' in text
+    assert 'id="c-back"' in text
+    assert 'id="c-pause"' in text
+    assert 'id="c-dot"' in text
+    assert 'id="c-live"' in text
+    # Compare button in runs view
+    assert 'id="btn-compare"' in text
+    # Checkbox class for selection
+    assert 'class="compare-checkbox"' in text
+    # Delta badge function
+    assert "function deltaBadge" in text
+    assert "loadCompare" in text
+    assert "renderCompare" in text

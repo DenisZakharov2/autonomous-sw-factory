@@ -289,6 +289,7 @@ tbody tr:hover{background:#151926}
     <h1>Factory</h1><span class="muted">прогоны</span>
     <span class="muted" id="runs-count"></span>
     <span class="live" style="margin-left:auto"><i class="dot" id="runs-dot"></i><span id="runs-live">обновляется</span></span>
+    <button class="btn" id="btn-compare" disabled style="align-self:center">Выбрано: 0 / 2</button>
     <a class="btn" href="/api/export/runs.csv" style="align-self:center" title="Экспорт списка прогонов в CSV">CSV</a>
   </div>
   <div id="runs-body"><div class="empty">Загрузка…</div></div>
@@ -614,7 +615,7 @@ function renderRuns(data) {
   const sorted = filtered.slice().sort((a, b) => cmp(a, b) || String(a.run_id || "").localeCompare(String(b.run_id || "")));
   const rows = sorted.map((run) => {
     if (run.error) {
-      return `<tr data-run="${esc(run.run_id)}"><td class="proj">${esc(run.project)}</td><td class="mono">${esc(run.run_id)}</td>
+      return `<tr data-run="${esc(run.run_id)}"><td><input type="checkbox" class="compare-checkbox" data-run="${esc(run.run_id)}" disabled></td><td class="proj">${esc(run.project)}</td><td class="mono">${esc(run.run_id)}</td>
         <td colspan="2"><span class="badge err"><span class="ico">✕</span><span>state.json не читается</span></span></td>
         <td>—</td><td>—</td><td class="muted">${esc(run.error)}</td></tr>`;
     }
@@ -622,6 +623,7 @@ function renderRuns(data) {
       ? `<span class="mono">${esc(run.stage)}</span>`
       : '<span class="muted">завершён</span>';
     return `<tr data-run="${esc(run.run_id)}">
+      <td><input type="checkbox" class="compare-checkbox" data-run="${esc(run.run_id)}"></td>
       <td class="proj" title="${esc(run.project)}">${esc(run.project)}</td>
       <td class="mono">${esc(run.run_id)}</td>
       <td>${esc(run.mode || "—")}</td>
@@ -633,6 +635,7 @@ function renderRuns(data) {
   }).join("");
   const header = `<div class="runs-scroll"><table class="runs-table">
     <thead><tr>
+      <th style="width:36px"></th>
       <th data-sort="project">Проект</th>
       <th data-sort="run_id">run_id</th>
       <th data-sort="mode">Режим</th>
@@ -650,13 +653,18 @@ function renderRuns(data) {
   }
   $("#runs-body").innerHTML = header;
   $("#runs-count").textContent = count;
+  updateCompareButton();
   for (const row of document.querySelectorAll("#runs-body tbody tr")) {
-    row.addEventListener("click", () => { location.search = `?run=${encodeURIComponent(row.dataset.run)}`; });
-  for (const r of document.querySelectorAll("tr.stage-row")) { r.addEventListener("click", () => showDrawerStage(r.dataset.stage)); }
-  for (const r of document.querySelectorAll("tr.journal-row")) { r.addEventListener("click", () => showDrawerEvent(r.dataset.seq)); }
-  for (const r of document.querySelectorAll("#runs-body tbody tr")) { r.addEventListener("click", () => { location.search = `?run=${encodeURIComponent(r.dataset.run)}`; }); }
+    row.addEventListener("click", (ev) => {
+      if (ev.target.matches("input.compare-checkbox")) return;
+      location.search = `?run=${encodeURIComponent(row.dataset.run)}`;
+    });
+  }
+  for (const cb of document.querySelectorAll("input.compare-checkbox")) {
+    cb.addEventListener("change", updateCompareButton);
   }
   for (const th of document.querySelectorAll("#runs-body thead th")) {
+    if (!th.dataset.sort) continue;
     th.style.cursor = "pointer";
     th.addEventListener("click", () => {
       const key = th.dataset.sort;
@@ -670,6 +678,15 @@ function renderRuns(data) {
       history.replaceState(null, "", "?" + np.toString());
       loadRuns();
     });
+  }
+}
+let compareSelected = [];
+function updateCompareButton() {
+  compareSelected = Array.from(document.querySelectorAll("input.compare-checkbox:checked")).map((cb) => cb.dataset.run);
+  const btn = $("#btn-compare");
+  if (btn) {
+    btn.disabled = compareSelected.length !== 2;
+    btn.textContent = compareSelected.length === 2 ? `Сравнить (${compareSelected[0]} → ${compareSelected[1]})` : `Выбрано: ${compareSelected.length} / 2`;
   }
 }
 
@@ -1198,6 +1215,23 @@ function editionWiring() {
     if (paused) { clearTimeout(timer); tick(); }
     else { poll(); }
   });
+  $("#btn-compare").addEventListener("click", () => {
+    if (compareSelected.length === 2) {
+      location.search = `?compare=${encodeURIComponent(compareSelected[0])},${encodeURIComponent(compareSelected[1])}`;
+    }
+  });
+  $("#c-pause").addEventListener("click", () => {
+    comparePaused = !comparePaused;
+    $("#c-pause").textContent = comparePaused ? "Продолжить" : "Пауза";
+    $("#c-pause").setAttribute("aria-pressed", String(comparePaused));
+    $("#c-dot").classList.toggle("paused", comparePaused);
+    if (!comparePaused) loadCompare();
+  });
+  $("#c-back").addEventListener("click", (ev) => {
+    ev.preventDefault();
+    history.replaceState(null, "", location.pathname);
+    location.search = "";
+  });
   $("#btn-layout").addEventListener("click", () => {
     const menu = $("#menu-layout");
     menu.hidden = !menu.hidden;
@@ -1387,10 +1421,226 @@ function reorderBy(id, delta) {
   panelNode(id).focus();
 }
 
+let compareIdA = null;
+let compareIdB = null;
+let compareEtag = null;
+let comparePaused = false;
+let compareTimer = null;
+
+function deltaBadge(delta, deltaPct) {
+  if (delta == null && deltaPct == null) return '<span class="muted">—</span>';
+  if (delta == null) return '<span class="muted">—</span>';
+  const isPositive = delta > 0;
+  const cls = isPositive ? "ok" : delta < 0 ? "err" : "";
+  const sign = isPositive ? "+" : "";
+  const pct = deltaPct != null ? ` <span class="muted">(${sign}${deltaPct}%)</span>` : "";
+  return `<span class="badge ${cls}"><span class="ico">${isPositive ? "▲" : delta < 0 ? "▼" : "●"}</span><span>${sign}${delta}</span></span>${pct}`;
+}
+
+async function loadCompare() {
+  try {
+    const headers = {};
+    if (compareEtag) headers["If-None-Match"] = compareEtag;
+    const res = await fetch(`/api/compare?a=${encodeURIComponent(compareIdA)}&b=${encodeURIComponent(compareIdB)}`, { headers });
+    if (res.status === 304) {
+      flashDot("c-dot");
+      scheduleCompare();
+      return;
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    compareEtag = res.headers.get("ETag");
+    const data = await res.json();
+    renderCompare(data);
+    flashDot("c-dot");
+  } catch (err) {
+    $("#c-metrics-body").innerHTML = `<div class="errbox">Не удалось загрузить сравнение: ${esc(err.message)}</div>`;
+  }
+  scheduleCompare();
+}
+function scheduleCompare() {
+  if (document.visibilityState !== "visible" || comparePaused) return;
+  clearTimeout(compareTimer);
+  compareTimer = setTimeout(loadCompare, POLL_MS);
+}
+
+function renderCompare(data) {
+  $("#c-title").textContent = `Сравнение: ${esc(data.a.run_id)} → ${esc(data.b.run_id)}`;
+  renderCompareMetrics(data.metrics);
+  renderCompareTotals(data.totals);
+  renderCompareStages(data.stages);
+  renderCompareTrace(data.trace);
+}
+
+function renderCompareMetrics(metrics) {
+  const body = $("#c-metrics-body");
+  if (!metrics || Object.keys(metrics).length === 0) {
+    body.innerHTML = '<div class="empty">метрик нет</div>';
+    return;
+  }
+  const pct = (v) => v == null ? "не измерено" : `${Math.round(v * 100)}%`;
+  const minutes = (v) => v == null ? "не измерено" : `${Number(v).toFixed(1)} мин`;
+  const usd = (v) => v == null ? "не измерено" : `$${Number(v).toFixed(2)}`;
+  const fmt = {
+    first_pass_rate: pct,
+    rework_rate: pct,
+    escaped_defect_rate: pct,
+    cycle_time_p50_minutes: minutes,
+    cycle_time_p90_minutes: minutes,
+    cost_per_artifact_usd: usd,
+    verification_coverage: pct,
+    traceability_coverage: pct,
+  };
+  const labels = {
+    first_pass_rate: "первый проход",
+    rework_rate: "переделки",
+    escaped_defect_rate: "утекшие дефекты",
+    cycle_time_p50_minutes: "время цикла p50",
+    cycle_time_p90_minutes: "время цикла p90",
+    cost_per_artifact_usd: "цена артефакта",
+    verification_coverage: "покрытие проверкой",
+    traceability_coverage: "покрытие трассировкой",
+  };
+  body.innerHTML = `<div class="stats">${Object.entries(metrics).map(([key, d]) => {
+    const a = d.a;
+    const b = d.b;
+    const delta = d.delta;
+    const deltaPct = d.delta_pct;
+    const valueA = fmt[key] ? fmt[key](a) : (a == null ? "не измерено" : a);
+    const valueB = fmt[key] ? fmt[key](b) : (b == null ? "не измерено" : b);
+    return `<div class="stat"><div class="k">${esc(labels[key] || key)}</div>
+      <div class="v"><span class="mono">${esc(valueA)}</span> → <span class="mono">${esc(valueB)}</span> ${deltaBadge(delta, deltaPct)}</div></div>`;
+  }).join("")}</div>`;
+}
+
+function renderCompareTotals(totals) {
+  const body = $("#c-totals-body");
+  if (!totals || Object.keys(totals).length === 0) {
+    body.innerHTML = '<div class="empty">итогов нет</div>';
+    return;
+  }
+  const fmt = {
+    tokens: (v) => num(v),
+    seconds: (v) => secondsLabel(v),
+    usd: (v) => v == null || v === 0 ? "не измерено" : `$${Number(v).toFixed(4)}`,
+    api_calls: (v) => num(v),
+    steps: (v) => num(v),
+  };
+  const labels = {
+    tokens: "токены",
+    seconds: "секунды",
+    usd: "USD",
+    api_calls: "API-вызовов",
+    steps: "шагов",
+  };
+  body.innerHTML = `<div class="stats">${Object.entries(totals).map(([key, d]) => {
+    const a = d.a;
+    const b = d.b;
+    const delta = d.delta;
+    const deltaPct = d.delta_pct;
+    const valueA = fmt[key] ? fmt[key](a) : (a == null ? "не измерено" : a);
+    const valueB = fmt[key] ? fmt[key](b) : (b == null ? "не измерено" : b);
+    return `<div class="stat"><div class="k">${esc(labels[key] || key)}</div>
+      <div class="v"><span class="mono">${esc(valueA)}</span> → <span class="mono">${esc(valueB)}</span> ${deltaBadge(delta, deltaPct)}</div></div>`;
+  }).join("")}</div>`;
+}
+
+function renderCompareStages(stages) {
+  const body = $("#c-stages-body");
+  if (!stages || !stages.length) {
+    body.innerHTML = '<div class="empty">стадий нет</div>';
+    return;
+  }
+  body.innerHTML = `<table><thead><tr>
+    <th>Стадия</th><th>Статус A</th><th>Статус B</th><th>Гейт A</th><th>Гейт B</th>
+    <th class="num">Токены A</th><th class="num">Токены B</th><th class="num">Δ токены</th>
+    <th class="num">Секунды A</th><th class="num">Секунды B</th><th class="num">Δ сек</th>
+    <th class="num">Попытки A</th><th class="num">Попытки B</th><th class="num">Δ попыток</th>
+  </tr></thead><tbody>
+  ${stages.map((s) => {
+    const aStatus = s.a_status || "—";
+    const bStatus = s.b_status || "—";
+    const aGate = s.a_gate_status || "—";
+    const bGate = s.b_gate_status || "—";
+    const aTokens = s.a_tokens;
+    const bTokens = s.b_tokens;
+    const aSec = s.a_seconds;
+    const bSec = s.b_seconds;
+    const aAtt = s.a_attempts;
+    const bAtt = s.b_attempts;
+    const dTokens = s.delta_tokens;
+    const dTokensPct = s.delta_tokens_pct;
+    const dSec = s.delta_seconds;
+    const dSecPct = s.delta_seconds_pct;
+    const dAtt = s.delta_attempts;
+    const dAttPct = s.delta_attempts_pct;
+    const aSt = STATUS[aStatus] || { ico: "○", cls: "idle" };
+    const bSt = STATUS[bStatus] || { ico: "○", cls: "idle" };
+    return `<tr>
+      <td class="mono">${esc(s.stage_id)}</td>
+      <td><span class="badge ${aSt.cls}"><span class="ico">${aSt.ico}</span><span>${esc(aStatus)}</span></span></td>
+      <td><span class="badge ${bSt.cls}"><span class="ico">${bSt.ico}</span><span>${esc(bStatus)}</span></span></td>
+      <td class="muted">${esc(aGate)}</td>
+      <td class="muted">${esc(bGate)}</td>
+      <td class="num">${aTokens == null ? '<span class="muted">—</span>' : num(aTokens)}</td>
+      <td class="num">${bTokens == null ? '<span class="muted">—</span>' : num(bTokens)}</td>
+      <td class="num">${deltaBadge(dTokens, dTokensPct)}</td>
+      <td class="num">${aSec == null ? '<span class="muted">—</span>' : Number(aSec).toFixed(1)}</td>
+      <td class="num">${bSec == null ? '<span class="muted">—</span>' : Number(bSec).toFixed(1)}</td>
+      <td class="num">${deltaBadge(dSec, dSecPct)}</td>
+      <td class="num">${aAtt == null ? '<span class="muted">—</span>' : aAtt}</td>
+      <td class="num">${bAtt == null ? '<span class="muted">—</span>' : bAtt}</td>
+      <td class="num">${deltaBadge(dAtt, dAttPct)}</td>
+    </tr>`;
+  }).join("")}
+  </tbody></table>`;
+}
+
+function renderCompareTrace(trace) {
+  const body = $("#c-trace-body");
+  const a = trace.a || {};
+  const b = trace.b || {};
+  const aCov = a.coverage == null ? "—" : `${Math.round(a.coverage * 100)}%`;
+  const bCov = b.coverage == null ? "—" : `${Math.round(b.coverage * 100)}%`;
+  const dCov = trace.delta_coverage;
+  const dCovPct = trace.delta_coverage_pct;
+  const dCovered = trace.delta_covered;
+  const dCoveredPct = trace.delta_covered_pct;
+  const dTotal = trace.delta_total;
+  const dTotalPct = trace.delta_total_pct;
+  body.innerHTML = `
+    <div class="cover" style="margin-bottom:16px">
+      <div class="muted" style="font-size:11px;margin-bottom:4px">покрытие REQ</div>
+      <div style="display:flex;gap:24px;align-items:center">
+        <div><div class="muted" style="font-size:11px">A</div><div class="big">${esc(aCov)}</div></div>
+        <div class="bar" style="flex:1"><span style="width:${a.coverage ? (a.coverage * 100) : 0}%"></span></div>
+        <div><div class="muted" style="font-size:11px">B</div><div class="big">${esc(bCov)}</div></div>
+        <div class="muted" style="font-size:12px">${deltaBadge(dCov, dCovPct)}</div>
+      </div>
+      <div class="muted" style="margin-top:4px">${esc(a.covered || 0)} из ${esc(a.total || 0)} → ${esc(b.covered || 0)} из ${esc(b.total || 0)} ${deltaBadge(dCovered, dCoveredPct)} · всего ${deltaBadge(dTotal, dTotalPct)}</div>
+    </div>
+    <div class="muted" style="font-size:11px;margin-bottom:8px">непокрытые A: ${(a.uncovered || []).map((r) => `<span class="tag err">${esc(r)}</span>`).join(" ") || "—"}</div>
+    <div class="muted" style="font-size:11px">непокрытые B: ${(b.uncovered || []).map((r) => `<span class="tag err">${esc(r)}</span>`).join(" ") || "—"}</div>
+  `;
+}
+
 // ---------------- boot ----------------
 function boot() {
   const params = new URLSearchParams(location.search);
   runId = params.get("run");
+  const compare = params.get("compare");
+  if (compare) {
+    const [a, b] = compare.split(",");
+    if (a && b) {
+      compareIdA = a;
+      compareIdB = b;
+      $("#view-compare").hidden = false;
+      loadCompare();
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible" && !comparePaused) loadCompare();
+      });
+      return;
+    }
+  }
   if (!runId) {
     $("#view-runs").hidden = false;
     loadRuns();
@@ -1576,3 +1826,52 @@ boot();
   <div class="drawer-body" id="drawer-body"></div>
 </div>
 <div id="drawer-overlay" class="drawer-overlay"></div>
+
+<section id="view-compare" hidden>
+  <header class="topbar">
+    <div class="brand">
+      <div class="project" id="c-title">Сравнение прогонов</div>
+      <div class="meta"><a href="/" id="c-back" class="back">все прогоны</a></div>
+    </div>
+    <div class="status-cluster">
+      <span class="live"><i class="dot" id="c-dot"></i><span id="c-live">загрузка</span></span>
+    </div>
+    <div class="toolbar">
+      <button class="btn" id="c-pause" aria-pressed="false">Пауза</button>
+    </div>
+  </header>
+  <div class="grid" id="c-grid" style="padding: 16px 24px 40px;">
+    <div class="panel" data-panel="cp1" style="grid-column: span 6; grid-row: span 3;">
+      <div class="panel-head">
+        <span class="grip" aria-hidden="true">⠿</span>
+        <h2>Метрики (A → B)</h2>
+        <span class="head-badge">дельта</span>
+      </div>
+      <div class="panel-body" id="c-metrics-body"><div class="empty">загрузка…</div></div>
+    </div>
+    <div class="panel" data-panel="cp2" style="grid-column: span 6; grid-row: span 3;">
+      <div class="panel-head">
+        <span class="grip" aria-hidden="true">⠿</span>
+        <h2>Итоги (A → B)</h2>
+        <span class="head-badge">usage</span>
+      </div>
+      <div class="panel-body" id="c-totals-body"><div class="empty">загрузка…</div></div>
+    </div>
+    <div class="panel" data-panel="cp3" style="grid-column: span 12; grid-row: span 4;">
+      <div class="panel-head">
+        <span class="grip" aria-hidden="true">⠿</span>
+        <h2>Стадии (A → B)</h2>
+        <span class="head-badge">13 стадий</span>
+      </div>
+      <div class="panel-body" id="c-stages-body"><div class="empty">загрузка…</div></div>
+    </div>
+    <div class="panel" data-panel="cp4" style="grid-column: span 12; grid-row: span 4;">
+      <div class="panel-head">
+        <span class="grip" aria-hidden="true">⠿</span>
+        <h2>Трассировка REQ (A → B)</h2>
+        <span class="head-badge">coverage delta</span>
+      </div>
+      <div class="panel-body" id="c-trace-body"><div class="empty">загрузка…</div></div>
+    </div>
+  </div>
+</section>

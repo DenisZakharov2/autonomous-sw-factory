@@ -3,6 +3,21 @@
 All notable changes are recorded here. From `1.0.0` the project follows
 Semantic Versioning.
 
+## [1.0.5] — 2026-11-02
+
+Журнал на экране был «хвостом 50» без фильтров и без счётчика; список прогонов не умел искать и сортировать; клик по стадии/задаче/событию не давал деталей; экспорт CSV игнорировал фильтры экрана. Версия 1.0.4 поставила панель метрик, но оставила эти пробелы.
+
+### Added
+
+- **Фильтры журнала (verdict, stage, event_type, limit 10–200).** Состояние в URL (`?verdict=&stage=&event_type=&limit=`), переживает reload, передаётся в poll. ETag включает хэш фильтров (`_filters_hash`). Кэш по `(stamp blackbox.jsonl, фильтры, limit)`. Блок journal: `events/total/matched/shown/limit/filters/event_types`.
+- **Честный счётчик.** «показано / всего / отфильтровано». Кнопка «Сброс» возвращает дефолт.
+- **Поиск и сортировка списка прогонов.** Клиентский `q` и сортировка по заголовкам (`?q=&sort=&dir=`) без перезагрузки.
+- **Drawer деталей (420 px fixed right).** Открывается по клику на стадию/задачу/событие; deep link `?event=<seq>`; Esc/×/фон закрывают и возвращают фокус.
+- **Эндпоинт события.** `GET /api/runs/<id>/events/<seq>` — полное событие (seq int>0 → 400; нет → 404), кэш по штампу журнала.
+- **Экспорт journal.csv с фильтрами.** `/api/runs/<id>/export/journal.csv` принимает те же фильтры; `limit` — любой положительный (совместимость), при фильтрах без `limit` — `JOURNAL_LIMIT_DEFAULT`. Формат: UTF-8 BOM, `;`, CRLF.
+- **Payload расширения:** `stages` += `gate_evidence`, `gate_decided_by`, `gate_decided_at`, `gate_approver`; `tasks` += `artifacts`.
+- **Тесты:** 41 тест в `tests/test_ui.py`, включая `test_journal_filter_hides_fail_outside_the_tail` (журнал 117 событий, FAIL вне хвоста 50).
+
 ## [1.0.4] — 2026-11-01
 
 Метрики прогона считались на каждый холодный запрос, но на экране была видна

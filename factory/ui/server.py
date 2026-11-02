@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from ..errors import FactoryError
 from . import data, export
+from .data import RunNotFound, FilterError, compare_runs, compare_revision
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8420
@@ -90,6 +91,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return self._runs()
         if path == "/api/export/runs.csv":
             return self._export_runs()
+        if path == "/api/compare":
+            return self._compare(query)
         segments = [segment for segment in path.split("/") if segment]
         if len(segments) >= 3 and segments[0] == "api" and segments[1] == "runs":
             run_id = segments[2]
@@ -196,6 +199,40 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 {"error": f"event seq {seq} not found", "run_id": run_id, "seq": seq},
             )
         self._json(HTTPStatus.OK, event)
+
+    def _compare(self, query: dict[str, list[str]]) -> None:
+        run_a = (query.get("a") or [""])[0].strip()
+        run_b = (query.get("b") or [""])[0].strip()
+        if not run_a or not run_b:
+            return self._json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "both 'a' and 'b' query parameters are required"},
+            )
+        if run_a == run_b:
+            return self._json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "run ids must differ"},
+            )
+        try:
+            etag = compare_revision(run_a, run_b, self.runs_dir)
+        except RunNotFound as exc:
+            return self._json(HTTPStatus.NOT_FOUND, {"error": str(exc)})
+        except FactoryError as exc:
+            return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
+        if etag and self._not_modified(etag):
+            return self._not_modified_response(etag)
+        try:
+            payload = compare_runs(run_a, run_b, self.runs_dir)
+        except RunNotFound as exc:
+            return self._json(HTTPStatus.NOT_FOUND, {"error": str(exc)})
+        except ValueError as exc:
+            return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+        except FactoryError as exc:
+            return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
+        etag = compare_revision(run_a, run_b, self.runs_dir)
+        if etag and self._not_modified(etag):
+            return self._not_modified_response(etag)
+        self._json(HTTPStatus.OK, payload, etag=etag)
 
     def _chain(self, run_id: str, query: dict[str, list[str]]) -> None:
         refresh = (query.get("refresh") or [""])[0] not in ("", "0", "false")

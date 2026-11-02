@@ -6,7 +6,7 @@
 
 ---
 
-**Version 1.0.4.**
+**Version 1.0.5.**
 
 ## See a run
 
@@ -234,6 +234,20 @@ factory ui --port 0                   # a free port; the address is printed
   cached by `(mtime, size)`. `compute_metrics` runs in every cold payload of a run and is cached by
   `state.json`, the journal, requirements, acceptance, traceability and tests; the "Metrics" panel
   shows all nine values, and `null` reads "not measured".
+- **Journal filters.** The journal panel accepts three exact filters (`verdict`, `stage`, `event_type`)
+  and `limit` (10–200, default 50). Filter state is preserved in the URL
+  (`?verdict=&stage=&event_type=&limit=`), survives reload, and is passed to polling.
+  The counter shows "shown / total / filtered". A "Reset" button restores defaults.
+- **Run list search and sort.** Client-side search by `q` and sort by headers
+  (`?q=&sort=&dir=`) work without a page reload.
+- **Detail drawer (420 px).** Clicking a stage, task, or event opens a right-side drawer
+  with details; deep link `?event=<seq>` restores the open drawer. Esc, the close button, and
+  clicking the backdrop close the drawer and return focus.
+- **Event endpoint.** `GET /api/runs/<id>/events/<seq>` returns the full journal event
+  (validation `seq>0`, 404 if missing); cached by journal stamp.
+- **Export with filters.** `/api/runs/<id>/export/journal.csv` accepts the same filters
+  as the journal panel; `limit` in export is any positive integer (compatibility), and when
+  filters are present without `limit`, `JOURNAL_LIMIT_DEFAULT` is used. Format: UTF-8 BOM, `;`, CRLF.
 
 ## Quarantine
 

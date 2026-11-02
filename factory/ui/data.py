@@ -826,6 +826,37 @@ def timeseries_data(run_id: str, root: str | Path | None = None,
     return _timeseries(run_path, metrics, bucket)
 
 
+def compare_timeseries_revision(run_id_a: str, run_id_b: str, root: str | Path | None = None,
+                                metrics: list[str] | None = None, bucket: str = "stage") -> str | None:
+    """ETag for /api/compare/timeseries: two timeseries revisions + metrics."""
+    rev_a = timeseries_revision(run_id_a, root, bucket)
+    rev_b = timeseries_revision(run_id_b, root, bucket)
+    if not rev_a or not rev_b:
+        return None
+    metrics_key = ",".join(metrics or TIMESERIES_METRICS)
+    return hashlib.sha1(f"{rev_a}|{rev_b}|{metrics_key}".encode("utf-8")).hexdigest()[:20]
+
+
+def compare_timeseries_data(run_id_a: str, run_id_b: str, root: str | Path | None = None,
+                            metrics: list[str] | None = None,
+                            bucket: str = "stage") -> dict[str, Any]:
+    """Time-series points of two runs for the compare overlay.
+
+    Raises ``RunNotFound`` if either run does not exist, or ``ValueError`` if
+    ``run_id_a == run_id_b``.
+    """
+    if run_id_a == run_id_b:
+        raise ValueError("run ids must differ")
+    series_a = timeseries_data(run_id_a, root, metrics, bucket)
+    series_b = timeseries_data(run_id_b, root, metrics, bucket)
+    return {
+        "a": {"run_id": run_id_a, "points": series_a["points"]},
+        "b": {"run_id": run_id_b, "points": series_b["points"]},
+        "metrics": series_a["metrics"],
+        "bucket": series_a["bucket"],
+    }
+
+
 def run_payload(run_id: str, root: str | Path | None = None,
                 filters: dict[str, str] | None = None,
                 limit: int = JOURNAL_LIMIT_DEFAULT) -> dict[str, Any]:

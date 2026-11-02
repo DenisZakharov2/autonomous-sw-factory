@@ -368,6 +368,20 @@ const META = {
   p8: { title: "Метрики", badge: "9" },
   p9: { title: "Time-series", badge: "4" }
 };
+const TS_METRIC_LABELS = {
+  tokens: "Токены",
+  seconds: "Секунды",
+  usd: "USD",
+  api_calls: "API-вызовов"
+};
+const TS_METRIC_COLORS = {
+  tokens: "#6366F1",
+  seconds: "#10B981",
+  usd: "#F59E0B",
+  api_calls: "#EF4444"
+};
+// Compare overlay: fixed distinct colors per run (A indigo, B amber).
+const CMP_SERIES_COLORS = ["#6366F1", "#F59E0B"];
 const PRESETS = {
   operator: { label: "Оператор", order: ["p2", "p3", "p4", "p7"],
     size: { p2: [12, 3], p3: [4, 4], p4: [8, 4], p7: [12, 4] } },
@@ -889,19 +903,9 @@ function renderTimeseries(data) {
     byMetric[p.metric].push(p);
   }
 
-  // Metric labels and colors
-  const metricLabels = {
-    tokens: "Токены",
-    seconds: "Секунды",
-    usd: "USD",
-    api_calls: "API-вызовов"
-  };
-  const metricColors = {
-    tokens: "#6366F1",
-    seconds: "#10B981",
-    usd: "#F59E0B",
-    api_calls: "#EF4444"
-  };
+  // Metric labels and colors (shared with the compare overlay)
+  const metricLabels = TS_METRIC_LABELS;
+  const metricColors = TS_METRIC_COLORS;
 
   // Get current metric and bucket from URL
   const params = new URLSearchParams(location.search);
@@ -932,13 +936,15 @@ function renderTimeseries(data) {
         <select id="ts-bucket" class="input" style="width:auto">${bucketHtml}</select>
       </div>
     </div>
-    ${chartHtml}
+    ${canvasHtml}
     ${chartData.length === 0 ? '<div class="empty" style="margin-top:8px">нет точек для этого метрика/bucket</div>' : ""}
   `;
 
   // Draw chart
   const canvas = document.getElementById("ts-chart");
-  if (canvas && chartData.length > 0) drawChart(canvas, chartData, currentMetric, metricColors[currentMetric]);
+  if (canvas && chartData.length > 0) {
+    drawChart(canvas, [{ name: currentMetric, points: chartData, color: metricColors[currentMetric] }], currentMetric);
+  }
 
   // Wire tabs
   for (const btn of body.querySelectorAll("[data-ts-metric]")) {
@@ -964,7 +970,7 @@ function renderTimeseries(data) {
   }
 }
 
-function drawChart(canvas, points, metric, color) {
+function drawChart(canvas, seriesList, metric) {
   const ctx = canvas.getContext("2d");
   const dpr = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
@@ -978,38 +984,31 @@ function drawChart(canvas, points, metric, color) {
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
 
-  if (points.length < 2) {
-    // Single point or empty - just show a dot
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.arc(padding.left, height - padding.bottom, 4, 0, Math.PI * 2);
-    ctx.fill();
-    return;
-  }
-
-  // Extract values and timestamps
-  const values = points.map(p => p.value);
-  const timestamps = points.map(p => p.t);
-  const minVal = Math.min(...values);
-  const maxVal = Math.max(...values);
-  const valRange = maxVal - minVal || 1;
-
-  // Parse timestamps for X axis
-  const times = timestamps.map(t => {
-    try {
-      return new Date(t).getTime();
-    } catch {
-      return Date.now();
-    }
+  // Per-series relative X (seconds since the series' first point) on a shared
+  // scale: runs started at different wall-clock times overlay honestly.
+  const allValues = [];
+  let maxRel = 0;
+  const series = seriesList.map(s => {
+    const points = s.points || [];
+    const times = points.map(p => {
+      const t = new Date(p.t).getTime();
+      return Number.isNaN(t) ? 0 : t;
+    });
+    const t0 = times.length ? Math.min(...times) : 0;
+    const rel = times.map(t => (t - t0) / 1000);
+    if (rel.length) maxRel = Math.max(maxRel, ...rel);
+    for (const p of points) allValues.push(p.value);
+    return { color: s.color, points, rel };
   });
-  const minTime = Math.min(...times);
-  const maxTime = Math.max(...times);
-  const timeRange = maxTime - minTime || 1;
+  const relRange = maxRel || 1;
+  const minVal = allValues.length ? Math.min(...allValues) : 0;
+  const maxVal = allValues.length ? Math.max(...allValues) : 1;
+  const valRange = maxVal - minVal || 1;
 
   // Clear
   ctx.clearRect(0, 0, width, height);
 
-  // Grid lines
+  // Grid lines + Y labels
   ctx.strokeStyle = "#232837";
   ctx.lineWidth = 1;
   for (let i = 0; i <= 4; i++) {
@@ -1018,7 +1017,6 @@ function drawChart(canvas, points, metric, color) {
     ctx.moveTo(padding.left, y);
     ctx.lineTo(width - padding.right, y);
     ctx.stroke();
-    // Y axis labels
     const val = maxVal - (valRange * i) / 4;
     ctx.fillStyle = "#8B91A5";
     ctx.font = "10px var(--mono)";
@@ -1026,40 +1024,37 @@ function drawChart(canvas, points, metric, color) {
     ctx.fillText(val >= 1000 ? (val/1000).toFixed(1) + "k" : val.toFixed(val < 1 ? 2 : 0), padding.left - 8, y + 3);
   }
 
-  // X axis labels (time)
+  // X axis labels (relative time)
   ctx.fillStyle = "#8B91A5";
   ctx.font = "10px var(--mono)";
   ctx.textAlign = "center";
   for (let i = 0; i <= 4; i++) {
     const x = padding.left + (plotWidth * i) / 4;
-    const time = minTime + (timeRange * i) / 4;
-    const date = new Date(time);
-    const label = date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
-    ctx.fillText(label, x, height - padding.bottom + 18);
+    ctx.fillText("+" + secondsLabel((relRange * i) / 4), x, height - padding.bottom + 18);
   }
 
-  // Draw line
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 2;
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  ctx.beginPath();
-  for (let i = 0; i < points.length; i++) {
-    const x = padding.left + ((times[i] - minTime) / timeRange) * plotWidth;
-    const y = padding.top + plotHeight - ((values[i] - minVal) / valRange) * plotHeight;
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  }
-  ctx.stroke();
-
-  // Draw points
-  ctx.fillStyle = color;
-  for (let i = 0; i < points.length; i++) {
-    const x = padding.left + ((times[i] - minTime) / timeRange) * plotWidth;
-    const y = padding.top + plotHeight - ((values[i] - minVal) / valRange) * plotHeight;
+  for (const s of series) {
+    if (!s.points.length) continue;
+    const xAt = (i) => padding.left + (s.rel[i] / relRange) * plotWidth;
+    const yAt = (i) => padding.top + plotHeight - ((s.points[i].value - minVal) / valRange) * plotHeight;
+    // Line
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
     ctx.beginPath();
-    ctx.arc(x, y, 3, 0, Math.PI * 2);
-    ctx.fill();
+    for (let i = 0; i < s.points.length; i++) {
+      if (i === 0) ctx.moveTo(xAt(i), yAt(i));
+      else ctx.lineTo(xAt(i), yAt(i));
+    }
+    ctx.stroke();
+    // Points
+    ctx.fillStyle = s.color;
+    for (let i = 0; i < s.points.length; i++) {
+      ctx.beginPath();
+      ctx.arc(xAt(i), yAt(i), 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   // Metric label
@@ -1529,7 +1524,9 @@ function editionWiring() {
 
 function panelWiring() {
   const grid = $("#grid");
-  for (const panel of document.querySelectorAll(".panel")) {
+  // Run-view panels only: the compare view ships static .panel markup without
+  // hide/settings controls, and it has no layout of its own.
+  for (const panel of grid.querySelectorAll(".panel")) {
     const id = panel.dataset.panel;
     const header = panel.querySelector(".panel-head");
     header.addEventListener("dragstart", (ev) => {
@@ -1678,6 +1675,7 @@ async function loadCompare() {
     const res = await fetch(`/api/compare?a=${encodeURIComponent(compareIdA)}&b=${encodeURIComponent(compareIdB)}`, { headers });
     if (res.status === 304) {
       flashDot("c-dot");
+      loadCompareTimeseries();
       scheduleCompare();
       return;
     }
@@ -1689,6 +1687,7 @@ async function loadCompare() {
   } catch (err) {
     $("#c-metrics-body").innerHTML = `<div class="errbox">Не удалось загрузить сравнение: ${esc(err.message)}</div>`;
   }
+  loadCompareTimeseries();
   scheduleCompare();
 }
 function scheduleCompare() {
@@ -1855,6 +1854,92 @@ function renderCompareTrace(trace) {
     <div class="muted" style="font-size:11px;margin-bottom:8px">непокрытые A: ${(a.uncovered || []).map((r) => `<span class="tag err">${esc(r)}</span>`).join(" ") || "—"}</div>
     <div class="muted" style="font-size:11px">непокрытые B: ${(b.uncovered || []).map((r) => `<span class="tag err">${esc(r)}</span>`).join(" ") || "—"}</div>
   `;
+}
+
+// ---------------- compare timeseries ----------------
+let compareTsEtag = null;
+
+async function loadCompareTimeseries() {
+  try {
+    const headers = {};
+    if (compareTsEtag) headers["If-None-Match"] = compareTsEtag;
+    const params = new URLSearchParams(location.search);
+    const bucket = params.get("bucket") || "stage";
+    const url = `/api/compare/timeseries?a=${encodeURIComponent(compareIdA)}&b=${encodeURIComponent(compareIdB)}` +
+      `&metrics=tokens,seconds,usd,api_calls&bucket=${encodeURIComponent(bucket)}`;
+    const res = await fetch(url, { headers });
+    if (res.status === 304) return;
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    compareTsEtag = res.headers.get("ETag");
+    renderCompareTimeseries(await res.json());
+  } catch (err) {
+    $("#c-ts-body").innerHTML = `<div class="errbox">Не удалось загрузить time-series: ${esc(err.message)}</div>`;
+  }
+}
+
+function renderCompareTimeseries(data) {
+  const body = $("#c-ts-body");
+  if (!data || !data.a || !data.b) {
+    body.innerHTML = '<div class="empty">time-series данных нет</div>';
+    return;
+  }
+  const metrics = data.metrics || ["tokens", "seconds", "usd", "api_calls"];
+  const bucket = data.bucket || "stage";
+  const params = new URLSearchParams(location.search);
+  let currentMetric = params.get("ts") || metrics[0];
+  if (!metrics.includes(currentMetric)) currentMetric = metrics[0];
+
+  const pick = (run) => (run.points || []).filter(p => p.metric === currentMetric);
+  const series = [
+    { name: data.a.run_id, points: pick(data.a), color: CMP_SERIES_COLORS[0] },
+    { name: data.b.run_id, points: pick(data.b), color: CMP_SERIES_COLORS[1] },
+  ];
+  const total = series[0].points.length + series[1].points.length;
+
+  const tabsHtml = metrics.map(m => `
+    <button class="btn${m === currentMetric ? " primary" : ""}" data-cmp-ts-metric="${m}" style="flex:1">${TS_METRIC_LABELS[m] || m}</button>
+  `).join("");
+  const buckets = ["stage", "event", "minute"];
+  const bucketHtml = buckets.map(b => `
+    <option value="${b}"${b === bucket ? " selected" : ""}>${b}</option>
+  `).join("");
+  const legendHtml = series.map(s =>
+    `<span class="muted" style="font-size:11px"><span style="color:${s.color}">■</span> ${esc(s.name)}</span>`
+  ).join(" · ");
+
+  body.innerHTML = `
+    <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+      <div style="display:flex;gap:4px;flex:1;min-width:200px">${tabsHtml}</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="muted" style="font-size:11px">Bucket:</span>
+        <select id="c-ts-bucket" class="input" style="width:auto">${bucketHtml}</select>
+      </div>
+    </div>
+    <div style="display:flex;gap:12px;margin-bottom:4px">${legendHtml}</div>
+    <canvas id="c-ts-chart" width="600" height="220" style="width:100%;height:220px;display:block"></canvas>
+    ${total === 0 ? '<div class="empty" style="margin-top:8px">нет точек для этого метрика/bucket</div>' : ""}
+  `;
+
+  const canvas = document.getElementById("c-ts-chart");
+  if (canvas && total > 0) drawChart(canvas, series, currentMetric);
+
+  for (const btn of body.querySelectorAll("[data-cmp-ts-metric]")) {
+    btn.addEventListener("click", () => {
+      const params = new URLSearchParams(location.search);
+      params.set("ts", btn.dataset.cmpTsMetric);
+      history.replaceState(null, "", "?" + params.toString());
+      renderCompareTimeseries(data);
+    });
+  }
+  const bucketSelect = body.querySelector("#c-ts-bucket");
+  if (bucketSelect) {
+    bucketSelect.addEventListener("change", () => {
+      const params = new URLSearchParams(location.search);
+      params.set("bucket", bucketSelect.value);
+      history.replaceState(null, "", "?" + params.toString());
+      loadCompareTimeseries();  // the bucket is aggregated server-side
+    });
+  }
 }
 
 // ---------------- boot ----------------
@@ -2051,7 +2136,9 @@ setTimeout(() => {
 }, 500);
 
 
-boot();
+// #view-compare and the drawer markup live after this script in the document,
+// so boot has to wait for the parser to reach them.
+document.addEventListener("DOMContentLoaded", boot);
 </script>
 <div id="drawer" class="drawer" hidden>
   <div class="drawer-head">
@@ -2107,6 +2194,14 @@ boot();
         <span class="head-badge">coverage delta</span>
       </div>
       <div class="panel-body" id="c-trace-body"><div class="empty">загрузка…</div></div>
+    </div>
+    <div class="panel" data-panel="cp5" style="grid-column: span 12; grid-row: span 4;">
+      <div class="panel-head">
+        <span class="grip" aria-hidden="true">⠿</span>
+        <h2>Time-series (A vs B)</h2>
+        <span class="head-badge">оверлей</span>
+      </div>
+      <div class="panel-body" id="c-ts-body"><div class="empty">загрузка…</div></div>
     </div>
   </div>
 </section>

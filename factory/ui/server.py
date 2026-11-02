@@ -100,6 +100,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return self._export_runs()
         if path == "/api/compare":
             return self._compare(query)
+        if path == "/api/compare/timeseries":
+            return self._compare_timeseries(query)
         segments = [segment for segment in path.split("/") if segment]
         if len(segments) >= 3 and segments[0] == "api" and segments[1] == "runs":
             run_id = segments[2]
@@ -337,6 +339,44 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return self._not_modified_response(etag)
         self._json(HTTPStatus.OK, payload, etag=etag)
 
+    def _compare_timeseries(self, query: dict[str, list[str]]) -> None:
+        run_a = (query.get("a") or [""])[0].strip()
+        run_b = (query.get("b") or [""])[0].strip()
+        if not run_a or not run_b:
+            return self._json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "both 'a' and 'b' query parameters are required"},
+            )
+        if run_a == run_b:
+            return self._json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "run ids must differ"},
+            )
+        parsed = self._parse_timeseries_query(query)
+        if parsed is None:
+            return
+        metrics, bucket = parsed
+        try:
+            data.run_path(run_a, self.runs_dir)
+            data.run_path(run_b, self.runs_dir)
+        except data.RunNotFound as exc:
+            return self._json(HTTPStatus.NOT_FOUND, {"error": str(exc)})
+        etag = data.compare_timeseries_revision(run_a, run_b, self.runs_dir, metrics, bucket)
+        if etag and self._not_modified(etag):
+            return self._not_modified_response(etag)
+        try:
+            payload = data.compare_timeseries_data(run_a, run_b, self.runs_dir, metrics, bucket)
+        except data.RunNotFound as exc:
+            return self._json(HTTPStatus.NOT_FOUND, {"error": str(exc)})
+        except ValueError as exc:
+            return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+        except FactoryError as exc:
+            return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
+        etag = data.compare_timeseries_revision(run_a, run_b, self.runs_dir, metrics, bucket)
+        if etag and self._not_modified(etag):
+            return self._not_modified_response(etag)
+        self._json(HTTPStatus.OK, payload, etag=etag)
+
     def _chain(self, run_id: str, query: dict[str, list[str]]) -> None:
         refresh = (query.get("refresh") or [""])[0] not in ("", "0", "false")
         try:
@@ -349,29 +389,37 @@ class DashboardHandler(BaseHTTPRequestHandler):
             )
         self._json(HTTPStatus.OK, report)
 
-    def _timeseries(self, run_id: str, query: dict[str, list[str]]) -> None:
-        # Parse and validate metrics parameter
+    def _parse_timeseries_query(self, query: dict[str, list[str]]) -> tuple[list[str], str] | None:
+        """Validated ``(metrics, bucket)``; ``None`` after the 400 was written."""
         raw_metrics = (query.get("metrics") or [""])[0].strip()
         if not raw_metrics:
-            return self._json(
+            self._json(
                 HTTPStatus.BAD_REQUEST,
                 {"error": "metrics parameter is required", "allowed": list(TIMESERIES_METRICS)},
             )
+            return None
         metrics = [m.strip() for m in raw_metrics.split(",") if m.strip()]
         invalid_metrics = [m for m in metrics if m not in TIMESERIES_METRICS]
         if invalid_metrics:
-            return self._json(
+            self._json(
                 HTTPStatus.BAD_REQUEST,
                 {"error": f"unknown metric(s): {', '.join(invalid_metrics)}", "allowed": list(TIMESERIES_METRICS)},
             )
-
-        # Parse and validate bucket parameter
+            return None
         bucket = (query.get("bucket") or ["stage"])[0].strip()
         if bucket not in TIMESERIES_BUCKETS:
-            return self._json(
+            self._json(
                 HTTPStatus.BAD_REQUEST,
                 {"error": f"unknown bucket: {bucket!r}", "allowed": list(TIMESERIES_BUCKETS)},
             )
+            return None
+        return metrics, bucket
+
+    def _timeseries(self, run_id: str, query: dict[str, list[str]]) -> None:
+        parsed = self._parse_timeseries_query(query)
+        if parsed is None:
+            return
+        metrics, bucket = parsed
 
         # Validate run exists
         try:

@@ -898,6 +898,144 @@ def test_timeseries_panel_in_page():
     assert 'id="ts-bucket"' in text
 
 
+# -- M3: compare timeseries ---------------------------------------------------
+def test_compare_timeseries_requires_both_params(served):
+    base, _root, _run = served
+    status, _headers, body = get(base, "/api/compare/timeseries")
+    assert status == 400
+    assert "both 'a' and 'b'" in json.loads(body)["error"]
+    status, _headers, _body = get(base, "/api/compare/timeseries?a=run-01")
+    assert status == 400
+    status, _headers, _body = get(base, "/api/compare/timeseries?b=run-01")
+    assert status == 400
+
+
+def test_compare_timeseries_same_run_returns_400(served):
+    base, _root, _run = served
+    status, _headers, body = get(base, "/api/compare/timeseries?a=run-01&b=run-01&metrics=tokens")
+    assert status == 400
+    assert "differ" in json.loads(body)["error"]
+
+
+def test_compare_timeseries_requires_metrics(served):
+    base, root, _run = served
+    init_run("run-02", "nano", root=root)
+    status, _headers, body = get(base, "/api/compare/timeseries?a=run-01&b=run-02")
+    assert status == 400
+    payload = json.loads(body)
+    assert "metrics parameter is required" in payload["error"]
+    assert payload["allowed"]
+
+
+def test_compare_timeseries_rejects_unknown_metric(served):
+    base, root, _run = served
+    init_run("run-02", "nano", root=root)
+    status, _headers, body = get(base, "/api/compare/timeseries?a=run-01&b=run-02&metrics=bogus")
+    assert status == 400
+    payload = json.loads(body)
+    assert "unknown metric" in payload["error"]
+    assert payload["allowed"]
+
+
+def test_compare_timeseries_rejects_unknown_bucket(served):
+    base, root, _run = served
+    init_run("run-02", "nano", root=root)
+    status, _headers, body = get(base, "/api/compare/timeseries?a=run-01&b=run-02&metrics=tokens&bucket=bogus")
+    assert status == 400
+    payload = json.loads(body)
+    assert "unknown bucket" in payload["error"]
+    assert payload["allowed"]
+
+
+def test_compare_timeseries_unknown_run_returns_404(served):
+    base, _root, _run = served
+    status, _headers, _body = get(base, "/api/compare/timeseries?a=run-01&b=nope&metrics=tokens")
+    assert status == 404
+    status, _headers, _body = get(base, "/api/compare/timeseries?a=nope&b=run-01&metrics=tokens")
+    assert status == 404
+
+
+def _seed_stage_series(root, run_dir, suffix):
+    """Two stages of usage + journal so bucket=stage yields points."""
+    usage = run_dir / "runtime" / "usage.jsonl"
+    usage.parent.mkdir(parents=True, exist_ok=True)
+    usage.write_text(
+        "\n".join([
+            json.dumps({"stage": "s1_spec", "role": "01-smart-interviewer",
+                        "tokens_total": 100, "seconds": 4.5, "usd": 0.001, "api_calls": 1}),
+            json.dumps({"stage": "s2_architecture", "role": "02-independent-verifier",
+                        "tokens_total": 50, "seconds": 2.0, "usd": 0.0005, "api_calls": 1}),
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    journal = run_dir / "blackbox.jsonl"
+    events = [
+        {"seq": 1, "event_type": "INIT", "stage": "s_in", "timestamp_utc": "2024-01-01T00:00:00Z"},
+        {"seq": 2, "event_type": "STAGE_RESET", "stage": "s1_spec", "timestamp_utc": "2024-01-01T00:01:00Z"},
+        {"seq": 3, "event_type": "STAGE_RESET", "stage": "s2_architecture", "timestamp_utc": "2024-01-01T00:02:00Z"},
+    ]
+    journal.write_text("\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8")
+    state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    state["event_count"] = 3
+    state["last_event_hash"] = "abc" + suffix
+    state["updated_at"] = "2024-01-01T00:02:00Z"
+    (run_dir / "state.json").write_text(json.dumps(state), encoding="utf-8")
+
+
+def test_compare_timeseries_returns_both_series(served):
+    base, root, run_dir = served
+    _seed_stage_series(root, run_dir, "a")
+    run2_dir, _state2, _event2 = init_run("run-02", "nano", root=root)
+    _seed_stage_series(root, run2_dir, "b")
+    data.clear_cache()
+
+    status, headers, body = get(base, "/api/compare/timeseries?a=run-01&b=run-02&metrics=tokens,seconds&bucket=stage")
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["a"]["run_id"] == "run-01"
+    assert payload["b"]["run_id"] == "run-02"
+    assert payload["bucket"] == "stage"
+    assert set(payload["metrics"]) == {"tokens", "seconds"}
+    for side in ("a", "b"):
+        assert payload[side]["points"], f"side {side} has no points"
+        for p in payload[side]["points"]:
+            assert "t" in p
+            assert "stage" in p
+            assert "metric" in p
+            assert "value" in p
+    assert headers.get("ETag")
+
+    status, _headers, _body = get(
+        base,
+        "/api/compare/timeseries?a=run-01&b=run-02&metrics=tokens,seconds&bucket=stage",
+        headers={"If-None-Match": headers["ETag"]},
+    )
+    assert status == 304
+
+
+def test_compare_timeseries_etag_changes_with_bucket_and_metrics(served):
+    base, root, _run = served
+    init_run("run-02", "nano", root=root)
+    _status, headers, _body = get(base, "/api/compare/timeseries?a=run-01&b=run-02&metrics=tokens&bucket=stage")
+    etag_stage = headers["ETag"]
+    _status, headers, _body = get(base, "/api/compare/timeseries?a=run-01&b=run-02&metrics=tokens&bucket=event")
+    etag_event = headers["ETag"]
+    _status, headers, _body = get(base, "/api/compare/timeseries?a=run-01&b=run-02&metrics=usd&bucket=stage")
+    etag_usd = headers["ETag"]
+    assert etag_stage != etag_event
+    assert etag_stage != etag_usd
+
+
+def test_compare_timeseries_ui_elements_in_page():
+    text = page_text()
+    assert 'id="c-ts-body"' in text
+    assert 'data-panel="cp5"' in text
+    assert "/api/compare/timeseries" in text
+    assert "function loadCompareTimeseries" in text
+    assert "function renderCompareTimeseries" in text
+    assert "CMP_SERIES_COLORS" in text
+
+
 # -- SSE /events/stream -------------------------------------------------------
 def read_sse_frame(response, timeout: float = 10.0) -> dict[str, str]:
     """Read one SSE frame (fields until a blank line), skipping comments."""

@@ -129,7 +129,7 @@ Expected: `VERIFY OK`. The reference run has 33 events and 3/3 requirements cove
 - **38 templates and 13 JSON schemas**; templates never pre-fill `PASS`.
 - **A reference run** in `examples/nano-todo/`: 33 events, 2 tasks, 3 requirements, all gates closed, the product runs.
 
-The numbers: 4 modes (3 of them exercised on a real project), 5 reference examples, 381 tests, CI on Ubuntu, macOS and Windows (Python 3.10–3.13).
+The numbers: 4 modes (3 of them exercised on a real project), 5 reference examples, 390 tests, CI on Ubuntu, macOS and Windows (Python 3.10–3.13).
 
 ## Modes
 
@@ -221,6 +221,13 @@ factory ui --port 0                   # a free port; the address is printed
   also streamed over SSE: `GET /api/runs/<id>/events/stream` (resume via `?from_seq=` or the
   `Last-Event-ID` header). A stream frame only triggers an immediate poll, so ETag/304 stays the
   single data path and a broken stream degrades to plain 2 s polling.
+- **Run comparison.** The `?compare=<a>,<b>` view shows the deltas of metrics, totals, stages and
+  traceability; the "Time-series (A vs B)" panel overlays both runs' series on one canvas —
+  distinct colors, a legend, metric tabs and a bucket selector, state in the URL
+  (`?compare=<a>,<b>&ts=tokens&bucket=stage`). The X axis is relative (seconds from each series'
+  start, shared scale): two runs have no common wall-clock axis. Data:
+  `GET /api/compare/timeseries?a=&b=&metrics=&bucket=`, ETag from the two timeseries revisions
+  plus the metric list, `If-None-Match` → `304`.
 - **Free layout.** A 12-column grid with 56 px rows: drag a panel by its header, resize it by the
   corner (3-12 columns, 1-4 rows), hide panels from the catalogue, switch presets
   (Operator / FinOps / Audit / Custom) and export or import the layout as `.json`. The layout lives in

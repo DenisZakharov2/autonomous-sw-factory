@@ -357,7 +357,7 @@ tbody tr:hover{background:#151926}
 const POLL_MS = 2000;                     // §6: один опрос раз в 2 с, вкладка видима
 const STORAGE_KEY = "ftcs.layout.v1";
 const CUSTOM_KEY = "ftcs.layout.custom.v1";
-const PANEL_IDS = ["p2", "p3", "p4", "p5", "p6", "p7", "p8"];
+const PANEL_IDS = ["p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9"];
 const META = {
   p2: { title: "Стадии", badge: "13" },
   p3: { title: "Сейчас", badge: "" },
@@ -365,15 +365,16 @@ const META = {
   p5: { title: "Расход", badge: "usage.jsonl" },
   p6: { title: "Трассировка", badge: "REQ" },
   p7: { title: "Журнал", badge: "50" },
-  p8: { title: "Метрики", badge: "9" }
+  p8: { title: "Метрики", badge: "9" },
+  p9: { title: "Time-series", badge: "4" }
 };
 const PRESETS = {
   operator: { label: "Оператор", order: ["p2", "p3", "p4", "p7"],
     size: { p2: [12, 3], p3: [4, 4], p4: [8, 4], p7: [12, 4] } },
   finops: { label: "FinOps", order: ["p2", "p5"],
     size: { p2: [12, 3], p5: [12, 4] } },
-  audit: { label: "Аудит", order: ["p2", "p6", "p8", "p7"],
-    size: { p2: [12, 2], p6: [12, 4], p8: [6, 3], p7: [12, 4] } }
+  audit: { label: "Аудит", order: ["p2", "p6", "p8", "p9", "p7"],
+    size: { p2: [12, 2], p6: [12, 4], p8: [6, 3], p9: [6, 3], p7: [12, 4] } }
 };
 const STATUS = {
   accepted: { ico: "✓", label: "принято", cls: "ok" },
@@ -870,6 +871,204 @@ function renderMetrics(data) {
       <div class="v${label === "частые отказы" ? " multi" : ""}">${value}</div></div>`).join("")}</div>`;
 }
 
+function renderTimeseries(data) {
+  const body = panelNode("p9").querySelector(".panel-body");
+  if (!data.timeseries) {
+    body.innerHTML = '<div class="empty">time-series данных нет</div>';
+    return;
+  }
+  const ts = data.timeseries;
+  const points = ts.points || [];
+  const metrics = ts.metrics || ["tokens", "seconds", "usd", "api_calls"];
+  const bucket = ts.bucket || "stage";
+
+  // Group points by metric
+  const byMetric = {};
+  for (const p of points) {
+    if (!byMetric[p.metric]) byMetric[p.metric] = [];
+    byMetric[p.metric].push(p);
+  }
+
+  // Metric labels and colors
+  const metricLabels = {
+    tokens: "Токены",
+    seconds: "Секунды",
+    usd: "USD",
+    api_calls: "API-вызовов"
+  };
+  const metricColors = {
+    tokens: "#6366F1",
+    seconds: "#10B981",
+    usd: "#F59E0B",
+    api_calls: "#EF4444"
+  };
+
+  // Get current metric and bucket from URL
+  const params = new URLSearchParams(location.search);
+  let currentMetric = params.get("ts") || metrics[0];
+  if (!metrics.includes(currentMetric)) currentMetric = metrics[0];
+  let currentBucket = params.get("bucket") || bucket;
+
+  // Build tabs
+  const tabsHtml = metrics.map(m => `
+    <button class="btn${m === currentMetric ? " primary" : ""}" data-ts-metric="${m}" style="flex:1">${metricLabels[m] || m}</button>
+  `).join("");
+
+  // Build bucket selector
+  const buckets = ["stage", "event", "minute"];
+  const bucketHtml = buckets.map(b => `
+    <option value="${b}"${b === currentBucket ? " selected" : ""}>${b}</option>
+  `).join("");
+
+  // Render chart for current metric
+  const chartData = byMetric[currentMetric] || [];
+  const canvasHtml = `<canvas id="ts-chart" width="600" height="200" style="width:100%;height:200px;display:block"></canvas>`;
+
+  body.innerHTML = `
+    <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+      <div style="display:flex;gap:4px;flex:1;min-width:200px">${tabsHtml}</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="muted" style="font-size:11px">Bucket:</span>
+        <select id="ts-bucket" class="input" style="width:auto">${bucketHtml}</select>
+      </div>
+    </div>
+    ${chartHtml}
+    ${chartData.length === 0 ? '<div class="empty" style="margin-top:8px">нет точек для этого метрика/bucket</div>' : ""}
+  `;
+
+  // Draw chart
+  const canvas = document.getElementById("ts-chart");
+  if (canvas && chartData.length > 0) drawChart(canvas, chartData, currentMetric, metricColors[currentMetric]);
+
+  // Wire tabs
+  for (const btn of body.querySelectorAll("[data-ts-metric]")) {
+    btn.addEventListener("click", () => {
+      const metric = btn.dataset.tsMetric;
+      const params = new URLSearchParams(location.search);
+      params.set("ts", metric);
+      history.replaceState(null, "", "?" + params.toString());
+      renderTimeseries(data);
+    });
+  }
+
+  // Wire bucket selector
+  const bucketSelect = body.querySelector("#ts-bucket");
+  if (bucketSelect) {
+    bucketSelect.addEventListener("change", () => {
+      const params = new URLSearchParams(location.search);
+      params.set("bucket", bucketSelect.value);
+      history.replaceState(null, "", "?" + params.toString());
+      // Need to re-fetch data for new bucket
+      loadRun();
+    });
+  }
+}
+
+function drawChart(canvas, points, metric, color) {
+  const ctx = canvas.getContext("2d");
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  ctx.scale(dpr, dpr);
+
+  const width = rect.width;
+  const height = rect.height;
+  const padding = { top: 20, right: 10, bottom: 30, left: 50 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+
+  if (points.length < 2) {
+    // Single point or empty - just show a dot
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(padding.left, height - padding.bottom, 4, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+
+  // Extract values and timestamps
+  const values = points.map(p => p.value);
+  const timestamps = points.map(p => p.t);
+  const minVal = Math.min(...values);
+  const maxVal = Math.max(...values);
+  const valRange = maxVal - minVal || 1;
+
+  // Parse timestamps for X axis
+  const times = timestamps.map(t => {
+    try {
+      return new Date(t).getTime();
+    } catch {
+      return Date.now();
+    }
+  });
+  const minTime = Math.min(...times);
+  const maxTime = Math.max(...times);
+  const timeRange = maxTime - minTime || 1;
+
+  // Clear
+  ctx.clearRect(0, 0, width, height);
+
+  // Grid lines
+  ctx.strokeStyle = "#232837";
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = padding.top + (plotHeight * i) / 4;
+    ctx.beginPath();
+    ctx.moveTo(padding.left, y);
+    ctx.lineTo(width - padding.right, y);
+    ctx.stroke();
+    // Y axis labels
+    const val = maxVal - (valRange * i) / 4;
+    ctx.fillStyle = "#8B91A5";
+    ctx.font = "10px var(--mono)";
+    ctx.textAlign = "right";
+    ctx.fillText(val >= 1000 ? (val/1000).toFixed(1) + "k" : val.toFixed(val < 1 ? 2 : 0), padding.left - 8, y + 3);
+  }
+
+  // X axis labels (time)
+  ctx.fillStyle = "#8B91A5";
+  ctx.font = "10px var(--mono)";
+  ctx.textAlign = "center";
+  for (let i = 0; i <= 4; i++) {
+    const x = padding.left + (plotWidth * i) / 4;
+    const time = minTime + (timeRange * i) / 4;
+    const date = new Date(time);
+    const label = date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+    ctx.fillText(label, x, height - padding.bottom + 18);
+  }
+
+  // Draw line
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  for (let i = 0; i < points.length; i++) {
+    const x = padding.left + ((times[i] - minTime) / timeRange) * plotWidth;
+    const y = padding.top + plotHeight - ((values[i] - minVal) / valRange) * plotHeight;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // Draw points
+  ctx.fillStyle = color;
+  for (let i = 0; i < points.length; i++) {
+    const x = padding.left + ((times[i] - minTime) / timeRange) * plotWidth;
+    const y = padding.top + plotHeight - ((values[i] - minVal) / valRange) * plotHeight;
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Metric label
+  ctx.fillStyle = "#E7E9F0";
+  ctx.font = "11px var(--mono)";
+  ctx.textAlign = "left";
+  ctx.fillText(metric, padding.left, padding.top - 4);
+}
+
 function qualityLine(metrics) {
   if (!metrics) return "";
   if (metrics.error) return `<div class="warnbox">метрики не посчитались: ${esc(metrics.error)}</div>`;
@@ -1072,6 +1271,7 @@ function applyPayload(data) {
   renderMetrics(data);
   renderTrace(data);
   renderJournal(data);
+  renderTimeseries(data);
   lastPollAt = Date.now();
 }
 
@@ -1094,7 +1294,24 @@ async function poll() {
       flashDot("live-dot");
     } else if (res.ok) {
       etag = res.headers.get("ETag");
-      applyPayload(await res.json());
+      const payloadData = await res.json();
+
+      // Fetch timeseries data
+      const tsParams = new URLSearchParams(location.search);
+      const tsMetrics = tsParams.get("ts") ? [tsParams.get("ts")] : ["tokens", "seconds", "usd", "api_calls"];
+      const tsBucket = tsParams.get("bucket") || "stage";
+      const tsUrl = `/api/runs/${encodeURIComponent(runId)}/timeseries?metrics=${tsMetrics.join(",")}&bucket=${tsBucket}`;
+      try {
+        const tsRes = await fetch(tsUrl);
+        if (tsRes.ok) {
+          payloadData.timeseries = await tsRes.json();
+        }
+      } catch (tsErr) {
+        // Timeseries fetch failed, continue without it
+        console.warn("Timeseries fetch failed:", tsErr);
+      }
+
+      applyPayload(payloadData);
       $("#live-dot").classList.remove("paused");
       flashDot("live-dot");
     } else {

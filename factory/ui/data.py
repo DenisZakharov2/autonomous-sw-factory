@@ -31,6 +31,14 @@ from ..state import load_state
 from ..trace import build_matrix
 from ..usage_report import build_usage_report
 
+
+def _number(value: Any) -> int | float | None:
+    """Extract a numeric value, returning None for non-numeric or boolean."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return value
+
+
 TAIL_LIMIT = 50
 TITLE_LIMIT = 120
 LINE_RE = re.compile(r"^line (\d+):")
@@ -39,6 +47,9 @@ JOURNAL_FILTER_FIELDS = ("verdict", "stage", "event_type")
 JOURNAL_LIMIT_MIN = 10
 JOURNAL_LIMIT_MAX = 200
 JOURNAL_LIMIT_DEFAULT = 50
+
+TIMESERIES_METRICS = ("tokens", "seconds", "usd", "api_calls")
+TIMESERIES_BUCKETS = ("stage", "event", "minute")
 
 _cache_lock = threading.Lock()
 _cache: dict[str, tuple[Any, Any]] = {}
@@ -222,6 +233,157 @@ def _filtered_journal(run_path: Path, filters: dict[str, str], limit: int) -> di
         }
 
     return _cached(key, signature, produce)
+
+
+def _timeseries(run_path: Path, metrics: list[str], bucket: str) -> dict[str, Any]:
+    """Build time-series points from journal and usage ledger.
+
+    Returns ``{"points": [...], "metrics": metrics, "bucket": bucket}`` where each
+    point is ``{"t": timestamp_utc, "stage": stage, "metric": metric, "value": value}``.
+    """
+    journal = run_path / "blackbox.jsonl"
+    usage_path = run_path / "runtime" / "usage.jsonl"
+    key = f"timeseries:{run_path}:{bucket}:{','.join(metrics)}"
+    signature = (_stamp(journal), _stamp(usage_path))
+
+    def produce() -> dict[str, Any]:
+        events = read_events(journal)
+        if not events:
+            return {"points": [], "metrics": metrics, "bucket": bucket}
+
+        # Load usage records
+        usage_records = []
+        if usage_path.exists():
+            for line in usage_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    usage_records.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+
+        points: list[dict[str, Any]] = []
+
+        if bucket == "event":
+            # One point per event, using event timestamp
+            for event in events:
+                ts = event.get("timestamp_utc")
+                stage = event.get("stage")
+                for metric in metrics:
+                    value = None
+                    if metric == "tokens":
+                        # Tokens from usage at this event's stage (approximate)
+                        # We'll sum tokens for this stage up to this event
+                        value = _usage_up_to_stage(usage_records, stage, "tokens_total") or 0
+                    elif metric == "seconds":
+                        value = _usage_up_to_stage(usage_records, stage, "seconds") or 0.0
+                    elif metric == "usd":
+                        value = _usage_up_to_stage(usage_records, stage, "usd") or 0.0
+                    elif metric == "api_calls":
+                        value = _usage_up_to_stage(usage_records, stage, "api_calls") or 0
+                    if value is not None:
+                        points.append({"t": ts, "stage": stage, "metric": metric, "value": value})
+
+        elif bucket == "stage":
+            # One point per stage transition, using first event timestamp for stage
+            stage_first_ts: dict[str, str] = {}
+            stage_order: list[str] = []
+            for event in events:
+                stage = event.get("stage")
+                if stage and stage not in stage_first_ts:
+                    stage_first_ts[stage] = event.get("timestamp_utc")
+                    stage_order.append(stage)
+
+            for stage in stage_order:
+                ts = stage_first_ts[stage]
+                for metric in metrics:
+                    value = None
+                    if metric == "tokens":
+                        value = _usage_for_stage(usage_records, stage, "tokens_total") or 0
+                    elif metric == "seconds":
+                        value = _usage_for_stage(usage_records, stage, "seconds") or 0.0
+                    elif metric == "usd":
+                        value = _usage_for_stage(usage_records, stage, "usd") or 0.0
+                    elif metric == "api_calls":
+                        value = _usage_for_stage(usage_records, stage, "api_calls") or 0
+                    if value is not None:
+                        points.append({"t": ts, "stage": stage, "metric": metric, "value": value})
+
+        elif bucket == "minute":
+            # Bucket events by minute, using usage timestamps
+            minute_buckets: dict[str, dict[str, float]] = {}
+            for record in usage_records:
+                ts = record.get("timestamp_utc")
+                if not ts:
+                    continue
+                # Round to minute
+                try:
+                    dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    minute_key = dt.strftime("%Y-%m-%dT%H:%MZ")
+                except ValueError:
+                    continue
+                bucket_data = minute_buckets.setdefault(minute_key, {})
+                for metric in metrics:
+                    if metric == "tokens":
+                        val = _number(record.get("tokens_total"))
+                        if val is not None:
+                            bucket_data[metric] = float(bucket_data.get(metric, 0)) + float(val)
+                    elif metric == "seconds":
+                        val = _number(record.get("seconds"))
+                        if val is not None:
+                            bucket_data[metric] = float(bucket_data.get(metric, 0)) + float(val)
+                    elif metric == "usd":
+                        val = _number(record.get("usd"))
+                        if val is not None:
+                            bucket_data[metric] = float(bucket_data.get(metric, 0)) + float(val)
+                    elif metric == "api_calls":
+                        val = _number(record.get("api_calls"))
+                        if val is not None:
+                            bucket_data[metric] = float(bucket_data.get(metric, 0)) + float(val)
+
+            for minute_key in sorted(minute_buckets.keys()):
+                bucket_data = minute_buckets[minute_key]
+                for metric in metrics:
+                    value = bucket_data.get(metric)
+                    if value is not None:
+                        points.append({"t": minute_key, "stage": None, "metric": metric, "value": value})
+
+        return {"points": points, "metrics": metrics, "bucket": bucket}
+
+    return _cached(key, signature, produce)
+
+
+def _usage_up_to_stage(usage_records: list[dict[str, Any]], stage: str | None, field: str) -> int | float | None:
+    """Sum usage field for all records up to and including the given stage."""
+    if not stage:
+        return None
+    total = 0
+    has_value = False
+    for record in usage_records:
+        if record.get("stage") == stage:
+            val = _number(record.get(field))
+            if val is not None:
+                total += val
+                has_value = True
+    return total if has_value else None
+
+
+def _usage_for_stage(usage_records: list[dict[str, Any]], stage: str | None, field: str) -> int | float | None:
+    """Sum usage field for records exactly at the given stage."""
+    if not stage:
+        return None
+    total = 0
+    has_value = False
+    for record in usage_records:
+        if record.get("stage") == stage:
+            val = _number(record.get(field))
+            if val is not None:
+                total += val
+                has_value = True
+    return total if has_value else None
 
 
 def event_by_seq(run_id: str, seq: int, root: str | Path | None = None) -> dict[str, Any] | None:
@@ -596,6 +758,36 @@ def compare_revision(run_id_a: str, run_id_b: str, root: str | Path | None = Non
     if not rev_a or not rev_b:
         return None
     return hashlib.sha1(f"{rev_a}|{rev_b}".encode("utf-8")).hexdigest()[:20]
+
+
+def timeseries_revision(run_id: str, root: str | Path | None = None, bucket: str = "stage") -> str | None:
+    """ETag for /api/runs/<id>/timeseries: hash of journal stamp + bucket."""
+    try:
+        run_path = _run_path(run_id, root)
+    except RunNotFound:
+        return None
+    journal = run_path / "blackbox.jsonl"
+    usage = run_path / "runtime" / "usage.jsonl"
+    journal_stamp = _stamp(journal)
+    usage_stamp = _stamp(usage)
+    if not journal_stamp:
+        return None
+    parts = [
+        f"journal={journal_stamp}",
+        f"usage={usage_stamp}",
+        f"bucket={bucket}",
+    ]
+    return hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:20]
+
+
+def timeseries_data(run_id: str, root: str | Path | None = None,
+                    metrics: list[str] | None = None,
+                    bucket: str = "stage") -> dict[str, Any]:
+    """Return time-series points for the given run, metrics, and bucket."""
+    if metrics is None:
+        metrics = list(TIMESERIES_METRICS)
+    run_path = _run_path(run_id, root)
+    return _timeseries(run_path, metrics, bucket)
 
 
 def run_payload(run_id: str, root: str | Path | None = None,

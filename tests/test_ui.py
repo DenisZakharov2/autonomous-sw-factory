@@ -318,9 +318,10 @@ def test_metrics_panel_has_all_nine_values_including_honest_nulls():
 
 def test_metrics_panel_is_catalogued_and_visible_in_the_audit_preset():
     text = page_text()
-    assert 'const PANEL_IDS = ["p2", "p3", "p4", "p5", "p6", "p7", "p8"];' in text
+    assert 'const PANEL_IDS = ["p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9"];' in text
     assert 'p8: { title: "Метрики", badge: "9" }' in text
-    assert 'order: ["p2", "p6", "p8", "p7"]' in text
+    assert 'p9: { title: "Time-series", badge: "4" }' in text
+    assert 'order: ["p2", "p6", "p8", "p9", "p7"]' in text
     assert "renderMetrics(data);" in text
     for label in ("первый проход", "переделки", "утекшие дефекты", "время цикла p50",
                   "время цикла p90", "цена артефакта", "частые отказы",
@@ -744,3 +745,153 @@ def test_compare_ui_elements_in_page():
     assert "function deltaBadge" in text
     assert "loadCompare" in text
     assert "renderCompare" in text
+
+
+# -- M3: timeseries ---------------------------------------------------------
+def test_timeseries_endpoint_requires_metrics_param(served):
+    base, _root, _run = served
+    status, _headers, body = get(base, "/api/runs/run-01/timeseries")
+    assert status == 400
+    assert "metrics parameter is required" in json.loads(body)["error"]
+    assert "allowed" in json.loads(body)
+
+
+def test_timeseries_endpoint_rejects_unknown_metric(served):
+    base, _root, _run = served
+    status, _headers, body = get(base, "/api/runs/run-01/timeseries?metrics=unknown")
+    assert status == 400
+    assert "unknown metric" in json.loads(body)["error"]
+
+
+def test_timeseries_endpoint_rejects_unknown_bucket(served):
+    base, _root, _run = served
+    status, _headers, body = get(base, "/api/runs/run-01/timeseries?metrics=tokens&bucket=unknown")
+    assert status == 400
+    assert "unknown bucket" in json.loads(body)["error"]
+
+
+def test_timeseries_endpoint_returns_404_for_unknown_run(served):
+    base, _root, _run = served
+    status, _headers, body = get(base, "/api/runs/no-such-run/timeseries?metrics=tokens")
+    assert status == 404
+
+
+def test_timeseries_endpoint_returns_points(served):
+    base, root, run_dir = served
+    # Add some usage data
+    usage = run_dir / "runtime" / "usage.jsonl"
+    usage.parent.mkdir(parents=True, exist_ok=True)
+    usage.write_text(
+        "\n".join([
+            json.dumps({"stage": "s1_spec", "role": "01-smart-interviewer", "task_id": "TASK-001",
+                        "tokens_total": 100, "seconds": 4.5, "usd": 0.001, "api_calls": 1}),
+            json.dumps({"stage": "s2_architecture", "role": "02-independent-verifier",
+                        "tokens_total": 50, "seconds": 2.0, "usd": 0.0005, "api_calls": 1}),
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    # Add journal events for stages
+    journal = run_dir / "blackbox.jsonl"
+    events = [
+        {"seq": 1, "event_type": "INIT", "stage": "s_in", "timestamp_utc": "2024-01-01T00:00:00Z"},
+        {"seq": 2, "event_type": "STAGE_RESET", "stage": "s1_spec", "timestamp_utc": "2024-01-01T00:01:00Z"},
+        {"seq": 3, "event_type": "STAGE_RESET", "stage": "s2_architecture", "timestamp_utc": "2024-01-01T00:02:00Z"},
+    ]
+    journal.write_text("\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8")
+    state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    state["event_count"] = 3
+    state["last_event_hash"] = "abc"
+    state["updated_at"] = "2024-01-01T00:02:00Z"
+    (run_dir / "state.json").write_text(json.dumps(state), encoding="utf-8")
+    data.clear_cache()
+
+    status, headers, body = get(base, "/api/runs/run-01/timeseries?metrics=tokens,seconds&bucket=stage")
+    assert status == 200
+    payload = json.loads(body)
+    assert "points" in payload
+    assert "metrics" in payload
+    assert "bucket" in payload
+    assert payload["bucket"] == "stage"
+    assert set(payload["metrics"]) == {"tokens", "seconds"}
+    # Should have points for each stage with tokens/seconds
+    points = payload["points"]
+    assert len(points) > 0
+    for p in points:
+        assert "t" in p
+        assert "stage" in p
+        assert "metric" in p
+        assert "value" in p
+    # ETag should be present
+    assert headers.get("ETag")
+
+
+def test_timeseries_etag_304(served):
+    base, _root, _run = served
+    status, headers, _body = get(base, "/api/runs/run-01/timeseries?metrics=tokens&bucket=stage")
+    assert status == 200
+    etag = headers["ETag"]
+    # Repeat with same ETag
+    status, _headers, _body = get(base, "/api/runs/run-01/timeseries?metrics=tokens&bucket=stage", headers={"If-None-Match": etag})
+    assert status == 304
+
+
+def test_timeseries_bucket_event(served):
+    base, root, run_dir = served
+    usage = run_dir / "runtime" / "usage.jsonl"
+    usage.parent.mkdir(parents=True, exist_ok=True)
+    usage.write_text(
+        json.dumps({"stage": "s1_spec", "tokens_total": 100, "seconds": 4.5, "api_calls": 1}) + "\n",
+        encoding="utf-8",
+    )
+    journal = run_dir / "blackbox.jsonl"
+    events = [
+        {"seq": 1, "event_type": "INIT", "stage": "s_in", "timestamp_utc": "2024-01-01T00:00:00Z"},
+        {"seq": 2, "event_type": "STAGE_RESET", "stage": "s1_spec", "timestamp_utc": "2024-01-01T00:01:00Z"},
+    ]
+    journal.write_text("\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8")
+    state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    state["event_count"] = 2
+    state["last_event_hash"] = "abc"
+    state["updated_at"] = "2024-01-01T00:01:00Z"
+    (run_dir / "state.json").write_text(json.dumps(state), encoding="utf-8")
+    data.clear_cache()
+
+    status, _headers, body = get(base, "/api/runs/run-01/timeseries?metrics=tokens&bucket=event")
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["bucket"] == "event"
+    # Should have one point per event
+    assert len(payload["points"]) >= 1
+
+
+def test_timeseries_bucket_minute(served):
+    base, root, run_dir = served
+    usage = run_dir / "runtime" / "usage.jsonl"
+    usage.parent.mkdir(parents=True, exist_ok=True)
+    usage.write_text(
+        json.dumps({"stage": "s1_spec", "tokens_total": 100, "seconds": 4.5, "timestamp_utc": "2024-01-01T00:00:30Z", "api_calls": 1}) + "\n",
+        encoding="utf-8",
+    )
+    data.clear_cache()
+
+    status, _headers, body = get(base, "/api/runs/run-01/timeseries?metrics=tokens&bucket=minute")
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["bucket"] == "minute"
+
+
+def test_timeseries_panel_in_page():
+    text = page_text()
+    # Panel p9 should be in PANEL_IDS and META
+    assert 'const PANEL_IDS = ["p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9"];' in text
+    assert 'p9: { title: "Time-series", badge: "4" }' in text
+    # renderTimeseries function should exist
+    assert "function renderTimeseries" in text
+    assert "function drawChart" in text
+    # Canvas element should be created
+    assert "id=\"ts-chart\"" in text
+    # Tabs for metrics
+    for label in ("Токены", "Секунды", "USD", "API-вызовов"):
+        assert label in text
+    # Bucket selector
+    assert 'id="ts-bucket"' in text

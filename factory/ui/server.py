@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from ..errors import FactoryError
 from . import data, export
-from .data import RunNotFound, FilterError, compare_runs, compare_revision
+from .data import RunNotFound, FilterError, compare_runs, compare_revision, TIMESERIES_METRICS, TIMESERIES_BUCKETS
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8420
@@ -100,6 +100,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 return self._run(run_id, query)
             if len(segments) == 4 and segments[3] == "chain":
                 return self._chain(run_id, query)
+            if len(segments) == 4 and segments[3] == "timeseries":
+                return self._timeseries(run_id, query)
             if len(segments) == 4 and segments[3] == "export.xlsx":
                 return self._export_xlsx(run_id)
             if len(segments) == 5 and segments[3] == "export":
@@ -245,6 +247,53 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc), "run_id": run_id}
             )
         self._json(HTTPStatus.OK, report)
+
+    def _timeseries(self, run_id: str, query: dict[str, list[str]]) -> None:
+        # Parse and validate metrics parameter
+        raw_metrics = (query.get("metrics") or [""])[0].strip()
+        if not raw_metrics:
+            return self._json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "metrics parameter is required", "allowed": list(TIMESERIES_METRICS)},
+            )
+        metrics = [m.strip() for m in raw_metrics.split(",") if m.strip()]
+        invalid_metrics = [m for m in metrics if m not in TIMESERIES_METRICS]
+        if invalid_metrics:
+            return self._json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": f"unknown metric(s): {', '.join(invalid_metrics)}", "allowed": list(TIMESERIES_METRICS)},
+            )
+
+        # Parse and validate bucket parameter
+        bucket = (query.get("bucket") or ["stage"])[0].strip()
+        if bucket not in TIMESERIES_BUCKETS:
+            return self._json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": f"unknown bucket: {bucket!r}", "allowed": list(TIMESERIES_BUCKETS)},
+            )
+
+        # Validate run exists
+        try:
+            run_path = data.run_path(run_id, self.runs_dir)
+        except data.RunNotFound as exc:
+            return self._json(HTTPStatus.NOT_FOUND, {"error": str(exc), "run_id": run_id})
+
+        # ETag based on journal stamp + bucket
+        etag = data.timeseries_revision(run_id, self.runs_dir, bucket)
+        if etag and self._not_modified(etag):
+            return self._not_modified_response(etag)
+
+        try:
+            payload = data.timeseries_data(run_id, self.runs_dir, metrics, bucket)
+        except data.RunNotFound as exc:
+            return self._json(HTTPStatus.NOT_FOUND, {"error": str(exc), "run_id": run_id})
+        except FactoryError as exc:
+            return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc), "run_id": run_id})
+
+        etag = data.timeseries_revision(run_id, self.runs_dir, bucket)
+        if etag and self._not_modified(etag):
+            return self._not_modified_response(etag)
+        self._json(HTTPStatus.OK, payload, etag=etag)
 
     # -- exports ----------------------------------------------------------
     def _download(

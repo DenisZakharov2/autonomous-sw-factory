@@ -1,53 +1,55 @@
-graph TD
-    subgraph "Вход и подготовка"
-        s_in["s_in: бэкап, restore drill, аудит brownfield"] -->|человек| gate_s_in["gate_s_in"]
-        s00["s00_intake: интервью, глоссарий"] -->|человек| gate_s00["gate_s00"]
-        s0["s0_vision: визион, бэклог, конкуренты, метрики"] -->|человек advisory| gate_s0["gate_s0"]
+graph LR
+    subgraph "Вход"
+        s_in["s_in<br/>бэкап, restore drill"]:::stage
+        s00["s00_intake<br/>интервью, глоссарий"]:::stage
+        s0["s0_vision<br/>визион, бэклог"]:::stage
     end
 
-    subgraph "Спецификация и карантин"
-        s1["s1_spec: spec, spec-human, traceability, domain model, access matrix"] -->|человек blocking| gate_s1["gate_s1"]
-        s15["s15_quarantine: security review скиллов, skills-lock"] -->|верификатор| gate_s15["gate_s15"]
+    subgraph "Спецификация"
+        s1["s1_spec<br/>spec, traceability, domain model"]:::stage
+        s15["s15_quarantine<br/>skill security review"]:::stage
     end
 
     subgraph "Архитектура и план"
-        s2["s2_architecture: архитектура, API contract, data model, threat model, ADR, UX, AI design"] -->|верификатор| gate_s2["gate_s2"]
-        s3["s3_plan: план, техдолг"] -->|верификатор| gate_s3["gate_s3"]
+        s2["s2_architecture<br/>arch, API, threat model, ADR"]:::stage
+        s3["s3_plan<br/>план, техдолг"]:::stage
     end
 
     subgraph "Сборка и приёмка"
-        s4["s4_build: deliverables, код, тесты"] -->|верификатор| gate_s4["gate_s4"]
-        s5["s5_acceptance: отчёт тестов, матрица приёмки"] -->|верификатор| gate_s5["gate_s5"]
+        s4["s4_build<br/>код, тесты, deliverables"]:::stage
+        s5["s5_acceptance<br/>test report, acceptance matrix"]:::stage
     end
 
     subgraph "Безопасность и релиз"
-        s6["s6_security: app security, DB report, data pipeline"] -->|верификатор| gate_s6["gate_s6"]
-        s7["s7_release: deploy runbook, ops runbook, release notes"] -->|человек| gate_s7["gate_s7"]
+        s6["s6_security<br/>app sec, DB, data pipeline"]:::stage
+        s7["s7_release<br/>runbooks, release notes"]:::stage
     end
 
-    subgraph "Документация и выводы"
-        s8["s8_docs: product README, user guide"] -->|верификатор| gate_s8["gate_s8"]
-        s9["s9_learn: метрики, lessons learned, improvement patches"] -->|человек| gate_s9["gate_s9"]
+    subgraph "Документация"
+        s8["s8_docs<br/>README, user guide"]:::stage
+        s9["s9_learn<br/>метрики, lessons, patches"]:::stage
     end
 
-    gate_s_in --> s00
-    gate_s00 --> s0
-    gate_s0 --> s1
-    gate_s1 --> s15
-    gate_s15 --> s2
-    gate_s2 --> s3
-    gate_s3 --> s4
-    gate_s4 --> s5
-    gate_s5 --> s6
-    gate_s6 --> s7
-    gate_s7 --> s8
-    gate_s8 --> s9
+    %% Gates
+    g_in["👤 gate_s_in"]:::humanGate
+    g_00["👤 gate_s00"]:::humanGate
+    g_0["👤 gate_s0<br/>(advisory)"]:::humanGate
+    g_1["👤 gate_s1<br/>(blocking)"]:::humanGate
+    g_15["✅ gate_s15"]:::verifierGate
+    g_2["✅ gate_s2"]:::verifierGate
+    g_3["✅ gate_s3"]:::verifierGate
+    g_4["✅ gate_s4"]:::verifierGate
+    g_5["✅ gate_s5"]:::verifierGate
+    g_6["✅ gate_s6"]:::verifierGate
+    g_7["👤 gate_s7"]:::humanGate
+    g_8["✅ gate_s8"]:::verifierGate
+    g_9["👤 gate_s9"]:::humanGate
 
-    classDef humanGate fill:#fef3c7,stroke:#f59e0b,stroke-width:2px;
-    classDef verifierGate fill:#d1fae5,stroke:#10b981,stroke-width:2px;
-    classDef stage fill:#e0e7ff,stroke:#6366f1,stroke-width:1px;
-    classDef input fill:#f3f4f6,stroke:#6b7280,stroke-width:1px;
+    %% Flow
+    s_in --> g_in --> s00 --> g_00 --> s0 --> g_0 --> s1 --> g_1 --> s15 --> g_15 --> s2 --> g_2 --> s3 --> g_3 --> s4 --> g_4 --> s5 --> g_5 --> s6 --> g_6 --> s7 --> g_7 --> s8 --> g_8 --> s9 --> g_9
 
-    class gate_s_in,gate_s00,gate_s0,gate_s1,gate_s7,gate_s9 humanGate;
-    class gate_s15,gate_s2,gate_s3,gate_s4,gate_s5,gate_s6,gate_s8 verifierGate;
-    class s_in,s00,s0,s1,s15,s2,s3,s4,s5,s6,s7,s8,s9 stage;
+    classDef stage fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#e2e8f0,font-size:11px;
+    classDef humanGate fill:#fef3c7,stroke:#f59e0b,stroke-width:2px,color:#78350f,font-weight:bold,font-size:10px;
+    classDef verifierGate fill:#d1fae5,stroke:#10b981,stroke-width:2px,color:#064e3b,font-weight:bold,font-size:10px;
+
+    linkStyle default stroke:#64748b,stroke-width:1.5px;

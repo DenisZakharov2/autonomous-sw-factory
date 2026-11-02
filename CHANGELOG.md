@@ -1,92 +1,221 @@
 # Changelog
 
-All notable changes are recorded here. From `1.0.0` the project follows
-Semantic Versioning.
+All notable changes are recorded here. From `1.0.0` the project follows Semantic Versioning.
+
+---
 
 ## [Unreleased]
 
-M3 (опционально): live-обновления дашборда по SSE и сравнение time-series между прогонами.
-
 ### Added
+- Artifact diff viewer between runs (spec/acceptance/plan) — line-by-line comparison in the dashboard
+- Drawer close fix — the ✕ button and overlay click now properly close the detail panel
 
-- **Эндпоинт `GET /api/runs/<id>/events/stream`.** Server-Sent Events поверх журнала прогона: новые события кадрами `id: <seq>` + `data: <json>`, heartbeat-комментарии. Возобновление по `?from_seq=N` или заголовку `Last-Event-ID` (события со `seq > N`); без параметра — только события после подключения (хвост у UI уже есть из payload); `from_seq=0` — весь журнал. Инкрементальное чтение `blackbox.jsonl` по байтовому смещению: недописанная строка ждёт следующего цикла, усечение файла перезапускает чтение с нуля, битая завершённая строка — ошибка, а не молчание.
-- **Live-обновления в UI.** `EventSource` на тот же адрес; каждый кадр запускает внеочередной опрос (debounce 150 мс). ETag/304 остаётся единственным путём данных: при обрыве стрима интерфейс деградирует до прежнего опроса раз в 2 с.
-- **Эндпоинт `GET /api/compare/timeseries`.** Точки time-series двух прогонов одним ответом: `{a: {run_id, points}, b: {run_id, points}, metrics, bucket}`. Параметры как у `/api/runs/<id>/timeseries` плюс `a`/`b`; валидация: пропуск `a`/`b` или `a==b` → 400, неизвестный `run_id` → 404, неизвестная `metric`/`bucket` → 400 со списком допустимых. ETag — sha1 двух timeseries-ревизий и списка метрик, `If-None-Match` → 304, смена `bucket` или `metrics` меняет ETag.
-- **Canvas-оверлей «Time-series (A vs B)»** на странице сравнения (`?compare=<a>,<b>`): две серии на одном canvas различимыми цветами, легенда с именами прогонов, вкладки метрик и селектор бакета, состояние в URL (`?compare=<a>,<b>&ts=tokens&bucket=stage`). Ось X — относительная: секунды от первой точки каждой серии, общий масштаб (у двух прогонов нет общей настенной оси ни в одном bucket).
-- **18 новых тестов** в `tests/test_ui.py` за две поставки: SSE (инкрементальное чтение, 400/404, replay, live-append, `Last-Event-ID`, EventSource на странице) и compare-timeseries (400/404/ETag, обе серии в ответе, элементы страницы).
+---
 
-### Fixed
+## [1.0.7] — 2026-11-02
 
-- **Панель P9 снова рендерится.** Шаблон `renderTimeseries` ссылался на необъявленный `chartHtml` (переменная называется `canvasHtml`): ReferenceError обрывал панель целиком с релиза 1.0.6 — JS-тестов нет, поэтому сломалось молча.
+**M4: Artifact diff viewer + drawer fix**
+
+### What's better for you
+- **Compare artifacts side by side** — open `?compare=<a>,<b>&artifact=spec` to see a line-by-line diff of `spec.md`, `acceptance.md`, or `plan.md` between two runs. Three tabs, color-coded (red for removed, green for added), honest "not created" message when an artifact doesn't exist. State survives reload.
+- **Drawer actually closes** — the ✕ button and clicking the backdrop now work reliably. Esc key still works too.
+
+### Technical details
+- New endpoint `GET /api/compare/artifact` with `difflib`-based diff, ETag caching, full validation
+- Panel cp6 "Артефакты (A vs B)" on compare page with three-tab selector
+- Fixed drawer close wiring (moved into `DOMContentLoaded` so elements exist)
+
+### Quality
+- Page size: 113 KB (well under 250 KB limit)
+- `factory doctor` — OK
+- 398 tests pass (390 baseline + 8 new)
+- CI: 14/14 jobs green on ubuntu/macos/windows × Python 3.10–3.13
+
+---
 
 ## [1.0.6] — 2026-11-02
 
-M3: time-series метрики на дашборде.
+**M3: Time-series metrics on the dashboard**
 
-### Added
+### What's better for you
+- **See spend over time** — new "Time-series" panel (P9) with four charts: Tokens, Seconds, USD, API calls. No external libraries, pure canvas/SVG. Switch metrics via tabs, choose bucket (stage / event / minute), state saved in URL.
+- **Compare runs visually** — time-series data available for comparison view too.
 
-- **Панель «Time-series» (P9).** Четыре графика на canvas/SVG без внешних библиотек: Токены, Секунды, USD, API-вызовы. Данные из `usage.jsonl` / `journal.jsonl`. Переключение вкладок, селектор бакета (`stage` | `event` | `minute`), сохранение состояния в URL (`?run=<id>&ts=tokens&bucket=stage`).
-- **Эндпоинт `GET /api/runs/<id>/timeseries`.** Параметры: `metrics=tokens,seconds,usd,api_calls`, `bucket=stage|event|minute`. Возвращает массив точек `{t, stage, metric, value}`. Валидация: неизвестный `run_id` → 404, неизвестная `metric`/`bucket` → 400 со списком допустимых. ETag по штампу журнала + bucket, `If-None-Match` → 304.
-- **9 новых тестов** в `tests/test_ui.py`: endpoint validation, ETag/304, наличие панели P9 и canvas, URL params, error cases.
-
-### Changed
-
-- Размер страницы ≤ 250 KB (фактически ~101 KB), ноль внешних URL.
-- Пресет «Аудит» теперь включает панель Time-series (P9).
+### Technical details
+- New endpoint `GET /api/runs/<id>/timeseries` with metrics, bucket params, ETag by journal stamp + bucket
+- 9 new tests in `tests/test_ui.py`: endpoint validation, ETag/304, panel presence, URL params, error cases
+- Page size ≤ 250 KB (actually ~101 KB), zero external URLs
+- "Audit" preset now includes Time-series panel
 
 ### Fixed
+- 400/404 errors return JSON with `error` field and allowed values list
 
-- Ошибки 400/404 возвращают JSON с полем `error` и списком допустимых значений.
+---
 
 ## [1.0.5] — 2026-11-02
 
-Журнал на экране был «хвостом 50» без фильтров и без счётчика; список прогонов не умел искать и сортировать; клик по стадии/задаче/событию не давал деталей; экспорт CSV игнорировал фильтры экрана. Версия 1.0.4 поставила панель метрик, но оставила эти пробелы.
+**The dashboard finally feels complete**
 
-### Added
+### What was wrong
+The journal on screen was just "last 50 events" with no filters, no counter. Run list couldn't search or sort. Clicking a stage/task/event gave no details. CSV export ignored screen filters. Version 1.0.4 added the metrics panel but left these gaps.
 
-- **Фильтры журнала (verdict, stage, event_type, limit 10–200).** Состояние в URL (`?verdict=&stage=&event_type=&limit=`), переживает reload, передаётся в poll. ETag включает хэш фильтров (`_filters_hash`). Кэш по `(stamp blackbox.jsonl, фильтры, limit)`. Блок journal: `events/total/matched/shown/limit/filters/event_types`.
-- **Честный счётчик.** «показано / всего / отфильтровано». Кнопка «Сброс» возвращает дефолт.
-- **Поиск и сортировка списка прогонов.** Клиентский `q` и сортировка по заголовкам (`?q=&sort=&dir=`) без перезагрузки.
-- **Drawer деталей (420 px fixed right).** Открывается по клику на стадию/задачу/событие; deep link `?event=<seq>`; Esc/×/фон закрывают и возвращают фокус.
-- **Эндпоинт события.** `GET /api/runs/<id>/events/<seq>` — полное событие (seq int>0 → 400; нет → 404), кэш по штампу журнала.
-- **Экспорт journal.csv с фильтрами.** `/api/runs/<id>/export/journal.csv` принимает те же фильтры; `limit` — любой положительный (совместимость), при фильтрах без `limit` — `JOURNAL_LIMIT_DEFAULT`. Формат: UTF-8 BOM, `;`, CRLF.
-- **Payload расширения:** `stages` += `gate_evidence`, `gate_decided_by`, `gate_decided_at`, `gate_approver`; `tasks` += `artifacts`.
-- **Тесты:** 41 тест в `tests/test_ui.py`, включая `test_journal_filter_hides_fail_outside_the_tail` (журнал 117 событий, FAIL вне хвоста 50).
+### What's better for you
+- **Journal filters that actually work** — filter by verdict, stage, event_type, limit (10–200). State lives in URL (`?verdict=&stage=&event_type=&limit=`), survives reload, passes to polling. Honest counter: "shown / total / filtered". Reset button returns defaults.
+- **Find runs fast** — client-side search (`q`) and sort by column headers (`?q=&sort=&dir=`) without page reload.
+- **See details instantly** — click any stage, task, or event to open a 420px right-side drawer with full details. Deep link `?event=<seq>` restores it. Esc, ✕, backdrop click close and return focus.
+- **Export what you see** — `journal.csv` export now respects the same filters. Format: UTF-8 BOM, `;`, CRLF so Excel in Russian locale opens Cyrillic correctly.
+- **Event API** — `GET /api/runs/<id>/events/<seq>` returns full event (validation, 404 if missing), cached by journal stamp.
+- **Richer payload** — stages now include `gate_evidence`, `gate_decided_by`, `gate_decided_at`, `gate_approver`; tasks include `artifacts`.
+
+### Technical details
+- 41 tests in `tests/test_ui.py`, including `test_journal_filter_hides_fail_outside_the_tail` (117 events, FAIL outside the 50-event tail)
+- ETag now includes filter hash (`_filters_hash`)
+- Cache key: `(blackbox.jsonl stamp, filters, limit)`
+
+---
 
 ## [1.0.4] — 2026-11-01
 
-Метрики прогона считались на каждый холодный запрос, но на экране была видна
-только их выжимка в подвале трассировки, а обе README утверждали обратное.
-Список прогонов при этом был шире окна: таблица 1384 px при вьюпорте 1280
-тянула за собой горизонтальный скролл всей страницы.
+**Metrics panel + run list that doesn't break the page**
 
-### Added
+### What was wrong
+Run metrics were computed on every cold request but only visible as a snippet in the traceability footer. Both READMEs claimed otherwise. Meanwhile the run list table was 1384px wide on a 1280px viewport, forcing horizontal scroll on the entire page.
 
-- **Панель «Метрики» (P8).** Девять значений из `compute_metrics` в
-  `data.run_payload`: первый проход, переделки, утекшие дефекты, время цикла
-  p50/p90, цена артефакта, частые отказы (до трёх пар «код × N»), покрытие
-  проверкой и трассировкой. Доли — проценты без десятых, минуты — с одним
-  знаком, USD — с двумя; `null` — «не измерено», ошибка расчёта — warnbox.
-  Видна в пресете «Аудит», в «Операторе» и «FinOps» — в каталоге, но скрыта;
-  размер по умолчанию 6×3.
-- **Блок «Посмотреть прогон» / «See a run» в начале README.** Установка,
-  `factory ui --runs-dir runs --open`, адрес `http://127.0.0.1:8420` и одна
-  фраза о том, что дашборд только читает. Описание репозитория обновлено,
-  добавлен topic `dashboard`.
+### What's better for you
+- **Dedicated Metrics panel (P8)** — nine values from `compute_metrics`: first pass rate, rework rate, escaped defects, cycle time p50/p90, artifact cost, top reject reasons (up to 3 "code × N" pairs), verification coverage, traceability coverage. Percentages without decimals, minutes with one decimal, USD with two; `null` = "not measured", calc error = warnbox. Visible in "Audit" preset, in "Operator" and "FinOps" — in catalog but hidden; default size 6×3.
+- **"See a run" block in README** — install, `factory ui --runs-dir runs --open`, address `http://127.0.0.1:8420`, one line explaining the dashboard is read-only. Repo description updated, added `dashboard` topic.
 
 ### Fixed
+- **Run list no longer stretches the page** — table lives in `overflow-x:auto` container; `body` doesn't demand more width than viewport. At 1280px no page-level horizontal scroll, columns don't hide or truncate.
+- **`factory ui --runs-dir` actually works** — `cmd_ui` was passing `_runs_root(args)` but `ui` command has no such field; flag was silently ignored and server opened `./runs`.
+- **Old layout doesn't auto-open new panel** — `sanitizeLayout` appends missing IDs to end and marks them `hidden`; layout reset returns preset.
+- **READMEs no longer claim `compute_metrics` isn't called** — it runs in every cold payload, cached by `state.json`, journal, spec, acceptance, traceability, tests; panel shows all nine values. Panel count — eight including header.
 
-- **Список прогонов больше не расширяет страницу.** Таблица живёт в
-  контейнере с `overflow-x:auto`; `body` не требует ширины больше окна,
-  поэтому при вьюпорте 1280 горизонтального скролла страницы нет, а колонки
-  не прячутся и не сокращаются.
-- **`factory ui --runs-dir` действительно читает указанный каталог.**
-  `cmd_ui` передавал в сервер `_runs_root(args)`, а у команды `ui` такого
-  поля нет: флаг молча игнорировался и сервер открывал `./runs`.
-- **Старая раскладка не открывает новую панель сама.** `sanitizeLayout`
-  дописывает отсутствующий в сохранённой раскладке id в конец и в `hidden`;
-  сброс раскладки возвращает пресет.
-- **README больше не утверждают, что `compute_metrics` не вызывается.** Он
-  считается в каждом холодном payload и кэшируется по `state.json`, журналу,
-  ТЗ, приёмке, трассировке и тестам; панель показывает все девять значений.
-  Счёт панелей — восемь с шапкой.
+### Measurements
+
+| What | Before | After |
+|---|---|---|
+| `documentElement.scrollWidth` at 1280 | 1408 | 1270 = `clientWidth`; with hidden scrollbars 1280/1280 |
+| Table / container width | 1384 / 1232 | 1384 / 1222, scrolls inside |
+| `compute_metrics`, 117 events | 338–359 ms | 315–346 ms (code unchanged) |
+| Cold payload | 685–807 ms | 680–748 ms |
+| `index.html` size | 62,838 B | 65,414 B, zero external URLs |
+
+- `pytest` — 357 passed
+- `factory doctor` — OK
+- `factory verify`, `trace`, `metrics`, `log verify` on `examples/nano-todo` — OK
+
+---
+
+## [1.0.3] — 2026-11-01
+
+**Run screen + data export**
+
+### What's new
+- **`factory ui` — local read-only dashboard** — `ThreadingHTTPServer` from stdlib, `GET` only: `POST`/`PUT`/`DELETE` get `405`. Run list reads `state.json` and `idea.md` without bundle; run screen builds seven panels (header, 13 stages with real gate IDs, "now", tasks, spend, `REQ` traceability, journal last 50 events) from core read functions. Single file in package: 12-column grid, drag by header, resize handle, panel catalog, presets "Operator / FinOps / Audit / Custom", layout in `localStorage`. Polling every 2s on visible tab, `revision` and `304`; `verify_chain` only by button with cache by `(mtime, size)`. Listens on `127.0.0.1`, not exposed to network, doesn't read `FACTORY_APPROVAL_KEY`, writes zero bytes to `runs/`.
+
+- **Export M1: CSV and `.xlsx`** — "Export ▾" menu in header serves `journal.csv` (full journal, not 50-event screen tail), `tasks.csv`, `usage.csv?by=stage|role|task`, `trace.csv`, book `<run_id>-<date>.xlsx` with six sheets ("Run", "Stages", "Tasks", "Journal", "Spend", "Traceability") and `runs.csv` for all runs. Rows built by same read functions as panels, so file can't diverge from screen. URLs: `/api/export/runs.csv`, `/api/runs/<id>/export/{journal,tasks,usage,trace}.csv`, `/api/runs/<id>/export.xlsx`.
+
+- **CSV format for Russian Excel** — UTF-8 with BOM, `;` delimiter, CRLF. Without BOM and CRLF Excel shows Cyrillic as mojibake; `null` = empty cell, `0` stays `0`. RFC 4180 with comma rejected deliberately.
+
+- **`openpyxl` as extra only** — `pip install autonomous-sw-factory[xlsx]`; lazy import, without it book endpoint returns `501` with hint, doesn't crash. Runtime dependencies unchanged.
+
+### Fixed
+- **Stage rejection reopens its tasks** — `gate_reject` at `rework_to == stage_id` returns `s4_build` tasks from `accepted`, `review`, `in_progress` to `pending` and clears lease; `rework_to != stage_id` branch (`s5_acceptance`, `s6_security` → `s4_build`) unchanged.
+- **Stage doesn't go to gate with stale verdict** — in `review` next step is verifier if report written before last producer submit (`_report_is_current`).
+- **`FAIL` reason reaches producer** — `_feedback` reads last `VERIFY FAIL` by task and stage from journal, order carries `feedback`, `build_prompt` prints it in "Previous review notes" section.
+- **Test names from `traceability.json` reach build** (`declared_tests`), and `s3_plan` rejects plan where declared test not in `Allowed Files` of any task.
+
+### Measurements (1 Nov 2026, `runs/nano-todo-verify-role-real`, 117 events)
+
+| What | Size | Time (warm server) |
+|---|---|---|
+| `journal.csv`, 117 rows | 29,288 B | 11–12 ms |
+| `tasks.csv`, 2 rows | 449 B | 11 ms |
+| `usage.csv`, 8 stages | 629 B | 9 ms |
+| `trace.csv`, 3 REQ | 431 B | 4 ms |
+| `runs.csv`, 87 runs | 15,263 B | 36 ms |
+| `<run_id>.xlsx`, 6 sheets | 22,386 B | 105–130 ms |
+
+100,000 events (synthetic 45 MB journal): table 3.18s, CSV 3.33s / 25.7 MiB, book 52.6s / 4.1 MiB, peak RSS 595 MiB — book on hundred-thousand rows is expensive due to openpyxl, CSV remains cheap path.
+
+Header at 1280px stays single line: 1260px used, `scrollWidth == clientWidth`, no wrap (measured in headless Chromium, not by eye).
+
+### Update
+```bash
+pip install -U autonomous-sw-factory            # dashboard without .xlsx
+pip install -U "autonomous-sw-factory[xlsx]"   # plus .xlsx book
+```
+
+`VERSION` 1.0.3, tag `v1.0.3`. Tests: 353 (was 341): 12 new in `tests/test_ui.py`, no existing test weakened. CI — 14/14 on Ubuntu/macOS/Windows × Python 3.10–3.13, including sdist build and install in clean env without `openpyxl`.
+
+---
+
+## [1.0.2] — 2026-11-01
+
+**Independent verifier becomes a real runtime step, requirements become code**
+
+### What's new
+- **Independent verifier — real step, not a signature** — role `02-independent-verifier` now executes before each of seven role-gates (`s15_quarantine`, `s2_architecture`, `s3_plan`, `s4_build`, `s5_acceptance`, `s6_security`, `s8_docs`) and before every `TASK_DONE`. Report `artifacts/verification/<stage>/verification.md` (or `tasks/<task_id>/verification/verification.md`) must contain three adversarial checks with command and actual output, and one `PASS`/`FAIL` verdict; template choice `PASS | FAIL` counts as invalid. `VERIFY` event written only by `02`, `VERIFY` enters `ARTIFACT_RECORDS`, and `factory verify` requires last `VERIFY PASS` before `GATE_DECISION` and `TASK_DONE`. `FAIL` verdict returns stage or task to rework.
+
+- **`verification_policy: "role"` in `state.json`** — new runs enable the check; schema field optional. Historical runs including `examples/nano-todo` not rewritten and pass `factory verify` as before. For them verification report artifact doesn't exist (`requires_policy`).
+
+- **`--fake-scenario verification-fail`** — first report per item gets `FAIL`, then `PASS`: rework cycle test without model.
+
+- **`--fake-scenario verification-invalid`** — first report per item leaves template choice `PASS | FAIL`, then `PASS`: step repeats, run converges, `runtime/evidence/` gets `report_invalid` record.
+
+- **Evidence `report_invalid` for invalid report** — `_complete_verification` returns validation errors, runtime writes step `{"status": "report_invalid", "errors": [...], "report": "<path>"}` via same mechanism as other steps. Before, retry after invalid report was only visible in executor transcript, not in audit. Valid report still writes nothing extra.
+
+- **`factory usage --run-id ID [--by stage|task|role] [--json]`** — read-only report from `runs/<id>/runtime/usage.jsonl`. Fields: `steps`, `api_calls`, `prompt_chars`, `tokens_in`, `cache_read`, `tokens_out`, `tokens`, `tokens_billable`, `seconds`, `usd`. Stages in `pipeline.yaml` order, `--by task` puts taskless rows in `-`, `--by role` sorts roles. `null` doesn't become zero: if record lacks field, field total is `null`. Broken JSONL line skipped; empty or missing ledger gives zeros and stderr warning; unknown `run_id` → exit `1`. `usd` at `0.0`/`null` labeled "usd not measured", not presented as price. Docs — `docs/runtime.md` §5.8 and `docs/metrics.md`.
+
+### Changed
+- **"Deterministic check" in stage report becomes code rule** — `validate_verification_report(require_deterministic_check=True)` requires at least one `### Check N` block with `- Command:` containing `verify`, i.e. report relies on `factory verify --run-id <id> --stage <stage>`; otherwise report invalid and step repeats. Before this was only a prompt paragraph. For task report rule doesn't apply (`require_deterministic_check=False`): `factory verify` has no task scope, deterministic proof there is check command from `plan.md`. Measured on nine real reports `runs/nano-todo-verify-role-clean`: `factory verify` present in 7/9 (7/7 stage, 0/2 task), after change valid 9/9; stage report without such check invalid, test exists.
+
+- **`s5_acceptance` prompt requires literal `PASS`** — both real runs got rework on `s5_acceptance`: producer wrote "passed by test", `validate_acceptance` rejected stage. Now stage prompt has "Acceptance matrix rules" block: in `Status` column — literal `PASS`, template intentionally leaves `PENDING`, pre-filling `PASS` before verification forbidden.
+
+- **Verifier prompt requires single word in verdict** — two of eleven steps in green run were retries after invalid report: model left template choice `PASS | FAIL`. Verifier assignment (stage and task) now says: in `- Verdict:` line — exactly one word, `PASS` or `FAIL`; leftover choice invalid and step repeats. `verification_verdict` unchanged — it already rejected ambiguity.
+
+- **Task verifier assignment no longer promises `factory verify`** — command has no task scope, so "one check is `factory verify` for stage" replaced with "task check command from `plan.md`": nine real reports showed verifier worked exactly that way.
+
+- **`task_accept` no longer writes stub `verification.md` in new runs** — without valid report with `PASS` it fails (`VerificationError`), and CLI `factory task accept` too. Legacy stub remains only for runs without `verification_policy`.
+
+- **`gate_approve` from role-approver checks report and writes `VERIFY` before `GATE_DECISION`; `FAIL` → reject, gate doesn't close.**
+
+- **Fake reference regenerated:** `nano-todo` 13/33 → 22/48, `standard-mini` 15/35 → 24/50 (steps/events). `eval/baseline.json` updated after green fake run; `eval/baseline-hermes.json` untouched.
+
+- **Budgets `nano`, `standard`, `brownfield` remeasured after verifier** — rule: worst green real measurement × 1.25, round up. `nano`: 5.2M → **7.8M** (6.2M, `nano-product-mini`, 22 steps); `standard`: 2.9M → **9.5M** (7.6M, `product-mini`, 28 steps); `brownfield`: 4.5M → **9.1M** tokens and 30 → **60** min (7.3M, 28 steps, 44.2 min). `minutes` for `nano` and `standard` unchanged: calculated 50 and 75 min below active 120. `enterprise` not measured (no case) and unchanged — now 6M below measured `standard` need. `usd` nowhere changed: provider doesn't return price (`usd` = 0.0, "not measured").
+
+- **`eval/baseline-hermes.json` not rewritten: real run of five cases gave 2 green of 5.** `brownfield-proxy-mini` (28 steps / 53 events / 7.3M) and `product-mini` (28 / 50 / 7.6M) green; `nano-todo` and `nano-product-mini` failed `REQ` coverage in `traceability.json` (references tests not in declared files), `standard-mini` escalated on `s4_build`: verifier found tests don't run with case's canonical command without `PYTHONPATH`, and `gate_reject` at `rework_to == stage_id` doesn't reopen tasks — three checks of same files and escalation. `write_baseline` refuses to write baseline from failing cases, so file stayed same.
+
+- **Brownfield `fake2` → `real2` delta recorded.** `factory compare`: steps 17/17, events 38/38, artifacts 173 same / 44 changed / 1 only left / 175 only right. Cost breakdown by stages and tasks, top-5 drivers, three cost-reduction candidates — in `handoff.md`, "Brownfield cost" section. Prompts in this session unchanged: cheapening effect without real run not proven.
+
+### Verified
+- CI run `41282195622` on `d9f75e5` — 14/14 jobs (ubuntu/macOS/Windows × Python 3.10–3.13, eval, build). CI on release commit — also 14/14; run number in `v1.0.2` release description.
+- Locally: 311 tests, `factory doctor` — OK, `tests/test_docs.py` — 9 passed, fake eval `nano-todo` 22/48 and `standard-mini` 24/50 — `match`, `examples/nano-todo`: `VERIFY OK`, `trace` 3/3, `log verify` CHAIN OK, product tests 3 OK.
+- Real run of five eval cases on Hermes: 2 of 5 green (`brownfield-proxy-mini`, `product-mini`); `nano-todo` and `nano-product-mini` red by `REQ` coverage in `traceability.json`, `standard-mini` escalated on `s4_build`. `eval/baseline-hermes.json` therefore not rewritten — recorded, not covered up.
+
+---
+
+## [1.0.1] — 2026-10-31
+
+- `traceability` checks test function name, not just file
+- Legal `re-record` of accepted artifact (`ARTIFACT_RERECORD`, §5.7 `docs/runtime.md`)
+- New human-readable factory description in `README.md`/`README.en.md`
+- CI run `41221412801` (14/14)
+
+---
+
+## [1.0.0] — 2026-10-31
+
+First stable release. Full `nano`, `standard`, `brownfield` on real product (`nano-product-mini`, `product-mini`, `brownfield-proxy-mini`), five records in `eval/baseline-hermes.json`, mode ceilings from measurements, green CI on ubuntu/macOS/Windows (run `41215608643`, 14/14).
+
+---
+
+## Older Versions
+
+- `0.3.0` — Signed checkpoints, eval set, run comparison
+- `0.2.1` — CI fix: sandbox tests on runners
+- `0.2.0` — Executable runtime: work orders in, verified artifacts out
+- `0.1.2` — Audit fixes: transactional core and artifact integrity
+- `0.1.1` — Audit fixes
+- `0.1.0-preview` — Initial preview

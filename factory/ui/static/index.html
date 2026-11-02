@@ -244,6 +244,42 @@ tbody tr:hover{background:#151926}
 @media (prefers-reduced-motion:reduce){
   *{animation:none !important;transition:none !important}
 }
+
+/* ---------- drawer (P7) ---------- */
+.drawer-overlay{
+  position:fixed; inset:0; z-index:70; background:rgba(11,13,18,.55);
+  backdrop-filter:blur(4px); display:none; align-items:flex-start;
+}
+.drawer{
+  position:fixed; top:0; right:0; z-index:80;
+  width:420px; max-width:calc(100vw - 24px); height:100%; background:var(--panel);
+  border-left:1px solid var(--line); box-shadow:-6px 0 24px rgba(0,0,0,.4);
+  display:flex; flex-direction:column; animation:drawerIn .2s ease-out;
+}
+.drawer-head{
+  height:48px; border-bottom:1px solid var(--line); padding:0 14px; display:flex;
+  align-items:center; gap:10px; flex-shrink:0;
+}
+.drawer-head h2{font-size:15px;flex:1}
+.drawer-body{
+  overflow-y:auto; padding:14px 18px; flex:1; font-size:12.5px; line-height:1.5;
+}
+.drawer-body h3{font-size:12px;margin:12px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.drawer-body .kv{margin-bottom:8px;display:flex;gap:10px}
+.drawer-body .kv .k{min-width:110px;color:var(--muted);font-family:var(--mono);font-size:11px}
+.drawer-body .kv .v{flex:1;white-space:pre-wrap;overflow-wrap:break-word}
+.drawer-body .evidence{margin-top:6px;background:#0e1119;border:1px solid var(--line);border-radius:6px;padding:8px 10px;white-space:pre-wrap;overflow-wrap:break-word;font-family:var(--mono);font-size:11px;color:#aab0c2}
+.drawer-body .tag-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.drawer-body .tag{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:3px 8px;font-size:11px}
+.drawer-body table{width:100%;border-collapse:collapse;margin-top:6px}
+.drawer-body th{text-align:left;font-size:11px;color:var(--muted);padding:4px 6px;border-bottom:1px solid var(--line)}
+.drawer-body td{font-size:11.5px;padding:4px 6px;border-bottom:1px solid #1c2130;vertical-align:top}
+.drawer-body tr:hover td{background:#171b26}
+.drawer-close{background:transparent;border:0;color:var(--fg);font-size:18px;line-height:1;padding:2px}
+@keyframes drawerIn{from{transform:translateX(100%)}to{transform:translateX(0)}}
+.journal-row{cursor:pointer}
+.journal-row:hover{background:#171b26}
+.drawer-empty{color:var(--muted);font-style:italic}
 </style>
 </head>
 <body>
@@ -556,12 +592,27 @@ function scheduleRuns() {
 }
 function renderRuns(data) {
   const runs = data.runs || [];
-  $("#runs-count").textContent = `${runs.length} прогонов`;
-  if (!runs.length) {
-    $("#runs-body").innerHTML = '<div class="empty">прогонов нет — запустите <span class="mono">factory run</span></div>';
-    return;
+  const params = new URLSearchParams(location.search);
+  const q = (params.get("q") || "").toLowerCase();
+  let filtered = runs;
+  if (q) {
+    filtered = runs.filter((r) => {
+      const haystack = [r.project, r.run_id, r.mode, r.stage, r.stage_status].map((x) => String(x || "").toLowerCase()).join(" ");
+      return haystack.includes(q);
+    });
   }
-  const rows = runs.map((run) => {
+  const sortKey = params.get("sort") || "updated_at";
+  const dir = params.get("dir") === "asc" ? 1 : -1;
+  function cmp(a, b) {
+    const av = a[sortKey]; const bv = b[sortKey];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === "number" && typeof bv === "number") return (av - bv) * dir;
+    return String(av).localeCompare(String(bv)) * dir;
+  }
+  const sorted = filtered.slice().sort((a, b) => cmp(a, b) || String(a.run_id || "").localeCompare(String(b.run_id || "")));
+  const rows = sorted.map((run) => {
     if (run.error) {
       return `<tr data-run="${esc(run.run_id)}"><td class="proj">${esc(run.project)}</td><td class="mono">${esc(run.run_id)}</td>
         <td colspan="2"><span class="badge err"><span class="ico">✕</span><span>state.json не читается</span></span></td>
@@ -580,11 +631,45 @@ function renderRuns(data) {
       <td class="nowrap muted">${esc(shortTime(run.updated_at))}</td>
     </tr>`;
   }).join("");
-  $("#runs-body").innerHTML = `<div class="runs-scroll"><table class="runs-table">
-    <thead><tr><th>Проект</th><th>run_id</th><th>Режим</th><th>Стадия</th><th>Статус</th><th style="text-align:right">Токены</th><th>Обновлён</th></tr></thead>
-    <tbody>${rows}</tbody></table></div>`;
+  const header = `<div class="runs-scroll"><table class="runs-table">
+    <thead><tr>
+      <th data-sort="project">Проект</th>
+      <th data-sort="run_id">run_id</th>
+      <th data-sort="mode">Режим</th>
+      <th data-sort="stage">Стадия</th>
+      <th data-sort="stage_status">Статус</th>
+      <th data-sort="tokens" style="text-align:right">Токены</th>
+      <th data-sort="updated_at">Обновлён</th>
+    </tr></thead><tbody>${rows}</tbody></table></div>`;
+  const count = q ? `найдено ${sorted.length} из ${runs.length}` : `${runs.length} прогонов`;
+  if (!sorted.length) {
+    $("#runs-body").innerHTML = `<div class="empty">ничего не найдено — <a href="#" id="runs-reset">сбросить</a></div>`;
+    const r = $("#runs-reset");
+    if (r) r.addEventListener("click", (e) => { e.preventDefault(); history.replaceState(null, "", location.pathname); loadRuns(); });
+    return;
+  }
+  $("#runs-body").innerHTML = header;
+  $("#runs-count").textContent = count;
   for (const row of document.querySelectorAll("#runs-body tbody tr")) {
     row.addEventListener("click", () => { location.search = `?run=${encodeURIComponent(row.dataset.run)}`; });
+  for (const r of document.querySelectorAll("tr.stage-row")) { r.addEventListener("click", () => showDrawerStage(r.dataset.stage)); }
+  for (const r of document.querySelectorAll("tr.journal-row")) { r.addEventListener("click", () => showDrawerEvent(r.dataset.seq)); }
+  for (const r of document.querySelectorAll("#runs-body tbody tr")) { r.addEventListener("click", () => { location.search = `?run=${encodeURIComponent(r.dataset.run)}`; }); }
+  }
+  for (const th of document.querySelectorAll("#runs-body thead th")) {
+    th.style.cursor = "pointer";
+    th.addEventListener("click", () => {
+      const key = th.dataset.sort;
+      const cur = params.get("sort") || "updated_at";
+      let ndir = (cur === key && params.get("dir") !== "asc") ? "asc" : "desc";
+      if (cur !== key) ndir = (key === "tokens" || key === "updated_at") ? "desc" : "asc";
+      const np = new URLSearchParams(location.search);
+      np.set("sort", key);
+      np.set("dir", ndir);
+      np.set("q", q);
+      history.replaceState(null, "", "?" + np.toString());
+      loadRuns();
+    });
   }
 }
 
@@ -619,7 +704,7 @@ function renderStages(data) {
       ${data.stages.map((stage) => {
         const st = STATUS[stage.status] || { ico: "○", label: stage.status || "—", cls: "idle" };
         const cls = stage.applicable ? st.cls : "idle";
-        return `<tr><td class="mono">${esc(stage.id)}</td>
+        return `<tr data-stage="${esc(stage.id)}" class="stage-row"><td class="mono">${esc(stage.id)}</td>
           <td>${stage.applicable
             ? `<span class="badge ${cls}"><span class="ico">${st.ico}</span><span>${esc(st.label)}</span></span>`
             : '<span class="badge idle" style="border-style:dashed"><span class="ico">–</span><span>не применима</span></span>'}</td>
@@ -817,47 +902,89 @@ function renderChainBadge() {
 function renderJournal(data) {
   const body = panelNode("p7").querySelector(".panel-body");
   const settings = layout.settings.p7;
-  const events = (data.journal.events || [])
-    .filter((event) => settings.filter === "all" || event.verdict === settings.filter)
-    .slice(-settings.limit);
+  const journal = data.journal || {};
+  const events = journal.events || [];
+  const total = journal.total == null ? events.length : journal.total;
+  const matched = journal.matched == null ? events.length : journal.matched;
   const chainBlock = chain ? `<div class="${chain.status === "OK" ? "warnbox" : "errbox"}">
       цепочка: <b>${chain.status}</b>${chain.seq ? ` · первая ошибка в seq ${chain.seq}` : ""}
       <div class="muted" style="margin-top:4px">${esc(chain.checked_at || "")}</div>
       ${(chain.errors || []).slice(0, 5).map((e) => `<div class="mono" style="font-size:11px">${esc(e)}</div>`).join("")}
     </div>` : "";
+  const params = new URLSearchParams(location.search);
+  const filterVerdict = params.get("verdict") || settings.filter || "all";
+  const filterStage = params.get("stage") || "";
+  const filterType = params.get("event_type") || "";
+  const active = filterVerdict !== "all" || filterStage || filterType;
+  let rows = events;
+  if (filterVerdict !== "all") rows = rows.filter((e) => e.verdict === filterVerdict);
+  if (filterStage) rows = rows.filter((e) => (e.stage || "") === filterStage);
+  if (filterType) rows = rows.filter((e) => (e.event_type || "") === filterType);
+  const shown = rows.slice(-settings.limit);
   body.innerHTML = `
     <div class="p7-tools">
       <button class="btn" id="btn-chain">Проверить цепочку</button>
       <select id="p7-filter" title="Фильтр по вердикту">
-        <option value="all"${settings.filter === "all" ? " selected" : ""}>все вердикты</option>
-        <option value="FAIL"${settings.filter === "FAIL" ? " selected" : ""}>только FAIL</option>
-        <option value="VETO"${settings.filter === "VETO" ? " selected" : ""}>только VETO</option>
+        <option value="all"${filterVerdict === "all" ? " selected" : ""}>все вердикты</option>
+        <option value="FAIL"${filterVerdict === "FAIL" ? " selected" : ""}>только FAIL</option>
+        <option value="VETO"${filterVerdict === "VETO" ? " selected" : ""}>только VETO</option>
       </select>
-      <span class="muted">показано ${events.length} из ${data.journal.events.length}</span>
+      <select id="p7-filter-stage" title="Фильтр по стадии">
+        <option value="">любая стадия</option>
+        ${(journal.event_types || []).map((t) => `<option value="${esc(t)}"${filterStage === t ? " selected" : ""}>стадия ${esc(t)}</option>`).join("")}
+      </select>
+      <select id="p7-filter-type" title="Фильтр по типу события">
+        <option value="">любой тип</option>
+        ${(journal.event_types || []).map((t) => `<option value="${esc(t)}"${filterType === t ? " selected" : ""}>тип ${esc(t)}</option>`).join("")}
+      </select>
+      ${active ? `<button class="btn" id="btn-filter-reset" style="font-size:11px;padding:3px 6px">сбросить фильтры</button>` : ""}
+      <span class="muted" id="p7-count">
+        ${active ? `под фильтр ${matched} из ${total} · показано ${shown.length}` : `всего ${total}`}
+      </span>
     </div>
     ${chainBlock}
-    ${events.length ? `<table class="journal-table"><colgroup><col style="width:58px"><col style="width:146px"><col style="width:124px"><col style="width:198px"><col style="width:150px"><col style="width:96px"><col></colgroup><thead><tr><th class="num">seq</th><th>время</th><th>стадия</th><th>роль</th><th>тип</th><th>вердикт</th><th>смысл</th></tr></thead><tbody>
-      ${events.slice().reverse().map((event) => `<tr><td class="mono num">${esc(event.seq)}</td>
+    ${shown.length ? `<table class="journal-table"><colgroup><col style="width:58px"><col style="width:146px"><col style="width:124px"><col style="width:198px"><col style="width:150px"><col style="width:96px"><col></colgroup><thead><tr><th class="num">seq</th><th>время</th><th>стадия</th><th>роль</th><th>тип</th><th>вердикт</th><th>смысл</th></tr></thead><tbody>
+      ${shown.slice().reverse().map((event) => `<tr data-seq="${esc(event.seq)}" class="journal-row"><td class="mono num">${esc(event.seq)}</td>
         <td class="mono nowrap">${esc(shortTime(event.timestamp_utc))}</td>
         <td class="mono">${esc(event.stage || "—")}</td>
         <td class="mono">${esc(event.role || "—")}</td>
         <td class="mono">${esc(event.event_type)}</td>
         <td>${event.verdict ? `<span class="badge ${(STATUS[event.verdict] || {}).cls || "idle"}"><span class="ico">${(STATUS[event.verdict] || {}).ico || "·"}</span><span>${esc(event.verdict)}</span></span>` : '<span class="muted">—</span>'}</td>
         <td><span class="cut-text" title="${esc(event.meaning || "")}">${esc(event.meaning || "")}</span></td></tr>`).join("")}
-    </tbody></table>` : '<div class="empty">событий пока нет</div>'}`;
-  panelNode("p7").querySelector(".head-badge").textContent = String(events.length);
-  const btn = $("#btn-chain");
+    </tbody></table>` : active ? '<div class="empty">под фильтр ничего не попало — нажмите «сбросить фильтры»</div>' : '<div class="empty">событий пока нет</div>'}`;
+  panelNode("p7").querySelector(".head-badge").textContent = String(shown.length);
+  const btn = panelNode("p7").querySelector("#btn-chain");
   if (btn) btn.addEventListener("click", checkChain);
-  const filter = $("#p7-filter");
-  if (filter) filter.addEventListener("change", () => {
-    layout.settings.p7.filter = filter.value;
-    markCustom(); saveLayout();
-    if (payload) renderJournal(payload);
-  });
+  const filter = panelNode("p7").querySelector("#p7-filter");
+  const filterStageEl = panelNode("p7").querySelector("#p7-filter-stage");
+  const filterTypeEl = panelNode("p7").querySelector("#p7-filter-type");
+  const resetBtn = panelNode("p7").querySelector("#btn-filter-reset");
+  if (filter) filter.addEventListener("change", () => applyJournalFilter(filter.value, filterStageEl.value, filterTypeEl.value));
+  if (filterStageEl) filterStageEl.addEventListener("change", () => applyJournalFilter(filter.value, filterStageEl.value, filterTypeEl.value));
+  if (filterTypeEl) filterTypeEl.addEventListener("change", () => applyJournalFilter(filter.value, filterStageEl.value, filterTypeEl.value));
+  if (resetBtn) resetBtn.addEventListener("click", () => resetJournalFilters());
+  const textFilter = panelNode("p7").querySelector("#p7-filter-text");
+  if (textFilter) {
+    textFilter.value = params.get("q") || "";
+    textFilter.addEventListener("input", () => applyJournalFilter(filterVerdict, filterStage, filterType, textFilter.value));
+  }
+}
+function applyJournalFilter(verdict, stage, type, q = "") {
+  const params = new URLSearchParams(location.search);
+  params.set("verdict", verdict === "all" ? "" : verdict);
+  params.set("stage", stage || "");
+  params.set("event_type", type || "");
+  params.set("q", q || "");
+  history.replaceState(null, "", "?" + params.toString());
+  loadRun();
+}
+function resetJournalFilters() {
+  history.replaceState(null, "", "");
+  loadRun();
 }
 
 async function checkChain() {
-  const btn = $("#btn-chain");
+  const btn = $("btn-chain");
   if (btn) { btn.disabled = true; btn.textContent = "Проверяю…"; }
   try {
     const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/chain?refresh=1`);
@@ -937,7 +1064,13 @@ async function poll() {
   if (document.visibilityState !== "visible") { schedule(); return; }
   try {
     const headers = etag ? { "If-None-Match": etag } : {};
-    const res = await fetch(`/api/runs/${encodeURIComponent(runId)}`, { headers });
+    const url = new URL(`/api/runs/${encodeURIComponent(runId)}`, location.origin);
+    const _sp = new URLSearchParams(location.search);
+    for (const k of ["verdict", "stage", "event_type", "limit"]) {
+      const v = _sp.get(k);
+      if (v) url.searchParams.set(k, v);
+    }
+    const res = await fetch(url.pathname + url.search, { headers });
     if (res.status === 304) {
       lastPollAt = Date.now();
       $("#live-dot").classList.remove("paused");
@@ -1286,7 +1419,160 @@ function boot() {
   });
 }
 
+
+// ---------------- drawer wiring ----------------
+let lastFocused = null;
+function openDrawer(title, html) {
+  const drawer = $("#drawer");
+  const overlay = $("#drawer-overlay");
+  const body = $("#drawer-body");
+  const titleEl = $("#drawer-title");
+  if (!drawer || !overlay || !body) return;
+  titleEl.textContent = title;
+  body.innerHTML = html;
+  drawer.hidden = false;
+  overlay.hidden = false;
+  document.body.style.overflow = "hidden";
+  lastFocused = document.activeElement;
+}
+function closeDrawer() {
+  const drawer = $("#drawer");
+  const overlay = $("#drawer-overlay");
+  if (!drawer || !overlay) return;
+  drawer.hidden = true;
+  overlay.hidden = true;
+  document.body.style.overflow = "";
+  if (lastFocused && typeof lastFocused.focus === "function") lastFocused.focus();
+  lastFocused = null;
+  const params = new URLSearchParams(location.search);
+  params.delete("event");
+  const qs = params.toString();
+  history.replaceState(null, "", qs ? ("?" + qs) : location.pathname);
+}
+
+function escHtml(s) { return esc(s == null ? "" : String(s)); }
+
+async function showDrawerStage(stageId) {
+  const stage = (payload && payload.stages) ? payload.stages.find((s) => s.id === stageId) : null;
+  if (!stage) { toast("стадию не удалось найти", true); return; }
+  const gateHtml = stage.gate
+    ? `<h3>Гейт</h3>
+       <div class="kv"><span class="k">гейт</span><span class="v">${escHtml(stage.gate)}</span></div>
+       <div class="kv"><span class="k">статус</span><span class="v">${escHtml(stage.gate_status || "—")}</span></div>
+       <div class="kv"><span class="k">кто принял</span><span class="v">${escHtml(stage.gate_decided_by || "—")}</span></div>
+       <div class="kv"><span class="k">когда</span><span class="v">${escHtml(stage.gate_decided_at || "—")}</span></div>` : "";
+  const evidenceHtml = stage.gate_evidence ? `<h3>Evidence гейта</h3><div class="evidence">${escHtml(Array.isArray(stage.gate_evidence) ? stage.gate_evidence.join("\n") : stage.gate_evidence)}</div>` : "";
+  const attemptsHtml = `<div class="kv"><span class="k">попытки</span><span class="v">${stage.attempts}/${stage.max_attempts || "—"}</span></div>`;
+  const tasksHtml = (stage.tasks || []).length
+    ? `<h3>Задачи стадии (${stage.tasks.length})</h3><table><thead><tr><th>Задача</th><th>Статус</th><th>Попытки</th><th>Отказы</th></tr></thead><tbody>
+      ${stage.tasks.map((t) => `<tr class="drawer-link" data-task="${escHtml(t.task_id)}"><td class="mono">${escHtml(t.task_id)}</td>
+        <td>${escHtml(t.status || "—")}</td><td class="num">${escHtml(t.attempts || 0)}</td><td>${escHtml((t.reject_reasons || []).length ? t.reject_reasons.join("; ") : "—")}</td></tr>`).join("")}
+      </tbody></table>` : "";
+  openDrawer(`Стадия ${escHtml(stageId)}`, `
+    <div class="kv"><span class="k">id</span><span class="v">${escHtml(stage.id)}</span></div>
+    <div class="kv"><span class="k">заголовок</span><span class="v">${escHtml(stage.title || "—")}</span></div>
+    <div class="kv"><span class="k">статус</span><span class="v">${escHtml(stage.status || "—")}</span></div>
+    ${attemptsHtml}${gateHtml}${evidenceHtml}${tasksHtml}
+  `);
+  for (const tr of drawer.querySelectorAll("tr.drawer-link")) {
+    tr.addEventListener("click", () => showDrawerTask(tr.dataset.task));
+  }
+}
+
+async function showDrawerTask(taskId) {
+  const task = (payload && payload.tasks) ? payload.tasks.find((t) => t.task_id === taskId) : null;
+  if (!task) { toast("задачу не удалось найти", true); return; }
+  const artifactsHtml = (task.artifacts || []).length
+    ? `<h3>Артефакты (${task.artifacts.length})</h3><ul class="tag-row">
+      ${task.artifacts.map((a) => `<li class="tag">${escHtml(a)}</li>`).join("")}
+    </ul>` : "<p class=\"drawer-empty\">артефактов нет</p>";
+  const reasonsHtml = (task.reject_reasons || []).length
+    ? `<h3>Отказы</h3><div class="tag-row">
+      ${task.reject_reasons.map((r) => `<div class="tag err">${escHtml(r)}</div>`).join("")}
+    </div>` : "<p class=\"drawer-empty\">отказов нет</p>";
+  openDrawer(`Задача ${escHtml(taskId)}`, `
+    <div class="kv"><span class="k">id</span><span class="v">${escHtml(task.task_id)}</span></div>
+    <div class="kv"><span class="k">стадия</span><span class="v">${escHtml(task.stage || "—")}</span></div>
+    <div class="kv"><span class="k">владелец</span><span class="v">${escHtml(task.owner || "—")}</span></div>
+    <div class="kv"><span class="k">статус</span><span class="v">${escHtml(task.status || "—")}</span></div>
+    <div class="kv"><span class="k">попытки</span><span class="v">${escHtml(task.attempts || 0)}</span></div>
+    <div class="kv"><span class="k">lease</span><span class="v">${escHtml(task.lease || "—")}</span></div>
+    <div class="kv"><span class="k">REQ</span><span class="v">${escHtml((task.reqs || []).join(", ") || "—")}</span></div>
+    <div class="kv"><span class="k">разрешенные файлы</span><span class="v">${escHtml((task.allowed_files || []).join("\n") || "—")}</span></div>
+    <div class="kv"><span class="k">artefacts</span><span class="v">${escHtml((task.artifacts || []).length ? task.artifacts.join("\n") : "—")}</span></div>
+    ${artifactsHtml}${reasonsHtml}
+  `);
+}
+
+async function showDrawerEvent(seq) {
+  openDrawer(`Событие #${seq}`, '<div class="muted" style="padding-top:40px">загружаю…</div>');
+  try {
+    const res = await fetch(`/api/runs/${encodeURIComponent(payload.run_id)}/events/${seq}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+    const ev = await res.json();
+    const verdict = ev.verdict || {};
+    const arts = ev.artifacts || [];
+    const evidenceHtml = verdict.evidence ? `<h3>Evidence</h3><div class="evidence">${escHtml(verdict.evidence)}</div>` : "";
+    const artifactsHtml = arts.length
+      ? `<h3>Артефакты (${arts.length})</h3><table><thead><tr><th>Путь</th><th>Байт</th><th>SHA-256</th></tr></thead><tbody>
+      ${arts.map((a) => `<tr><td class="mono">${escHtml(a.path || "—")}</td>
+        <td class="num">${escHtml(a.bytes || "—")}</td><td class="mono">${escHtml(a.sha256 || "—")}</td></tr>`).join("")}
+      </tbody></table>` : "<p class=\"drawer-empty\">артефактов нет</p>";
+    openDrawer(`Событие #${escHtml(seq)}`, `
+      <div class="kv"><span class="k">seq</span><span class="v">${escHtml(ev.seq)}</span></div>
+      <div class="kv"><span class="k">event_id</span><span class="v mono">${escHtml(ev.event_id || "—")}</span></div>
+      <div class="kv"><span class="k">время</span><span class="v">${escHtml(ev.timestamp_utc || "—")}</span></div>
+      <div class="kv"><span class="k">стадия</span><span class="v mono">${escHtml(ev.stage || "—")}</span></div>
+      <div class="kv"><span class="k">задача</span><span class="v mono">${escHtml(ev.task_id || "—")}</span></div>
+      <div class="kv"><span class="k">роль</span><span class="v mono">${escHtml(ev.role || "—")}</span></div>
+      <div class="kv"><span class="k">тип</span><span class="v mono">${escHtml(ev.event_type)}</span></div>
+      <div class="kv"><span class="k">действие</span><span class="v">${escHtml(ev.action || "—")}</span></div>
+      <div class="kv"><span class="k">why</span><span class="v">${escHtml(ev.why || "—")}</span></div>
+      <div class="kv"><span class="k">for_what</span><span class="v">${escHtml(ev.for_what || "—")}</span></div>
+      <div class="kv"><span class="k">вердикт</span><span class="v">${escHtml(verdict.status || "—")}</span></div>
+      <div class="kv"><span class="k">кто верифицировал</span><span class="v">${escHtml(verdict.verified_by || "—")}</span></div>
+      <div class="kv"><span class="k">код причины</span><span class="v mono">${escHtml(verdict.reason_code || "—")}</span></div>
+      ${evidenceHtml}
+      <div class="kv"><span class="k">хэш</span><span class="v mono">${escHtml(ev.hash || "—")}</span></div>
+      <div class="kv"><span class="k">prev_hash</span><span class="v mono">${escHtml(ev.prev_hash || "—")}</span></div>
+      ${artifactsHtml}
+    `);
+  } catch (err) {
+    toast("событие не загрузилось: " + err.message, true);
+  }
+}
+
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape") {
+    const drawer = $("#drawer");
+    if (drawer && !drawer.hidden) closeDrawer();
+  }
+});
+const overlayEl = $("#drawer-overlay");
+if (overlayEl) overlayEl.addEventListener("click", closeDrawer);
+const closeBtn = $("#drawer-close");
+if (closeBtn) closeBtn.addEventListener("click", closeDrawer);
+
+// Deep link for event drawer
+setTimeout(() => {
+  const params = new URLSearchParams(location.search);
+  const evSeq = params.get("event");
+  if (evSeq && payload) {
+    showDrawerEvent(Number(evSeq));
+  }
+}, 500);
+
+
 boot();
 </script>
-</body>
-</html>
+<div id="drawer" class="drawer" hidden>
+  <div class="drawer-head">
+    <h2 id="drawer-title">Карточка</h2>
+    <button class="drawer-close" id="drawer-close" aria-label="Закрыть">×</button>
+  </div>
+  <div class="drawer-body" id="drawer-body"></div>
+</div>
+<div id="drawer-overlay" class="drawer-overlay"></div>

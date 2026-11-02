@@ -94,13 +94,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if len(segments) >= 3 and segments[0] == "api" and segments[1] == "runs":
             run_id = segments[2]
             if len(segments) == 3:
-                return self._run(run_id)
+                return self._run(run_id, query)
             if len(segments) == 4 and segments[3] == "chain":
                 return self._chain(run_id, query)
             if len(segments) == 4 and segments[3] == "export.xlsx":
                 return self._export_xlsx(run_id)
             if len(segments) == 5 and segments[3] == "export":
                 return self._export_csv(run_id, segments[4], query)
+            if len(segments) == 5 and segments[3] == "events":
+                return self._event(run_id, segments[4])
         self._json(HTTPStatus.NOT_FOUND, {"error": "not found", "path": path})
 
     def _write_refused(self) -> None:
@@ -141,16 +143,28 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return self._not_modified_response(etag)
         self._json(HTTPStatus.OK, payload, etag=etag)
 
-    def _run(self, run_id: str) -> None:
+    def _run(self, run_id: str, query: dict[str, list[str]]) -> None:
+        # Validate journal filter params first; unknown values -> 400.
         try:
-            etag = data.revision(run_id, self.runs_dir)
+            filters, limit = data.parse_journal_filters(run_id, self.runs_dir, query)
+        except data.FilterError as exc:
+            return self._json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": str(exc), "allowed": exc.allowed},
+            )
         except data.RunNotFound as exc:
             return self._json(HTTPStatus.NOT_FOUND, {"error": str(exc), "run_id": run_id})
+        except FactoryError as exc:
+            # A broken state.json must surface as 500, not as a filter error.
+            return self._json(
+                HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc), "run_id": run_id}
+            )
         # An unchanged run costs one small read and three stats, not a payload.
+        etag = data.revision(run_id, self.runs_dir, filters=filters)
         if etag and self._not_modified(etag):
             return self._not_modified_response(etag)
         try:
-            payload = data.run_payload(run_id, self.runs_dir)
+            payload = data.run_payload(run_id, self.runs_dir, filters=filters, limit=limit)
         except data.RunNotFound as exc:
             return self._json(HTTPStatus.NOT_FOUND, {"error": str(exc), "run_id": run_id})
         except FactoryError as exc:
@@ -161,6 +175,27 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if self._not_modified(etag):
             return self._not_modified_response(etag)
         self._json(HTTPStatus.OK, payload, etag=etag)
+
+    def _event(self, run_id: str, seq_str: str) -> None:
+        try:
+            seq = int(seq_str)
+            if seq < 1:
+                raise ValueError
+        except ValueError:
+            return self._json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": f"seq must be a positive integer, got {seq_str!r}"},
+            )
+        try:
+            event = data.event_by_seq(run_id, seq, self.runs_dir)
+        except data.RunNotFound as exc:
+            return self._json(HTTPStatus.NOT_FOUND, {"error": str(exc), "run_id": run_id})
+        if event is None:
+            return self._json(
+                HTTPStatus.NOT_FOUND,
+                {"error": f"event seq {seq} not found", "run_id": run_id, "seq": seq},
+            )
+        self._json(HTTPStatus.OK, event)
 
     def _chain(self, run_id: str, query: dict[str, list[str]]) -> None:
         refresh = (query.get("refresh") or [""])[0] not in ("", "0", "false")
@@ -211,9 +246,20 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 HTTPStatus.BAD_REQUEST,
                 {"error": f"unknown usage grouping: {by!r} (stage, role or task)", "by": by},
             )
+        filters = {}
         limit = None
         if dataset == "journal":
-            raw = (query.get("limit") or [""])[0]
+            # Validate filter params (same rules as the payload endpoint).
+            try:
+                filters = data.read_journal_filters(run_id, self.runs_dir, query)
+            except data.FilterError as exc:
+                return self._json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": str(exc), "allowed": exc.allowed},
+                )
+            except data.RunNotFound as exc:
+                return self._json(HTTPStatus.NOT_FOUND, {"error": str(exc), "run_id": run_id})
+            raw = (query.get("limit") or [""])[0].strip()
             if raw:
                 if not raw.isdigit() or int(raw) < 1:
                     return self._json(
@@ -221,9 +267,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         {"error": f"limit must be a positive integer, got {raw!r}", "limit": raw},
                     )
                 limit = int(raw)
+            elif filters:
+                # The export must match the screen: when filters are active the
+                # payload limit applies.
+                limit = data.JOURNAL_LIMIT_DEFAULT
         try:
             if dataset == "journal":
-                fields, rows = export.journal_table(run_path, limit)
+                fields, rows = export.journal_table(run_path, limit, filters=filters)
             else:
                 payload = data.run_payload(run_id, self.runs_dir)
                 if dataset == "tasks":

@@ -258,6 +258,7 @@ def test_tasks_panel_carries_the_state_fields(served):
         "reqs": ["REQ-001"], "status": "review", "attempts": 2, "lease": None, "deps": [],
         "reject_reasons": ["тесты не запускались"],
         "allowed_files": ["product/src/a.py", "product/src/b.py", "product/src/c.py"],
+        "artifacts": [],
     }]
     assert payload["now"]["task_counts"] == {"review": 1}
 
@@ -435,6 +436,79 @@ def test_journal_export_is_the_whole_log_not_the_tail(served):
     assert [row[0] for row in limited[1:]] == [str(index) for index in range(73, 80)]
     status, _headers, body = get(base, "/api/runs/run-01/export/journal.csv?limit=0")
     assert status == 400 and "positive integer" in json.loads(body)["error"]
+
+
+def test_journal_filter_hides_fail_outside_the_tail(served):
+    base, _root, run_dir = served
+    # Build 117 events: first 67 contain FAIL, tail 68..117 are all PASS.
+    lines = []
+    for index in range(1, 118):
+        verdict = "FAIL" if index <= 67 else "PASS"
+        stage = "s5_acceptance" if index <= 67 else "s_in"
+        lines.append(json.dumps({"seq": index, "event_type": "VERIFY", "stage": stage, "verdict": {"status": verdict}}))
+    (run_dir / "blackbox.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    state["event_count"] = 117
+    (run_dir / "state.json").write_text(json.dumps(state), encoding="utf-8")
+    data.clear_cache()
+
+    # Without filters the tail shows PASS events only.
+    p = json.loads(get(base, "/api/runs/run-01")[2])
+    assert p["journal"]["matched"] == 117
+    assert p["journal"]["shown"] == 50
+    assert all(e["verdict"] == "PASS" for e in p["journal"]["events"])
+
+    # With verdict=FAIL the tail is the 67 FAIL events, and the count is 117 total.
+    p = json.loads(get(base, "/api/runs/run-01?verdict=FAIL")[2])
+    assert p["journal"]["matched"] == 67
+    assert p["journal"]["shown"] == 50
+    assert p["journal"]["total"] == 117
+    assert all(e["verdict"] == "FAIL" for e in p["journal"]["events"])
+    assert [e["seq"] for e in p["journal"]["events"]] == list(range(1, 118))[17:67]
+
+    # With verdict=FAIL&stage=s5_acceptance the result is the same.
+    p = json.loads(get(base, "/api/runs/run-01?verdict=FAIL&stage=s5_acceptance")[2])
+    assert p["journal"]["matched"] == 67
+
+    # With an unknown verdict the response is 400 with an allowed list.
+    status, _headers, body = get(base, "/api/runs/run-01?verdict=NOPE")
+    assert status == 400
+    assert "allowed" in json.loads(body)
+
+    # The limit applies to the filtered result.
+    p = json.loads(get(base, "/api/runs/run-01?verdict=FAIL&limit=10")[2])
+    assert p["journal"]["shown"] == 10
+    assert len(p["journal"]["events"]) == 10
+
+    # ETag differs between filters, and a repeat of the same filter is 304.
+    etag_fail = get(base, "/api/runs/run-01?verdict=FAIL")[1]["ETag"]
+    etag_all = get(base, "/api/runs/run-01")[1]["ETag"]
+    assert etag_fail != etag_all
+    status, _headers, _body = get(base, "/api/runs/run-01?verdict=FAIL", headers={"If-None-Match": etag_fail})
+    assert status == 304
+    status, _headers, _body = get(base, "/api/runs/run-01?verdict=FAIL&stage=s5_acceptance", headers={"If-None-Match": etag_fail})
+    assert status == 200
+
+    # The CSV export honors the filter and the limit.
+    rows = csv_rows(get(base, "/api/runs/run-01/export/journal.csv?verdict=FAIL")[2])
+    assert len(rows) - 1 == 50
+    assert all(row[7] == "FAIL" for row in rows[1:])
+    rows = csv_rows(get(base, "/api/runs/run-01/export/journal.csv?verdict=FAIL&limit=10")[2])
+    assert len(rows) - 1 == 10
+    rows = csv_rows(get(base, "/api/runs/run-01/export/journal.csv")[2])
+    assert len(rows) - 1 == 117
+
+    # The event-by-seq endpoint returns the full event.
+    ev = json.loads(get(base, "/api/runs/run-01/events/35")[2])
+    assert ev["seq"] == 35
+    assert ev["event_type"] == "VERIFY"
+    assert ev["verdict"]["status"] == "FAIL"
+
+    # Bad seqs are rejected.
+    status, _headers, _body = get(base, "/api/runs/run-01/events/abc")
+    assert status == 400
+    status, _headers, _body = get(base, "/api/runs/run-01/events/999999")
+    assert status == 404
 
 
 def test_usage_export_matches_the_usage_report(served):

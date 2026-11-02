@@ -174,10 +174,19 @@ def trace_table(payload: dict[str, Any]) -> Table:
     return TRACE_FIELDS, list(payload["trace"].get("rows") or [])
 
 
-def journal_table(run_path: Path, limit: int | None = None) -> Table:
-    """The whole journal, not the 50-event tail the screen shows; `limit` is opt-in."""
+def journal_table(run_path: Path, limit: int | None = None,
+                  filters: dict[str, str] | None = None) -> Table:
+    """The whole journal, not the 50-event tail the screen shows; `limit` is opt-in.
+
+    When ``filters`` are given (``verdict``, ``stage``, ``event_type``) only
+    matching events are included; ``limit`` is applied after filtering.
+    """
+    from .data import _matches  # lazy to avoid a circular import at module load
+
     rows = []
     for event in read_events(run_path / "blackbox.jsonl"):
+        if filters and not _matches(event, filters):
+            continue
         verdict = event.get("verdict") or {}
         rows.append(
             {

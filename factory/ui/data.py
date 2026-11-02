@@ -23,7 +23,8 @@ from typing import Any, Callable
 from ..config import load_pipeline
 from ..engine import status_summary
 from ..errors import FactoryError, RunError
-from ..journal import verify_chain
+from ..journal import read_events, verify_chain
+from ..journal import EVENT_TYPES, VERDICTS
 from ..metrics import compute_metrics
 from ..paths import run_dir as safe_run_dir, runs_root as default_runs_root
 from ..state import load_state
@@ -34,12 +35,27 @@ TAIL_LIMIT = 50
 TITLE_LIMIT = 120
 LINE_RE = re.compile(r"^line (\d+):")
 
+JOURNAL_FILTER_FIELDS = ("verdict", "stage", "event_type")
+JOURNAL_LIMIT_MIN = 10
+JOURNAL_LIMIT_MAX = 200
+JOURNAL_LIMIT_DEFAULT = 50
+
 _cache_lock = threading.Lock()
 _cache: dict[str, tuple[Any, Any]] = {}
 
 
 class RunNotFound(RunError):
     """The dashboard asks for a run id that has no directory."""
+
+
+class FilterError(FactoryError):
+    """A journal filter parameter failed validation."""
+
+    def __init__(self, field: str, value: str, allowed: list[str]):
+        self.field = field
+        self.value = value
+        self.allowed = allowed
+        super().__init__(f"unknown {field}: {value!r} (allowed: {', '.join(allowed)})")
 
 
 def clear_cache() -> None:
@@ -121,6 +137,107 @@ def _event_row(event: dict[str, Any]) -> dict[str, Any]:
         "action": event.get("action"),
         "meaning": event.get("for_what") or event.get("why") or event.get("action") or "",
     }
+
+
+def _filters_key(filters: dict[str, str]) -> str:
+    return "|".join(f"{k}={v}" for k, v in sorted(filters.items()) if v)
+
+
+def _filters_hash(filters: dict[str, str]) -> str:
+    return hashlib.sha1(_filters_key(filters).encode()).hexdigest()[:8]
+
+
+def _matches(event: dict[str, Any], filters: dict[str, str]) -> bool:
+    verdict = event.get("verdict") or {}
+    for field, value in filters.items():
+        if not value:
+            continue
+        if field == "verdict" and verdict.get("status") != value:
+            return False
+        if field == "stage" and event.get("stage") != value:
+            return False
+        if field == "event_type" and event.get("event_type") != value:
+            return False
+    return True
+
+
+def parse_journal_filters(run_id: str, root: str | Path | None, query: dict[str, list[str]]) -> tuple[dict[str, str], int]:
+    """Validate and normalize journal filter query params.
+
+    Returns ``(filters, limit)`` where ``filters`` contains only non-empty,
+    validated values and ``limit`` defaults to ``JOURNAL_LIMIT_DEFAULT``.
+    Raises ``FilterError`` or ``RunNotFound``.
+    """
+    filters = read_journal_filters(run_id, root, query)
+    raw_limit = (query.get("limit") or [""])[0].strip()
+    limit = JOURNAL_LIMIT_DEFAULT
+    if raw_limit:
+        try:
+            limit = int(raw_limit)
+        except ValueError:
+            raise FilterError("limit", raw_limit, [f"{JOURNAL_LIMIT_MIN}..{JOURNAL_LIMIT_MAX}"])
+        if not (JOURNAL_LIMIT_MIN <= limit <= JOURNAL_LIMIT_MAX):
+            raise FilterError("limit", raw_limit, [f"{JOURNAL_LIMIT_MIN}..{JOURNAL_LIMIT_MAX}"])
+    return filters, limit
+
+
+def read_journal_filters(
+    run_id: str, root: str | Path | None, query: dict[str, list[str]]
+) -> dict[str, str]:
+    """Validate verdict/stage/event_type only; ``limit`` is left to the caller.
+
+    CSV export accepts any positive ``limit`` (it has always done so), while the
+    payload bounds it to 10..200 for the screen.
+    """
+    run_path = _run_path(run_id, root)
+    state = _state(run_path)
+    filters: dict[str, str] = {}
+    allowed = {
+        "verdict": sorted(VERDICTS),
+        "event_type": sorted(EVENT_TYPES),
+        "stage": sorted(state["stage_status"].keys()),
+    }
+    for field in JOURNAL_FILTER_FIELDS:
+        raw = (query.get(field) or [""])[0].strip()
+        if not raw:
+            continue
+        if raw not in allowed[field]:
+            raise FilterError(field, raw, allowed[field])
+        filters[field] = raw
+    return filters
+
+
+def _filtered_journal(run_path: Path, filters: dict[str, str], limit: int) -> dict[str, Any]:
+    """Scan the whole journal, apply filters, return the last ``limit`` matches."""
+    journal = run_path / "blackbox.jsonl"
+    key = f"journal:{run_path}:{_filters_key(filters)}:{limit}"
+    signature = _stamp(journal)
+
+    def produce() -> dict[str, Any]:
+        events = read_events(journal)
+        matched = [e for e in events if _matches(e, filters)]
+        return {
+            "events": [_event_row(e) for e in matched[-limit:]],
+            "matched": len(matched),
+        }
+
+    return _cached(key, signature, produce)
+
+
+def event_by_seq(run_id: str, seq: int, root: str | Path | None = None) -> dict[str, Any] | None:
+    """Return the full event dict for ``seq`` (read-only, cached by journal stamp)."""
+    run_path = _run_path(run_id, root)
+    journal = run_path / "blackbox.jsonl"
+    key = f"event:{run_path}:{seq}"
+    signature = _stamp(journal)
+
+    def produce() -> dict[str, Any] | None:
+        for event in read_events(journal):
+            if event.get("seq") == seq:
+                return event
+        return None
+
+    return _cached(key, signature, produce)
 
 
 def tail_events(path: Path, limit: int = TAIL_LIMIT) -> list[dict[str, Any]]:
@@ -313,11 +430,14 @@ def run_path(run_id: str, root: str | Path | None = None) -> Path:
     return _run_path(run_id, root)
 
 
-def revision(run_id: str, root: str | Path | None = None) -> str | None:
+def revision(run_id: str, root: str | Path | None = None, filters: dict[str, str] | None = None) -> str | None:
     """Cheap `revision` for `If-None-Match`: a raw `state.json` read and three stats.
 
     Returns `None` for an unreadable state, so the expensive path runs and turns
     it into the 500 the operator needs to see.
+
+    When ``filters`` are present, a short hash of the normalized filters is
+    appended so changing a filter invalidates the client's ETag.
     """
     run_path = _run_path(run_id, root)
     try:
@@ -326,7 +446,10 @@ def revision(run_id: str, root: str | Path | None = None) -> str | None:
         return None
     if not isinstance(state, dict):
         return None
-    return _revision(run_path, state)
+    base = _revision(run_path, state)
+    if filters:
+        return base + "-" + _filters_hash(filters)
+    return base
 
 
 def _revision(run_path: Path, state: dict[str, Any]) -> str:
@@ -340,8 +463,15 @@ def _revision(run_path: Path, state: dict[str, Any]) -> str:
     return hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:20]
 
 
-def run_payload(run_id: str, root: str | Path | None = None) -> dict[str, Any]:
-    """P1-P7 for one run plus the `revision` the client polls against."""
+def run_payload(run_id: str, root: str | Path | None = None,
+                filters: dict[str, str] | None = None,
+                limit: int = JOURNAL_LIMIT_DEFAULT) -> dict[str, Any]:
+    """P1-P7 for one run plus the `revision` the client polls against.
+
+    When ``filters`` are given the journal block is built from the whole log,
+    not from the 50-event tail.  ``filters`` and ``limit`` are echoed in
+    ``payload["journal"]["filters"]`` / ``payload["journal"]["limit"]``.
+    """
     run_path = _run_path(run_id, root)
     state = _state(run_path)
     pipeline = _pipeline()
@@ -373,6 +503,9 @@ def run_payload(run_id: str, root: str | Path | None = None) -> dict[str, Any]:
                 "gate": gate_id,
                 "gate_status": gate.get("status"),
                 "gate_approver": gate.get("approver"),
+                "gate_decided_by": gate.get("decided_by"),
+                "gate_decided_at": gate.get("decided_at"),
+                "gate_evidence": gate.get("evidence", []),
                 "attempts": gate.get("attempts", 0),
                 "max_attempts": stage.get("max_attempts"),
                 "tokens": bucket.get("tokens"),
@@ -387,9 +520,37 @@ def run_payload(run_id: str, root: str | Path | None = None) -> dict[str, Any]:
         counts[task["status"]] = counts.get(task["status"], 0) + 1
 
     budget = (pipeline["modes"].get(mode) or {}).get("budget") or {}
+    revision = _revision(run_path, state)
+    if filters:
+        revision = revision + "-" + _filters_hash(filters)
+
+    # Journal block: fast tail when no filters, full scan when any filter is set.
+    if filters:
+        journal_data = _filtered_journal(run_path, filters, limit)
+        journal = {
+            "events": journal_data["events"],
+            "total": state.get("event_count"),
+            "matched": journal_data["matched"],
+            "shown": len(journal_data["events"]),
+            "limit": limit,
+            "filters": dict(filters),
+            "event_types": sorted(EVENT_TYPES),
+        }
+    else:
+        shown_tail = tail[:limit]
+        journal = {
+            "events": shown_tail,
+            "total": state.get("event_count"),
+            "matched": state.get("event_count"),
+            "shown": len(shown_tail),
+            "limit": TAIL_LIMIT,
+            "filters": {},
+            "event_types": sorted(EVENT_TYPES),
+        }
+
     payload = {
         "run_id": run_id,
-        "revision": _revision(run_path, state),
+        "revision": revision,
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "header": {
             "project": project_title(run_path),
@@ -430,6 +591,7 @@ def run_payload(run_id: str, root: str | Path | None = None) -> dict[str, Any]:
                 "deps": task["deps"],
                 "reject_reasons": task.get("reject_reasons", []),
                 "allowed_files": task["allowed_files"],
+                "artifacts": task.get("artifacts", []),
             }
             for task in sorted(tasks, key=lambda item: item["task_id"])
         ],
@@ -442,7 +604,7 @@ def run_payload(run_id: str, root: str | Path | None = None) -> dict[str, Any]:
         },
         "metrics": _metrics(run_path),
         "trace": _trace(run_path),
-        "journal": {"events": tail, "limit": TAIL_LIMIT},
+        "journal": journal,
     }
     return payload
 

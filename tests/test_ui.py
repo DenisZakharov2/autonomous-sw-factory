@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from factory.engine import init_run
+from factory.errors import FactoryError
 from factory.ui import data, export
 from factory.ui.server import make_server
 from factory.usage_report import build_usage_report
@@ -895,3 +896,121 @@ def test_timeseries_panel_in_page():
         assert label in text
     # Bucket selector
     assert 'id="ts-bucket"' in text
+
+
+# -- SSE /events/stream -------------------------------------------------------
+def read_sse_frame(response, timeout: float = 10.0) -> dict[str, str]:
+    """Read one SSE frame (fields until a blank line), skipping comments."""
+    frame: dict[str, str] = {}
+    data_lines: list[str] = []
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        line = response.readline()
+        if not line:
+            break
+        line = line.decode("utf-8").rstrip("\r\n")
+        if not line:
+            if frame or data_lines:
+                break
+            continue
+        if line.startswith(":"):
+            continue  # heartbeat / comment
+        field, _, value = line.partition(": ")
+        if field == "data":
+            data_lines.append(value)
+        else:
+            frame[field] = value
+    if data_lines:
+        frame["data"] = "\n".join(data_lines)
+    return frame
+
+
+def test_read_events_from_leaves_a_partial_line_for_the_next_call(tmp_path):
+    journal = tmp_path / "blackbox.jsonl"
+    journal.write_text(
+        json.dumps({"seq": 1, "event_type": "ONE"}) + "\n" + '{"seq": 2, "even',
+        encoding="utf-8",
+    )
+    events, offset = data.read_events_from(journal, 0)
+    assert [event["seq"] for event in events] == [1]
+    # The writer finishes the line; the next read resumes where we stopped.
+    with journal.open("a", encoding="utf-8") as handle:
+        handle.write('t_type": "TWO"}\n')
+    events, _offset = data.read_events_from(journal, offset)
+    assert [event["seq"] for event in events] == [2]
+
+
+def test_read_events_from_recovers_from_truncation(tmp_path):
+    journal = tmp_path / "blackbox.jsonl"
+    journal.write_text(json.dumps({"seq": 1, "event_type": "A_LONGER_FIRST_LINE"}) + "\n", encoding="utf-8")
+    _events, offset = data.read_events_from(journal, 0)
+    journal.write_text(json.dumps({"seq": 5}) + "\n", encoding="utf-8")  # shorter file
+    events, _offset = data.read_events_from(journal, offset)
+    assert [event["seq"] for event in events] == [5]
+
+
+def test_read_events_from_raises_on_a_corrupt_complete_line(tmp_path):
+    journal = tmp_path / "blackbox.jsonl"
+    journal.write_text("not json\n", encoding="utf-8")
+    with pytest.raises(FactoryError):
+        data.read_events_from(journal, 0)
+
+
+def test_events_stream_unknown_run_is_404(served):
+    base, _root, _run = served
+    status, _headers, body = get(base, "/api/runs/nope/events/stream")
+    assert status == 404
+    assert json.loads(body)["error"]
+
+
+def test_events_stream_rejects_bad_from_seq(served):
+    base, _root, _run = served
+    status, _headers, body = get(base, "/api/runs/run-01/events/stream?from_seq=abc")
+    assert status == 400
+    assert "from_seq" in json.loads(body)["error"]
+    status, _headers, body = get(base, "/api/runs/run-01/events/stream?from_seq=-1")
+    assert status == 400
+
+
+def test_events_stream_replays_journal_from_seq_zero(served):
+    base, _root, _run = served
+    request = urllib.request.Request(base + "/api/runs/run-01/events/stream?from_seq=0")
+    with urllib.request.urlopen(request, timeout=10) as response:
+        assert response.headers["Content-Type"].startswith("text/event-stream")
+        frame = read_sse_frame(response)
+    assert frame["id"] == "1"
+    assert json.loads(frame["data"])["seq"] == 1
+
+
+def test_events_stream_default_sends_only_new_appends(served):
+    base, root, _run = served
+    request = urllib.request.Request(base + "/api/runs/run-01/events/stream")
+    with urllib.request.urlopen(request, timeout=10) as response:
+        time.sleep(0.5)  # let the handler open the stream before the append
+        with (root / "run-01" / "blackbox.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({"seq": 42, "event_type": "APPENDED", "why": "live"}) + "\n")
+        frame = read_sse_frame(response)
+    # The pre-existing seq 1 is skipped: the first frame is the live append.
+    assert frame["id"] == "42"
+    assert json.loads(frame["data"])["event_type"] == "APPENDED"
+
+
+def test_events_stream_resumes_with_last_event_id(served):
+    base, root, _run = served
+    with (root / "run-01" / "blackbox.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"seq": 2, "event_type": "SECOND"}) + "\n")
+    request = urllib.request.Request(
+        base + "/api/runs/run-01/events/stream", headers={"Last-Event-ID": "1"}
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        frame = read_sse_frame(response)
+    assert frame["id"] == "2"
+    assert json.loads(frame["data"])["event_type"] == "SECOND"
+
+
+def test_run_view_opens_an_event_stream_and_keeps_polling_as_the_data_path():
+    text = page_text()
+    assert "EventSource" in text
+    assert "/events/stream" in text
+    assert "startEventStream();" in text
+    assert "const POLL_MS = 2000;" in text  # SSE only triggers an early poll

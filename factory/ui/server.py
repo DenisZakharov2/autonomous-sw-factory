@@ -7,6 +7,7 @@ operator asks for it with `--host`.
 from __future__ import annotations
 
 import json
+import time
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,6 +22,12 @@ from .data import RunNotFound, FilterError, compare_runs, compare_revision, TIME
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8420
+
+# /events/stream: how often the journal file is polled for appends, and how
+# often a `: ping` comment is sent so a dead client surfaces as a write error
+# instead of a thread that lives forever.
+SSE_POLL_INTERVAL_S = 0.25
+SSE_HEARTBEAT_INTERVAL_S = 15.0
 
 CSP = (
     "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
@@ -106,6 +113,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 return self._export_xlsx(run_id)
             if len(segments) == 5 and segments[3] == "export":
                 return self._export_csv(run_id, segments[4], query)
+            if len(segments) == 5 and segments[3] == "events" and segments[4] == "stream":
+                return self._events_stream(run_id, query)
             if len(segments) == 5 and segments[3] == "events":
                 return self._event(run_id, segments[4])
         self._json(HTTPStatus.NOT_FOUND, {"error": "not found", "path": path})
@@ -201,6 +210,98 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 {"error": f"event seq {seq} not found", "run_id": run_id, "seq": seq},
             )
         self._json(HTTPStatus.OK, event)
+
+    def _events_stream(self, run_id: str, query: dict[str, list[str]]) -> None:
+        """SSE stream of journal appends for one run (read-only, stdlib only).
+
+        Resume contract: the query ``from_seq`` or the ``Last-Event-ID``
+        header selects the first event as ``seq > value``; absent means "only
+        events appended after this connection" (the UI already holds the tail
+        from the payload, so replaying it would duplicate rows).  ``from_seq=0``
+        replays the whole journal.  Frames carry ``id: <seq>`` when the event
+        has an integer ``seq`` so the browser reconnect resumes by itself.
+        """
+        try:
+            run_path = data.run_path(run_id, self.runs_dir)
+        except data.RunNotFound as exc:
+            return self._json(HTTPStatus.NOT_FOUND, {"error": str(exc), "run_id": run_id})
+        raw_from = (query.get("from_seq") or [""])[0].strip()
+        if not raw_from:
+            raw_from = (self.headers.get("Last-Event-ID") or "").strip()
+        from_seq = 0
+        if raw_from:
+            try:
+                from_seq = int(raw_from)
+                if from_seq < 0:
+                    raise ValueError
+            except ValueError:
+                return self._json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": f"from_seq must be a non-negative integer, got {raw_from!r}"},
+                )
+        # Without an explicit resume point the stream starts at the current
+        # end of the journal: live appends only.
+        if not raw_from:
+            from_seq = self._journal_max_seq(run_path)
+
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+
+        journal = run_path / "blackbox.jsonl"
+        offset = 0
+        last_beat = time.monotonic()
+        try:
+            while True:
+                events, offset = data.read_events_from(journal, offset)
+                for event in events:
+                    seq = event.get("seq")
+                    if isinstance(seq, int) and seq <= from_seq:
+                        continue
+                    self._sse_frame(event)
+                    last_beat = time.monotonic()
+                now = time.monotonic()
+                if now - last_beat >= SSE_HEARTBEAT_INTERVAL_S:
+                    self.wfile.write(f": ping {int(time.time())}\n\n".encode("utf-8"))
+                    self.wfile.flush()
+                    last_beat = now
+                time.sleep(SSE_POLL_INTERVAL_S)
+        except (BrokenPipeError, ConnectionResetError):
+            return  # the client went away; nothing to log on a local console
+        except FactoryError as exc:
+            # The stream is already open, so the error can only ride as an
+            # SSE comment; the client's next poll reports it as JSON too.
+            try:
+                self._sse_comment(f"error: {exc}")
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
+    def _sse_frame(self, event: dict[str, Any]) -> None:
+        seq = event.get("seq")
+        lines = []
+        if isinstance(seq, int):
+            lines.append(f"id: {seq}")
+        lines.append("data: " + json.dumps(event, ensure_ascii=False, separators=(",", ":")))
+        self.wfile.write(("\n".join(lines) + "\n\n").encode("utf-8"))
+        self.wfile.flush()
+
+    def _sse_comment(self, text: str) -> None:
+        for line in text.splitlines() or [""]:
+            self.wfile.write(f": {line}\n".encode("utf-8"))
+        self.wfile.write(b"\n")
+        self.wfile.flush()
+
+    @staticmethod
+    def _journal_max_seq(run_path: Path) -> int:
+        journal = run_path / "blackbox.jsonl"
+        max_seq = 0
+        for event in data.tail_events(journal, limit=50):
+            seq = event.get("seq")
+            if isinstance(seq, int):
+                max_seq = max(max_seq, seq)
+        return max_seq
 
     def _compare(self, query: dict[str, list[str]]) -> None:
         run_a = (query.get("a") or [""])[0].strip()

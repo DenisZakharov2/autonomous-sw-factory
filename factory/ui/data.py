@@ -414,6 +414,42 @@ def tail_events(path: Path, limit: int = TAIL_LIMIT) -> list[dict[str, Any]]:
     return rows
 
 
+def read_events_from(path: Path, offset: int) -> tuple[list[dict[str, Any]], int]:
+    """Incrementally read journal events from byte ``offset``.
+
+    Returns ``(events, new_offset)``.  A trailing line without ``\\n`` is the
+    writer mid-append: it is left unconsumed and picked up on the next call.
+    A file shorter than ``offset`` was truncated or rotated, so the read
+    restarts at 0.  A complete line that does not parse raises
+    ``FactoryError`` -- the journal is corrupt, not unfinished.
+    """
+    events: list[dict[str, Any]] = []
+    if not path.exists():
+        return events, 0
+    size = path.stat().st_size
+    if offset > size:
+        offset = 0
+    with path.open("r", encoding="utf-8") as handle:
+        handle.seek(offset)
+        while True:
+            position = handle.tell()
+            line = handle.readline()
+            if not line:
+                break
+            if not line.endswith("\n"):
+                handle.seek(position)
+                break
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise FactoryError(f"{path}: invalid JSON at byte {position}: {exc}") from exc
+            if isinstance(event, dict):
+                events.append(event)
+        return events, handle.tell()
+
+
 def _seconds_since(stamp: str | None) -> float | None:
     if not stamp:
         return None

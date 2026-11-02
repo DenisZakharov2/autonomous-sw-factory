@@ -1330,6 +1330,23 @@ function schedule() {
   timer = setTimeout(poll, POLL_MS);
 }
 
+// Live updates: the server pushes journal appends over SSE; each frame just
+// triggers an immediate poll, so the ETag/304 path stays the only data path
+// and a dead stream degrades to the plain 2 s polling above.
+let eventSource = null;
+let esDebounce = null;
+function startEventStream() {
+  if (!runId || typeof EventSource === "undefined") return;
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource(`/api/runs/${encodeURIComponent(runId)}/events/stream`);
+  eventSource.onmessage = () => {
+    clearTimeout(esDebounce);
+    esDebounce = setTimeout(() => { if (!paused) poll(); }, 150);
+  };
+  eventSource.onopen = () => { $("#live-dot").classList.remove("paused"); };
+  eventSource.onerror = () => { $("#live-dot").classList.add("paused"); };
+}
+
 function eventAge() {
   const last = payload && payload.now && payload.now.last_event;
   if (!last || !last.timestamp_utc) return "событий нет";
@@ -1880,6 +1897,7 @@ function boot() {
   panelWiring();
   buildCatalog();
   poll();
+  startEventStream();
   ticker = setInterval(tick, 1000);
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible" && !paused) poll();

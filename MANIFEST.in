@@ -3,6 +3,7 @@ include NOTICE
 include LICENSE
 include README.md
 include README.en.md
+include TECHNICAL.md
 include CHANGELOG.md
 include AUDIT.md
 include DESIGN.md

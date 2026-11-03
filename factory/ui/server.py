@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from ..errors import FactoryError
 from . import data, export
-from .data import RunNotFound, FilterError, compare_runs, compare_revision, TIMESERIES_METRICS, TIMESERIES_BUCKETS
+from .data import RunNotFound, FilterError, compare_runs, compare_revision, TIMESERIES_METRICS, TIMESERIES_BUCKETS, compare_artifact_revision, compare_artifact_data, ARTIFACT_NAMES
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8420
@@ -102,6 +102,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return self._compare(query)
         if path == "/api/compare/timeseries":
             return self._compare_timeseries(query)
+        if path == "/api/compare/artifact":
+            return self._compare_artifact(query)
         segments = [segment for segment in path.split("/") if segment]
         if len(segments) >= 3 and segments[0] == "api" and segments[1] == "runs":
             run_id = segments[2]
@@ -373,6 +375,46 @@ class DashboardHandler(BaseHTTPRequestHandler):
         except FactoryError as exc:
             return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
         etag = data.compare_timeseries_revision(run_a, run_b, self.runs_dir, metrics, bucket)
+        if etag and self._not_modified(etag):
+            return self._not_modified_response(etag)
+        self._json(HTTPStatus.OK, payload, etag=etag)
+
+    def _compare_artifact(self, query: dict[str, list[str]]) -> None:
+        run_a = (query.get("a") or [""])[0].strip()
+        run_b = (query.get("b") or [""])[0].strip()
+        name = (query.get("name") or ["spec"])[0].strip()
+        if not run_a or not run_b:
+            return self._json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "both 'a' and 'b' query parameters are required"},
+            )
+        if run_a == run_b:
+            return self._json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "run ids must differ"},
+            )
+        if name not in ARTIFACT_NAMES:
+            return self._json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": f"unknown artifact name: {name!r}", "allowed": list(ARTIFACT_NAMES)},
+            )
+        try:
+            etag = compare_artifact_revision(run_a, run_b, self.runs_dir, name)
+        except RunNotFound as exc:
+            return self._json(HTTPStatus.NOT_FOUND, {"error": str(exc)})
+        except FactoryError as exc:
+            return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
+        if etag and self._not_modified(etag):
+            return self._not_modified_response(etag)
+        try:
+            payload = compare_artifact_data(run_a, run_b, self.runs_dir, name)
+        except RunNotFound as exc:
+            return self._json(HTTPStatus.NOT_FOUND, {"error": str(exc)})
+        except ValueError as exc:
+            return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+        except FactoryError as exc:
+            return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
+        etag = compare_artifact_revision(run_a, run_b, self.runs_dir, name)
         if etag and self._not_modified(etag):
             return self._not_modified_response(etag)
         self._json(HTTPStatus.OK, payload, etag=etag)

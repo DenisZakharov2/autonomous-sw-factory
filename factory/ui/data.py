@@ -857,6 +857,105 @@ def compare_timeseries_data(run_id_a: str, run_id_b: str, root: str | Path | Non
     }
 
 
+# -- artifact comparison ----------------------------------------------------
+
+ARTIFACT_NAMES = ("spec", "acceptance", "plan")
+ARTIFACT_FILES = {name: f"artifacts/{name}.md" for name in ARTIFACT_NAMES}
+
+
+def _artifact_path(run_path: Path, name: str) -> Path:
+    """Return the artifact file path for a run. Name must be in ARTIFACT_NAMES."""
+    return run_path / ARTIFACT_FILES[name]
+
+
+def _read_artifact(run_path: Path, name: str) -> list[str] | None:
+    """Read artifact lines, or None if file does not exist."""
+    path = _artifact_path(run_path, name)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    return text.splitlines()
+
+
+def _artifact_stamp(run_path: Path, name: str) -> tuple[int, int] | None:
+    """(mtime_ns, size) of an artifact file, or None if missing."""
+    return _stamp(_artifact_path(run_path, name))
+
+
+def artifact_revision(run_id: str, root: str | Path | None = None, name: str = "spec") -> str | None:
+    """ETag for a single run's artifact: hash of the file stamp."""
+    if name not in ARTIFACT_NAMES:
+        return None
+    try:
+        run_path = _run_path(run_id, root)
+    except RunNotFound:
+        return None
+    stamp = _artifact_stamp(run_path, name)
+    if not stamp:
+        return None
+    return hashlib.sha1(f"{name}={stamp}".encode("utf-8")).hexdigest()[:20]
+
+
+def compare_artifact_revision(run_id_a: str, run_id_b: str, root: str | Path | None = None, name: str = "spec") -> str | None:
+    """ETag for /api/compare/artifact: hash of both artifact stamps + name."""
+    if name not in ARTIFACT_NAMES:
+        return None
+    rev_a = artifact_revision(run_id_a, root, name)
+    rev_b = artifact_revision(run_id_b, root, name)
+    if not rev_a or not rev_b:
+        return None
+    return hashlib.sha1(f"{rev_a}|{rev_b}|{name}".encode("utf-8")).hexdigest()[:20]
+
+
+def compare_artifact_data(run_id_a: str, run_id_b: str, root: str | Path | None = None, name: str = "spec") -> dict[str, Any]:
+    """Line-by-line diff of an artifact between two runs using stdlib difflib.
+
+    Returns ``{"name", "a": {"run_id", "present", "lines"}, "b": {...}, "rows": [{"tag", "left", "right"}]}
+    where tag ∈ equal|delete|insert|replace. Missing artifact -> present: false, lines: null.
+    Raises ``RunNotFound`` if either run does not exist, or ``ValueError`` if
+    ``run_id_a == run_id_b`` or unknown artifact name.
+    """
+    import difflib
+    if run_id_a == run_id_b:
+        raise ValueError("run ids must differ")
+    if name not in ARTIFACT_NAMES:
+        raise ValueError(f"unknown artifact name: {name!r} (allowed: {', '.join(ARTIFACT_NAMES)})")
+    path_a = _run_path(run_id_a, root)
+    path_b = _run_path(run_id_b, root)
+    lines_a = _read_artifact(path_a, name)
+    lines_b = _read_artifact(path_b, name)
+    present_a = lines_a is not None
+    present_b = lines_b is not None
+    a_lines = lines_a if lines_a is not None else []
+    b_lines = lines_b if lines_b is not None else []
+    opcodes = difflib.SequenceMatcher(None, a_lines, b_lines).get_opcodes()
+    rows: list[dict[str, Any]] = []
+    for tag, i1, i2, j1, j2 in opcodes:
+        if tag == "equal":
+            for k in range(i2 - i1):
+                rows.append({"tag": "equal", "left": a_lines[i1 + k], "right": b_lines[j1 + k]})
+        elif tag == "delete":
+            for k in range(i2 - i1):
+                rows.append({"tag": "delete", "left": a_lines[i1 + k], "right": None})
+        elif tag == "insert":
+            for k in range(j2 - j1):
+                rows.append({"tag": "insert", "left": None, "right": b_lines[j1 + k]})
+        elif tag == "replace":
+            # render as paired lines: old on left, new on right
+            max_len = max(i2 - i1, j2 - j1)
+            for k in range(max_len):
+                left = a_lines[i1 + k] if k < (i2 - i1) else None
+                right = b_lines[j1 + k] if k < (j2 - j1) else None
+                rows.append({"tag": "replace", "left": left, "right": right})
+    return {
+        "name": name,
+        "a": {"run_id": run_id_a, "present": present_a, "lines": lines_a},
+        "b": {"run_id": run_id_b, "present": present_b, "lines": lines_b},
+        "rows": rows,
+    }
+
+
 def run_payload(run_id: str, root: str | Path | None = None,
                 filters: dict[str, str] | None = None,
                 limit: int = JOURNAL_LIMIT_DEFAULT) -> dict[str, Any]:

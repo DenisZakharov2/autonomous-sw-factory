@@ -1036,6 +1036,127 @@ def test_compare_timeseries_ui_elements_in_page():
     assert "CMP_SERIES_COLORS" in text
 
 
+# -- M4: compare artifact -------------------------------------------------------
+def test_compare_artifact_requires_both_params(served):
+    base, _root, _run = served
+    status, _headers, body = get(base, "/api/compare/artifact")
+    assert status == 400
+    assert "both 'a' and 'b'" in json.loads(body)["error"]
+    status, _headers, _body = get(base, "/api/compare/artifact?a=run-01")
+    assert status == 400
+    status, _headers, _body = get(base, "/api/compare/artifact?b=run-01")
+    assert status == 400
+
+
+def test_compare_artifact_same_run_returns_400(served):
+    base, root, _run = served
+    init_run("run-02", "nano", root=root)
+    status, _headers, body = get(base, "/api/compare/artifact?a=run-01&b=run-01&name=spec")
+    assert status == 400
+    assert "differ" in json.loads(body)["error"]
+
+
+def test_compare_artifact_rejects_unknown_name(served):
+    base, root, _run = served
+    init_run("run-02", "nano", root=root)
+    status, _headers, body = get(base, "/api/compare/artifact?a=run-01&b=run-02&name=bogus")
+    assert status == 400
+    payload = json.loads(body)
+    assert "unknown artifact name" in payload["error"]
+    assert payload["allowed"] == ["spec", "acceptance", "plan"]
+
+
+def test_compare_artifact_unknown_run_returns_404(served):
+    base, _root, _run = served
+    status, _headers, _body = get(base, "/api/compare/artifact?a=run-01&b=nope&name=spec")
+    assert status == 404
+    status, _headers, _body = get(base, "/api/compare/artifact?a=nope&b=run-01&name=spec")
+    assert status == 404
+
+
+def _seed_artifact(root, run_dir, name, content):
+    artifact = run_dir / "artifacts" / f"{name}.md"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text(content, encoding="utf-8")
+
+
+def test_compare_artifact_returns_diff(served):
+    base, root, run_dir = served
+    _seed_artifact(root, run_dir, "spec", "# Spec A\n\nLine 1\nLine 2\n")
+    run2_dir, _state2, _event2 = init_run("run-02", "nano", root=root)
+    _seed_artifact(root, run2_dir, "spec", "# Spec B\n\nLine 1\nLine 2 modified\nLine 3\n")
+    data.clear_cache()
+
+    status, headers, body = get(base, "/api/compare/artifact?a=run-01&b=run-02&name=spec")
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["name"] == "spec"
+    assert payload["a"]["run_id"] == "run-01"
+    assert payload["a"]["present"] is True
+    assert payload["b"]["run_id"] == "run-02"
+    assert payload["b"]["present"] is True
+    assert headers.get("ETag")
+
+    # Check rows structure
+    rows = payload["rows"]
+    assert rows, "should have diff rows"
+    tags = [r["tag"] for r in rows]
+    assert "equal" in tags
+    assert "delete" in tags or "insert" in tags or "replace" in tags
+
+    # 304 on repeated request
+    status, _headers, _body = get(
+        base,
+        "/api/compare/artifact?a=run-01&b=run-02&name=spec",
+        headers={"If-None-Match": headers["ETag"]},
+    )
+    assert status == 304
+
+
+def test_compare_artifact_missing_one_side(served):
+    base, root, run_dir = served
+    # run-01 has no spec.md
+    run2_dir, _state2, _event2 = init_run("run-02", "nano", root=root)
+    _seed_artifact(root, run2_dir, "spec", "# Spec B\n\nOnly in B\n")
+    data.clear_cache()
+
+    status, _headers, body = get(base, "/api/compare/artifact?a=run-01&b=run-02&name=spec")
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["a"]["present"] is False
+    assert payload["a"]["lines"] is None
+    assert payload["b"]["present"] is True
+    assert payload["b"]["lines"] is not None
+    # Rows should show all inserts (from B perspective)
+    for row in payload["rows"]:
+        assert row["tag"] in ("insert", "equal")
+
+
+def test_compare_artifact_etag_changes_with_name(served):
+    base, root, run_dir = served
+    _seed_artifact(root, run_dir, "spec", "# Spec A\n")
+    _seed_artifact(root, run_dir, "acceptance", "# Accept A\n")
+    run2_dir, _state2, _event2 = init_run("run-02", "nano", root=root)
+    _seed_artifact(root, run2_dir, "spec", "# Spec B\n")
+    _seed_artifact(root, run2_dir, "acceptance", "# Accept B\n")
+    data.clear_cache()
+    _status, headers, _body = get(base, "/api/compare/artifact?a=run-01&b=run-02&name=spec")
+    etag_spec = headers["ETag"]
+    _status, headers, _body = get(base, "/api/compare/artifact?a=run-01&b=run-02&name=acceptance")
+    etag_acc = headers["ETag"]
+    assert etag_spec != etag_acc
+
+
+def test_compare_artifact_ui_elements_in_page():
+    text = page_text()
+    assert 'id="c-artifacts-body"' in text
+    assert 'data-panel="cp6"' in text
+    assert "/api/compare/artifact" in text
+    assert "function loadCompareArtifacts" in text
+    assert "function renderCompareArtifacts" in text
+    assert "ARTIFACT_NAMES" in text
+
+
 # -- SSE /events/stream -------------------------------------------------------
 def read_sse_frame(response, timeout: float = 10.0) -> dict[str, str]:
     """Read one SSE frame (fields until a blank line), skipping comments."""
@@ -1151,4 +1272,39 @@ def test_run_view_opens_an_event_stream_and_keeps_polling_as_the_data_path():
     assert "EventSource" in text
     assert "/events/stream" in text
     assert "startEventStream();" in text
-    assert "const POLL_MS = 2000;" in text  # SSE only triggers an early poll
+    assert "const POLL_MS = 2000;" in text  # SSE несёт события в журнал и пинает ранний poll
+
+
+# -- UX: тема, шорткаты, виртуализация журнала ------------------------------
+def test_theme_switcher_in_every_header_and_light_overrides_are_color_only():
+    text = page_text()
+    assert text.count("data-theme-toggle") >= 3  # прогоны, прогон, сравнение
+    assert 'const THEME_KEY = "ftcs.theme.v1";' in text
+    assert "prefers-color-scheme: light" in text
+    assert "document.documentElement.dataset.theme" in text
+    assert '[data-theme="light"]{' in text
+    assert "--bg:#f3f5f9" in text
+    # Светлая тема переопределяет только цвета: ни размеров, ни шрифтов в блоке.
+    light_block = text.split('[data-theme="light"]{', 1)[1].split("}", 1)[0]
+    assert "radius" not in light_block and "font" not in light_block
+
+
+def test_keyboard_shortcuts_are_global_and_skip_inputs():
+    text = page_text()
+    assert 'id="help"' in text
+    assert 'ev.target.closest("input,select,textarea,[contenteditable]")' in text
+    for key in ('ev.key === "j"', 'ev.key === "g"', 'ev.key === "G"', 'ev.key === "r"',
+                'ev.key === "/"', 'ev.key === "?"', 'ev.key === "Enter"', 'ev.key === "Escape"'):
+        assert key in text, key
+    assert "showDrawerEvent(jSel)" in text
+    assert 'id="runs-q"' in text
+    assert 'id="p7-filter-text"' in text  # поиск-альтернатива Ctrl+F поверх виртуализации
+
+
+def test_journal_is_virtualized_and_fed_by_sse_replay():
+    text = page_text()
+    assert "const J_OVER = 50;" in text
+    assert 'class="p7-scroll"' in text
+    assert 'class="vsp" aria-hidden="true"' in text  # распорки держат высоту скроллбара
+    assert "/events/stream?from_seq=0" in text       # полный реплей журнала в клиентское хранилище
+    assert "function renderJournalWindow()" in text

@@ -4,12 +4,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Factory — пульт прогона</title>
+<script>
+// Тема до первой отрисовки, чтобы светлая тема не мигала тёмной.
+(function(){var m="auto";try{m=localStorage.getItem("ftcs.theme.v1")||"auto"}catch(e){}
+document.documentElement.dataset.theme=(m==="light"||(m==="auto"&&matchMedia("(prefers-color-scheme: light)").matches))?"light":"dark";})();
+</script>
 <style>
 :root{
   --bg:#0B0D12; --panel:#12151E; --panel2:#171B26; --line:#232837;
   --fg:#E7E9F0; --muted:#8B91A5;
   --accent:#6366F1; --ok:#10B981; --warn:#F59E0B; --err:#EF4444; --idle:#64748B;
   --radius:10px; --mono:ui-monospace,"JetBrains Mono",Consolas,monospace;
+}
+[data-theme="light"]{
+  --bg:#f3f5f9; --panel:#ffffff; --panel2:#eef1f6; --line:#d7dce6;
+  --fg:#1d2333; --muted:#5a6274;
+  --accent:#4f46e5; --ok:#0c9a6c; --warn:#b45309; --err:#dc2626; --idle:#64748B;
 }
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
@@ -280,6 +290,46 @@ tbody tr:hover{background:#151926}
 .journal-row{cursor:pointer}
 .journal-row:hover{background:#171b26}
 .drawer-empty{color:var(--muted);font-style:italic}
+
+/* ---------- light theme: color-only overrides ---------- */
+[data-theme="light"] .topbar{box-shadow:0 4px 14px rgba(15,23,42,.08)}
+[data-theme="light"] .brand .meta .run{color:#4b5468}
+[data-theme="light"] .brand .meta .back{border-bottom-color:#b9c0cf}
+[data-theme="light"] .btn:hover{background:#e4e8f0;border-color:#c3cad8}
+[data-theme="light"] .btn.primary{border-color:#a5b4fc;background:#e0e7ff}
+[data-theme="light"] .menu,[data-theme="light"] .panel-settings,[data-theme="light"] .catalog,
+[data-theme="light"] #toast{background:#ffffff;border-color:#d7dce6;box-shadow:0 8px 24px rgba(15,23,42,.18)}
+[data-theme="light"] .menu button:hover{background:#eef1f6}
+[data-theme="light"] .icon-btn:hover{background:#e4e8f0}
+[data-theme="light"] .panel-head .grip{color:#9aa3b5}
+[data-theme="light"] th{color:#5a6274}
+[data-theme="light"] td{border-bottom-color:#e7eaf1}
+[data-theme="light"] tbody tr:hover{background:#eff2f8}
+[data-theme="light"] .journal-row:hover{background:#eff2f8}
+[data-theme="light"] .drawer-body tr:hover td{background:#eff2f8}
+[data-theme="light"] .drawer-body td{border-bottom-color:#e7eaf1}
+[data-theme="light"] .bar{background:#e4e8f0}
+[data-theme="light"] .now-event .meaning{color:#2a3040}
+[data-theme="light"] .errbox,[data-theme="light"] .tag.err,[data-theme="light"] #toast.err{color:#b91c1c}
+[data-theme="light"] .warnbox{color:#92400e}
+[data-theme="light"] .tag.ok{color:#0c7a54}
+[data-theme="light"] .drawer-body .evidence{background:#f3f5f9;color:#4b5468}
+[data-theme="light"] .resize{background:linear-gradient(135deg,transparent 50%,#b9c0cf 50%,#b9c0cf 60%,transparent 60%,transparent 72%,#b9c0cf 72%,#b9c0cf 82%,transparent 82%)}
+[data-theme="light"] *{scrollbar-color:#c3cad8 transparent}
+[data-theme="light"] ::-webkit-scrollbar-thumb{background:#c3cad8;border:3px solid transparent;background-clip:padding-box}
+
+/* ---------- journal virtualization ---------- */
+.p7-scroll{flex:1;min-height:0;overflow:auto}
+.journal-table .badge{padding:1px 9px;font-size:11px;line-height:1.3} /* единая высота строки для окна */
+.journal-row.sel td,.runs-table tbody tr.sel td{background:rgba(99,102,241,.16)}
+
+/* ---------- shortcuts cheatsheet ---------- */
+#help{position:fixed;inset:0;z-index:95;background:rgba(11,13,18,.55);display:flex;align-items:center;justify-content:center}
+#help .help-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 20px;max-width:460px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+#help h2{font-size:14px;margin-bottom:8px}
+#help table{font-size:12.5px}
+#help td{padding:3px 10px 3px 0;border:0}
+#help td.k{font-family:var(--mono);white-space:nowrap;color:var(--accent)}
 </style>
 </head>
 <body>
@@ -288,9 +338,11 @@ tbody tr:hover{background:#151926}
   <div class="runs-head">
     <h1>Factory</h1><span class="muted">прогоны</span>
     <span class="muted" id="runs-count"></span>
+    <input class="input" id="runs-q" type="search" placeholder="поиск · /" aria-label="Поиск прогонов" style="width:180px;align-self:center">
     <span class="live" style="margin-left:auto"><i class="dot" id="runs-dot"></i><span id="runs-live">обновляется</span></span>
     <button class="btn" id="btn-compare" disabled style="align-self:center">Выбрано: 0 / 2</button>
     <a class="btn" href="/api/export/runs.csv" style="align-self:center" title="Экспорт списка прогонов в CSV">CSV</a>
+    <button class="btn icon" data-theme-toggle aria-label="Тема" title="Тема" style="align-self:center">🌙</button>
   </div>
   <div id="runs-body"><div class="empty">Загрузка…</div></div>
 </section>
@@ -322,6 +374,7 @@ tbody tr:hover{background:#151926}
         <div class="catalog" id="catalog" hidden></div>
       </div>
       <button class="btn" id="btn-pause" aria-pressed="false">Пауза</button>
+      <button class="btn icon" data-theme-toggle aria-label="Тема" title="Тема">🌙</button>
       <div class="menu-wrap" id="export-wrap">
         <button class="btn icon" id="btn-export" aria-expanded="false" aria-haspopup="true" aria-label="Экспорт ▾" title="Экспорт ▾">
           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false"><path d="M7 1.5v6.5M4.2 5.6 7 8.4l2.8-2.8M2.5 11.5h9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -516,6 +569,34 @@ let ticker = null;
 let lastPollAt = 0;
 let dragId = null;
 
+// ---------------- theme (dark/light/auto) ----------------
+const THEME_KEY = "ftcs.theme.v1";
+const themeMedia = matchMedia("(prefers-color-scheme: light)");
+let themeMode = "auto";
+try { themeMode = localStorage.getItem(THEME_KEY) || "auto"; } catch (err) { /* localStorage недоступен */ }
+function applyTheme() {
+  const light = themeMode === "light" || (themeMode === "auto" && themeMedia.matches);
+  document.documentElement.dataset.theme = light ? "light" : "dark";
+  const label = themeMode === "auto" ? "авто" : light ? "светлая" : "тёмная";
+  const icon = themeMode === "auto" ? "💻" : light ? "☀️" : "🌙";
+  for (const b of document.querySelectorAll("[data-theme-toggle]")) {
+    b.textContent = icon;
+    b.setAttribute("aria-label", "Тема: " + label);
+    b.title = "Тема: " + label + " — переключить";
+  }
+}
+function cycleTheme() {
+  themeMode = themeMode === "auto" ? "dark" : themeMode === "dark" ? "light" : "auto";
+  try { localStorage.setItem(THEME_KEY, themeMode); } catch (err) { /* приватный режим */ }
+  applyTheme();
+  if (payload) applyPayload(payload);              // canvas-графики читают CSS-переменные
+  if (lastCompareTs) renderCompareTimeseries(lastCompareTs);
+}
+themeMedia.addEventListener("change", () => { if (themeMode === "auto") applyTheme(); });
+document.addEventListener("click", (ev) => {
+  if (ev.target.closest("[data-theme-toggle]")) cycleTheme();
+});
+
 // ---------------- panel scaffolding ----------------
 function buildPanel(id) {
   const panel = document.createElement("section");
@@ -592,6 +673,7 @@ async function loadRuns() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     runsEtag = res.headers.get("ETag");
     const data = await res.json();
+    runsData = data;
     renderRuns(data);
     flashDot("runs-dot");
   } catch (err) {
@@ -601,6 +683,8 @@ async function loadRuns() {
 }
 let runsEtag = null;
 let runsTimer = null;
+let runsData = null;
+let runSel = null;
 function scheduleRuns() {
   if (document.visibilityState !== "visible") return;
   clearTimeout(runsTimer);
@@ -610,6 +694,8 @@ function renderRuns(data) {
   const runs = data.runs || [];
   const params = new URLSearchParams(location.search);
   const q = (params.get("q") || "").toLowerCase();
+  const rqInput = $("#runs-q");
+  if (rqInput && rqInput.value !== (params.get("q") || "")) rqInput.value = params.get("q") || "";
   let filtered = runs;
   if (q) {
     filtered = runs.filter((r) => {
@@ -693,6 +779,10 @@ function renderRuns(data) {
       history.replaceState(null, "", "?" + np.toString());
       loadRuns();
     });
+  }
+  if (runSel) {
+    const selRow = document.querySelector(`#runs-body tbody tr[data-run="${CSS.escape(runSel)}"]`);
+    if (selRow) selRow.classList.add("sel");
   }
 }
 let compareSelected = [];
@@ -965,13 +1055,17 @@ function renderTimeseries(data) {
       params.set("bucket", bucketSelect.value);
       history.replaceState(null, "", "?" + params.toString());
       // Need to re-fetch data for new bucket
-      loadRun();
+      poll();
     });
   }
 }
 
 function drawChart(canvas, seriesList, metric) {
   const ctx = canvas.getContext("2d");
+  const css = getComputedStyle(document.documentElement);
+  const gridColor = css.getPropertyValue("--line").trim() || "#232837";
+  const mutedColor = css.getPropertyValue("--muted").trim() || "#8B91A5";
+  const fgColor = css.getPropertyValue("--fg").trim() || "#E7E9F0";
   const dpr = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
   canvas.width = rect.width * dpr;
@@ -1009,7 +1103,7 @@ function drawChart(canvas, seriesList, metric) {
   ctx.clearRect(0, 0, width, height);
 
   // Grid lines + Y labels
-  ctx.strokeStyle = "#232837";
+  ctx.strokeStyle = gridColor;
   ctx.lineWidth = 1;
   for (let i = 0; i <= 4; i++) {
     const y = padding.top + (plotHeight * i) / 4;
@@ -1018,14 +1112,14 @@ function drawChart(canvas, seriesList, metric) {
     ctx.lineTo(width - padding.right, y);
     ctx.stroke();
     const val = maxVal - (valRange * i) / 4;
-    ctx.fillStyle = "#8B91A5";
+    ctx.fillStyle = mutedColor;
     ctx.font = "10px var(--mono)";
     ctx.textAlign = "right";
     ctx.fillText(val >= 1000 ? (val/1000).toFixed(1) + "k" : val.toFixed(val < 1 ? 2 : 0), padding.left - 8, y + 3);
   }
 
   // X axis labels (relative time)
-  ctx.fillStyle = "#8B91A5";
+  ctx.fillStyle = mutedColor;
   ctx.font = "10px var(--mono)";
   ctx.textAlign = "center";
   for (let i = 0; i <= 4; i++) {
@@ -1058,7 +1152,7 @@ function drawChart(canvas, seriesList, metric) {
   }
 
   // Metric label
-  ctx.fillStyle = "#E7E9F0";
+  ctx.fillStyle = fgColor;
   ctx.font = "11px var(--mono)";
   ctx.textAlign = "left";
   ctx.fillText(metric, padding.left, padding.top - 4);
@@ -1110,76 +1204,171 @@ function renderChainBadge() {
   badge.innerHTML = `<span class="ico">${ok ? "✓" : "✕"}</span><span>${ok ? "цепочка цела" : "TAMPERED · seq " + esc(chain.seq ?? "?")}</span>`;
 }
 
+// ---------------- journal store + virtualization ----------------
+// Источник строк — клиентское хранилище: хвост из payload + полный реплей
+// журнала по SSE (?from_seq=0). Рендерится только видимое окно ± J_OVER строк,
+// остальное — две распорки, держащие высоту скроллбара.
+const J_OVER = 50;
+let jEvents = [];        // по возрастанию seq
+let jSeqs = new Set();
+let jDirty = false;      // есть несортированные добавления
+let jRows = [];          // после фильтров, новые сверху
+let jSel = null;         // seq выбранной строки
+let jRowH = 31;          // скользящее среднее по отрисованным строкам
+let jTick = false;
+
+function eventRow(e) {
+  // payload отдаёт плоские строки; сырые события из SSE несут verdict-объект
+  const v = e.verdict && typeof e.verdict === "object" ? e.verdict : {};
+  return {
+    seq: e.seq,
+    timestamp_utc: e.timestamp_utc,
+    stage: e.stage,
+    role: e.role,
+    event_type: e.event_type,
+    verdict: typeof e.verdict === "string" ? e.verdict : (v.status || null),
+    meaning: e.meaning || e.for_what || e.why || e.action || "",
+  };
+}
+function ingestJournal(events) {
+  for (const raw of events || []) {
+    const seq = raw && raw.seq;
+    if (typeof seq !== "number" || jSeqs.has(seq)) continue;
+    jSeqs.add(seq);
+    jEvents.push(eventRow(raw));
+    jDirty = true;
+  }
+}
+
 function renderJournal(data) {
-  const body = panelNode("p7").querySelector(".panel-body");
-  const settings = layout.settings.p7;
+  const panel = panelNode("p7");
+  const body = panel.querySelector(".panel-body");
   const journal = data.journal || {};
-  const events = journal.events || [];
-  const total = journal.total == null ? events.length : journal.total;
-  const matched = journal.matched == null ? events.length : journal.matched;
-  const chainBlock = chain ? `<div class="${chain.status === "OK" ? "warnbox" : "errbox"}">
+  ingestJournal(journal.events);
+  if (jDirty) { jEvents.sort((a, b) => (a.seq || 0) - (b.seq || 0)); jDirty = false; }
+  const params = new URLSearchParams(location.search);
+  const filterVerdict = params.get("verdict") || layout.settings.p7.filter || "all";
+  const filterStage = params.get("stage") || "";
+  const filterType = params.get("event_type") || "";
+  const q = params.get("q") || "";
+  const active = filterVerdict !== "all" || filterStage || filterType || q;
+  let rows = jEvents;
+  if (filterVerdict !== "all") rows = rows.filter((e) => e.verdict === filterVerdict);
+  if (filterStage) rows = rows.filter((e) => (e.stage || "") === filterStage);
+  if (filterType) rows = rows.filter((e) => (e.event_type || "") === filterType);
+  if (q) {
+    const needle = q.toLowerCase();
+    rows = rows.filter((e) => (`${e.seq} ${e.event_type || ""} ${e.stage || ""} ${e.role || ""} ${e.verdict || ""} ${e.meaning || ""}`).toLowerCase().includes(needle));
+  }
+  jRows = rows.slice().reverse();
+  if (!body.querySelector(".p7-scroll")) {
+    body.style.display = "flex";
+    body.style.flexDirection = "column";
+    body.style.overflow = "hidden";
+    body.innerHTML = `
+      <div class="p7-tools">
+        <button class="btn" id="btn-chain">Проверить цепочку</button>
+        <select id="p7-filter" title="Фильтр по вердикту" aria-label="Фильтр по вердикту">
+          <option value="all">все вердикты</option>
+          <option value="FAIL">только FAIL</option>
+          <option value="VETO">только VETO</option>
+        </select>
+        <select id="p7-filter-stage" title="Фильтр по стадии" aria-label="Фильтр по стадии">
+          <option value="">любая стадия</option>
+          ${(journal.event_types || []).map((t) => `<option value="${esc(t)}">стадия ${esc(t)}</option>`).join("")}
+        </select>
+        <select id="p7-filter-type" title="Фильтр по типу события" aria-label="Фильтр по типу события">
+          <option value="">любой тип</option>
+          ${(journal.event_types || []).map((t) => `<option value="${esc(t)}">тип ${esc(t)}</option>`).join("")}
+        </select>
+        <input class="input" id="p7-filter-text" type="search" placeholder="фильтр · /" aria-label="Текстовый фильтр журнала" style="width:150px">
+        <button class="btn" id="btn-filter-reset" style="font-size:11px;padding:3px 6px">сбросить фильтры</button>
+        <span class="muted" id="p7-count"></span>
+      </div>
+      <div id="p7-chain"></div>
+      <div class="p7-scroll" tabindex="0" aria-label="Журнал событий">
+        <table class="journal-table"><colgroup><col style="width:58px"><col style="width:146px"><col style="width:124px"><col style="width:198px"><col style="width:150px"><col style="width:96px"><col></colgroup><thead><tr><th class="num">seq</th><th>время</th><th>стадия</th><th>роль</th><th>тип</th><th>вердикт</th><th>смысл</th></tr></thead><tbody></tbody></table>
+      </div>`;
+    const filter = body.querySelector("#p7-filter");
+    const filterStageEl = body.querySelector("#p7-filter-stage");
+    const filterTypeEl = body.querySelector("#p7-filter-type");
+    const textFilter = body.querySelector("#p7-filter-text");
+    body.querySelector("#btn-chain").addEventListener("click", checkChain);
+    const onFilter = () => applyJournalFilter(filter.value, filterStageEl.value, filterTypeEl.value, textFilter.value);
+    filter.addEventListener("change", onFilter);
+    filterStageEl.addEventListener("change", onFilter);
+    filterTypeEl.addEventListener("change", onFilter);
+    textFilter.addEventListener("input", onFilter);
+    body.querySelector("#btn-filter-reset").addEventListener("click", resetJournalFilters);
+    body.querySelector(".p7-scroll").addEventListener("scroll", () => {
+      if (jTick) return;
+      jTick = true;
+      requestAnimationFrame(() => { jTick = false; renderJournalWindow(); });
+    }, { passive: true });
+  }
+  // Синхронизируем контролы с URL (deep link, кнопка «назад»).
+  const filter = body.querySelector("#p7-filter");
+  const filterStageEl = body.querySelector("#p7-filter-stage");
+  const filterTypeEl = body.querySelector("#p7-filter-type");
+  const textFilter = body.querySelector("#p7-filter-text");
+  if (filter.value !== filterVerdict) filter.value = filterVerdict;
+  if (filterStageEl.value !== filterStage) filterStageEl.value = filterStage;
+  if (filterTypeEl.value !== filterType) filterTypeEl.value = filterType;
+  if (textFilter.value !== q) textFilter.value = q;
+  const total = Math.max(jEvents.length, journal.total || 0);
+  body.querySelector("#p7-count").textContent = active ? `найдено ${jRows.length} из ${total}` : `всего ${total}`;
+  body.querySelector("#p7-chain").innerHTML = chain ? `<div class="${chain.status === "OK" ? "warnbox" : "errbox"}">
       цепочка: <b>${chain.status}</b>${chain.seq ? ` · первая ошибка в seq ${chain.seq}` : ""}
       <div class="muted" style="margin-top:4px">${esc(chain.checked_at || "")}</div>
       ${(chain.errors || []).slice(0, 5).map((e) => `<div class="mono" style="font-size:11px">${esc(e)}</div>`).join("")}
     </div>` : "";
-  const params = new URLSearchParams(location.search);
-  const filterVerdict = params.get("verdict") || settings.filter || "all";
-  const filterStage = params.get("stage") || "";
-  const filterType = params.get("event_type") || "";
-  const active = filterVerdict !== "all" || filterStage || filterType;
-  let rows = events;
-  if (filterVerdict !== "all") rows = rows.filter((e) => e.verdict === filterVerdict);
-  if (filterStage) rows = rows.filter((e) => (e.stage || "") === filterStage);
-  if (filterType) rows = rows.filter((e) => (e.event_type || "") === filterType);
-  const shown = rows.slice(-settings.limit);
-  body.innerHTML = `
-    <div class="p7-tools">
-      <button class="btn" id="btn-chain">Проверить цепочку</button>
-      <select id="p7-filter" title="Фильтр по вердикту">
-        <option value="all"${filterVerdict === "all" ? " selected" : ""}>все вердикты</option>
-        <option value="FAIL"${filterVerdict === "FAIL" ? " selected" : ""}>только FAIL</option>
-        <option value="VETO"${filterVerdict === "VETO" ? " selected" : ""}>только VETO</option>
-      </select>
-      <select id="p7-filter-stage" title="Фильтр по стадии">
-        <option value="">любая стадия</option>
-        ${(journal.event_types || []).map((t) => `<option value="${esc(t)}"${filterStage === t ? " selected" : ""}>стадия ${esc(t)}</option>`).join("")}
-      </select>
-      <select id="p7-filter-type" title="Фильтр по типу события">
-        <option value="">любой тип</option>
-        ${(journal.event_types || []).map((t) => `<option value="${esc(t)}"${filterType === t ? " selected" : ""}>тип ${esc(t)}</option>`).join("")}
-      </select>
-      ${active ? `<button class="btn" id="btn-filter-reset" style="font-size:11px;padding:3px 6px">сбросить фильтры</button>` : ""}
-      <span class="muted" id="p7-count">
-        ${active ? `под фильтр ${matched} из ${total} · показано ${shown.length}` : `всего ${total}`}
-      </span>
-    </div>
-    ${chainBlock}
-    ${shown.length ? `<table class="journal-table"><colgroup><col style="width:58px"><col style="width:146px"><col style="width:124px"><col style="width:198px"><col style="width:150px"><col style="width:96px"><col></colgroup><thead><tr><th class="num">seq</th><th>время</th><th>стадия</th><th>роль</th><th>тип</th><th>вердикт</th><th>смысл</th></tr></thead><tbody>
-      ${shown.slice().reverse().map((event) => `<tr data-seq="${esc(event.seq)}" class="journal-row"><td class="mono num">${esc(event.seq)}</td>
-        <td class="mono nowrap">${esc(shortTime(event.timestamp_utc))}</td>
-        <td class="mono">${esc(event.stage || "—")}</td>
-        <td class="mono">${esc(event.role || "—")}</td>
-        <td class="mono">${esc(event.event_type)}</td>
-        <td>${event.verdict ? `<span class="badge ${(STATUS[event.verdict] || {}).cls || "idle"}"><span class="ico">${(STATUS[event.verdict] || {}).ico || "·"}</span><span>${esc(event.verdict)}</span></span>` : '<span class="muted">—</span>'}</td>
-        <td><span class="cut-text" title="${esc(event.meaning || "")}">${esc(event.meaning || "")}</span></td></tr>`).join("")}
-    </tbody></table>` : active ? '<div class="empty">под фильтр ничего не попало — нажмите «сбросить фильтры»</div>' : '<div class="empty">событий пока нет</div>'}`;
-  panelNode("p7").querySelector(".head-badge").textContent = String(shown.length);
-  const btn = panelNode("p7").querySelector("#btn-chain");
-  if (btn) btn.addEventListener("click", checkChain);
-  const filter = panelNode("p7").querySelector("#p7-filter");
-  const filterStageEl = panelNode("p7").querySelector("#p7-filter-stage");
-  const filterTypeEl = panelNode("p7").querySelector("#p7-filter-type");
-  const resetBtn = panelNode("p7").querySelector("#btn-filter-reset");
-  if (filter) filter.addEventListener("change", () => applyJournalFilter(filter.value, filterStageEl.value, filterTypeEl.value));
-  if (filterStageEl) filterStageEl.addEventListener("change", () => applyJournalFilter(filter.value, filterStageEl.value, filterTypeEl.value));
-  if (filterTypeEl) filterTypeEl.addEventListener("change", () => applyJournalFilter(filter.value, filterStageEl.value, filterTypeEl.value));
-  if (resetBtn) resetBtn.addEventListener("click", () => resetJournalFilters());
-  const textFilter = panelNode("p7").querySelector("#p7-filter-text");
-  if (textFilter) {
-    textFilter.value = params.get("q") || "";
-    textFilter.addEventListener("input", () => applyJournalFilter(filterVerdict, filterStage, filterType, textFilter.value));
+  panel.querySelector(".head-badge").textContent = String(jRows.length);
+  renderJournalWindow();
+}
+
+function journalRowHtml(event) {
+  const sel = event.seq === jSel ? " sel" : "";
+  return `<tr data-seq="${esc(event.seq)}" class="journal-row${sel}"><td class="mono num">${esc(event.seq)}</td>
+    <td class="mono nowrap">${esc(shortTime(event.timestamp_utc))}</td>
+    <td class="mono">${esc(event.stage || "—")}</td>
+    <td class="mono">${esc(event.role || "—")}</td>
+    <td class="mono">${esc(event.event_type)}</td>
+    <td>${event.verdict ? `<span class="badge ${(STATUS[event.verdict] || {}).cls || "idle"}"><span class="ico">${(STATUS[event.verdict] || {}).ico || "·"}</span><span>${esc(event.verdict)}</span></span>` : '<span class="muted">—</span>'}</td>
+    <td><span class="cut-text" title="${esc(event.meaning || "")}">${esc(event.meaning || "")}</span></td></tr>`;
+}
+
+function renderJournalWindow() {
+  const panel = panelNode("p7");
+  if (!panel) return;
+  const sc = panel.querySelector(".p7-scroll");
+  const tb = panel.querySelector(".journal-table tbody");
+  if (!sc || !tb) return;
+  const total = jRows.length;
+  if (!total) {
+    const params = new URLSearchParams(location.search);
+    const active = params.get("verdict") || params.get("stage") || params.get("event_type") || params.get("q");
+    tb.innerHTML = `<tr><td colspan="7" class="empty">${active ? "под фильтр ничего не попало — нажмите «сбросить фильтры»" : "событий пока нет"}</td></tr>`;
+    return;
+  }
+  const first = clamp(Math.floor(sc.scrollTop / jRowH) - J_OVER, 0, Math.max(total - 1, 0));
+  const last = clamp(Math.ceil((sc.scrollTop + sc.clientHeight) / jRowH) + J_OVER, first, total);
+  let html = "";
+  if (first > 0) html += `<tr class="vsp" aria-hidden="true"><td colspan="7" style="height:${first * jRowH}px;padding:0;border:0"></td></tr>`;
+  for (let i = first; i < last; i++) html += journalRowHtml(jRows[i]);
+  if (last < total) html += `<tr class="vsp" aria-hidden="true"><td colspan="7" style="height:${(total - last) * jRowH}px;padding:0;border:0"></td></tr>`;
+  tb.innerHTML = html;
+  // Высота строки гуляет на ±1px (бейджи): jRowH — скользящее среднее,
+  // чтобы распорки и прокрутка к seq оставались точными на длинном журнале.
+  const trs = tb.querySelectorAll("tr.journal-row");
+  if (trs.length) {
+    let sum = 0;
+    const n = Math.min(trs.length, 10);
+    for (let i = 0; i < n; i++) sum += trs[i].getBoundingClientRect().height;
+    const avg = sum / n;
+    if (avg > 20 && Math.abs(avg - jRowH) > 0.05) jRowH = avg;
   }
 }
+
 function applyJournalFilter(verdict, stage, type, q = "") {
   const params = new URLSearchParams(location.search);
   params.set("verdict", verdict === "all" ? "" : verdict);
@@ -1187,11 +1376,19 @@ function applyJournalFilter(verdict, stage, type, q = "") {
   params.set("event_type", type || "");
   params.set("q", q || "");
   history.replaceState(null, "", "?" + params.toString());
-  loadRun();
+  jSel = null;
+  const panel = panelNode("p7");
+  const sc = panel && panel.querySelector(".p7-scroll");
+  if (sc) sc.scrollTop = 0;
+  if (payload) renderJournal(payload);
 }
 function resetJournalFilters() {
-  history.replaceState(null, "", "");
-  loadRun();
+  const params = new URLSearchParams(location.search);
+  for (const k of ["verdict", "stage", "event_type", "q"]) params.delete(k);
+  const qs = params.toString();
+  history.replaceState(null, "", qs ? "?" + qs : location.pathname);
+  jSel = null;
+  if (payload) renderJournal(payload);
 }
 
 async function checkChain() {
@@ -1226,9 +1423,7 @@ function renderSettings(id) {
     html = `<label>вердикт<select data-setting="p7.filter">
       <option value="all"${settings.p7.filter === "all" ? " selected" : ""}>все</option>
       <option value="FAIL"${settings.p7.filter === "FAIL" ? " selected" : ""}>FAIL</option>
-      <option value="VETO"${settings.p7.filter === "VETO" ? " selected" : ""}>VETO</option></select></label>
-      <label>строк<input class="input" type="number" min="10" max="50" step="10" style="width:64px"
-        data-setting="p7.limit" value="${settings.p7.limit}"></label>`;
+      <option value="VETO"${settings.p7.filter === "VETO" ? " selected" : ""}>VETO</option></select></label>`;
   } else {
     html = '<div class="muted">у этой панели настроек нет</div>';
   }
@@ -1333,10 +1528,12 @@ let esDebounce = null;
 function startEventStream() {
   if (!runId || typeof EventSource === "undefined") return;
   if (eventSource) eventSource.close();
-  eventSource = new EventSource(`/api/runs/${encodeURIComponent(runId)}/events/stream`);
-  eventSource.onmessage = () => {
+  eventSource = new EventSource(`/api/runs/${encodeURIComponent(runId)}/events/stream?from_seq=0`);
+  eventSource.onmessage = (msg) => {
+    // Кадр — полное событие журнала: пополняем хранилище панели «Журнал».
+    try { ingestJournal([JSON.parse(msg.data)]); } catch (err) { /* не JSON — пропускаем */ }
     clearTimeout(esDebounce);
-    esDebounce = setTimeout(() => { if (!paused) poll(); }, 150);
+    esDebounce = setTimeout(() => { if (!paused) { if (payload) renderJournal(payload); poll(); } }, 150);
   };
   eventSource.onopen = () => { $("#live-dot").classList.remove("paused"); };
   eventSource.onerror = () => { $("#live-dot").classList.add("paused"); };
@@ -1858,6 +2055,7 @@ function renderCompareTrace(trace) {
 
 // ---------------- compare timeseries ----------------
 let compareTsEtag = null;
+let lastCompareTs = null;
 
 async function loadCompareTimeseries() {
   try {
@@ -1878,6 +2076,7 @@ async function loadCompareTimeseries() {
 }
 
 function renderCompareTimeseries(data) {
+  lastCompareTs = data;
   const body = $("#c-ts-body");
   if (!data || !data.a || !data.b) {
     body.innerHTML = '<div class="empty">time-series данных нет</div>';
@@ -1942,8 +2141,99 @@ function renderCompareTimeseries(data) {
   }
 }
 
+// ---------------- compare artifacts --------------------
+const ARTIFACT_NAMES = ["spec", "acceptance", "plan"];
+let compareArtifactsEtag = null;
+let compareArtifactsName = "spec";
+
+async function loadCompareArtifacts() {
+  try {
+    const headers = {};
+    if (compareArtifactsEtag) headers["If-None-Match"] = compareArtifactsEtag;
+    const params = new URLSearchParams(location.search);
+    const name = params.get("artifact") || "spec";
+    compareArtifactsName = name;
+    const url = `/api/compare/artifact?a=${encodeURIComponent(compareIdA)}&b=${encodeURIComponent(compareIdB)}&name=${encodeURIComponent(name)}`;
+    const res = await fetch(url, { headers });
+    if (res.status === 304) return;
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    compareArtifactsEtag = res.headers.get("ETag");
+    renderCompareArtifacts(await res.json());
+  } catch (err) {
+    $("#c-artifacts-body").innerHTML = `<div class="errbox">Не удалось загрузить дифф артефактов: ${esc(err.message)}</div>`;
+  }
+}
+
+function renderCompareArtifacts(data) {
+  const body = $("#c-artifacts-body");
+  if (!data || !data.rows) {
+    body.innerHTML = '<div class="empty">дифф недоступен</div>';
+    return;
+  }
+  const name = data.name || compareArtifactsName;
+  const a = data.a || { run_id: compareIdA, present: false, lines: null };
+  const b = data.b || { run_id: compareIdB, present: false, lines: null };
+  const rows = data.rows || [];
+
+  // Build artifact selector tabs
+  const tabsHtml = ARTIFACT_NAMES.map(n => `
+    <button class="btn${n === name ? " primary" : ""}" data-cmp-artifact="${n}" style="flex:1">${n}</button>
+  `).join("");
+
+  // Build diff rows
+  let rowsHtml = "";
+  for (const row of rows) {
+    const tag = row.tag;
+    const left = row.left == null ? "" : esc(row.left);
+    const right = row.right == null ? "" : esc(row.right);
+    if (tag === "equal") {
+      rowsHtml += `<tr class="diff-equal"><td class="mono">${left}</td><td class="mono">${right}</td></tr>`;
+    } else if (tag === "delete") {
+      rowsHtml += `<tr class="diff-delete"><td class="mono" style="background:rgba(239,68,68,.15)">${left}</td><td class="muted">—</td></tr>`;
+    } else if (tag === "insert") {
+      rowsHtml += `<tr class="diff-insert"><td class="muted">—</td><td class="mono" style="background:rgba(16,185,129,.15)">${right}</td></tr>`;
+    } else if (tag === "replace") {
+      rowsHtml += `<tr class="diff-replace"><td class="mono" style="background:rgba(239,68,68,.15)">${left}</td><td class="mono" style="background:rgba(16,185,129,.15)">${right}</td></tr>`;
+    }
+  }
+
+  // Missing artifact message
+  const aMissing = !a.present ? `<div class="warnbox">A (${esc(a.run_id)}): артефакт не создан</div>` : "";
+  const bMissing = !b.present ? `<div class="warnbox">B (${esc(b.run_id)}): артефакт не создан</div>` : "";
+
+  body.innerHTML = `
+    <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+      <div style="display:flex;gap:4px;flex:1;min-width:200px">${tabsHtml}</div>
+    </div>
+    ${aMissing}${bMissing}
+    <div style="overflow:auto">
+      <table style="table-layout:fixed;width:100%">
+        <thead>
+          <tr>
+            <th style="width:50%">A: ${esc(a.run_id)}</th>
+            <th style="width:50%">B: ${esc(b.run_id)}</th>
+          </tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    </div>
+    ${rows.length === 0 ? '<div class="empty" style="margin-top:8px">артефакты идентичны</div>' : ""}
+  `;
+
+  // Wire tabs
+  for (const btn of body.querySelectorAll("[data-cmp-artifact]")) {
+    btn.addEventListener("click", () => {
+      const params = new URLSearchParams(location.search);
+      params.set("artifact", btn.dataset.cmpArtifact);
+      history.replaceState(null, "", "?" + params.toString());
+      loadCompareArtifacts();
+    });
+  }
+}
+
 // ---------------- boot ----------------
 function boot() {
+  applyTheme();
   const params = new URLSearchParams(location.search);
   runId = params.get("run");
   const compare = params.get("compare");
@@ -1954,14 +2244,27 @@ function boot() {
       compareIdB = b;
       $("#view-compare").hidden = false;
       loadCompare();
+      loadCompareArtifacts();
+      loadCompareTimeseries();
       document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "visible" && !comparePaused) loadCompare();
+        if (document.visibilityState === "visible" && !comparePaused) {
+          loadCompare();
+          loadCompareArtifacts();
+          loadCompareTimeseries();
+        }
       });
       return;
     }
   }
   if (!runId) {
     $("#view-runs").hidden = false;
+    const rq = $("#runs-q");
+    if (rq) rq.addEventListener("input", () => {
+      const p = new URLSearchParams(location.search);
+      p.set("q", rq.value || "");
+      history.replaceState(null, "", "?" + p.toString());
+      if (runsData) renderRuns(runsData);
+    });
     loadRuns();
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") loadRuns();
@@ -2115,16 +2418,107 @@ async function showDrawerEvent(seq) {
   }
 }
 
+// ---------------- keyboard shortcuts ----------------
+let gPressedAt = 0;
+function currentJournalScroll() {
+  const panel = panelNode("p7");
+  return panel ? panel.querySelector(".p7-scroll") : null;
+}
+function scrollJournalTo(index) {
+  const sc = currentJournalScroll();
+  if (!sc) return;
+  const top = index * jRowH;
+  if (top < sc.scrollTop) sc.scrollTop = top;
+  else if (top + jRowH > sc.scrollTop + sc.clientHeight) sc.scrollTop = top + jRowH - sc.clientHeight;
+}
+function journalStep(delta) {
+  if (!jRows.length) return;
+  let idx = jRows.findIndex((e) => e.seq === jSel);
+  idx = idx < 0 ? (delta > 0 ? 0 : jRows.length - 1) : clamp(idx + delta, 0, jRows.length - 1);
+  jSel = jRows[idx].seq;
+  scrollJournalTo(idx);
+  renderJournalWindow();
+  scrollSelectedIntoView();
+}
+// Точная поправка по реальному DOM: высоты строк гуляют, расчёт по jRowH — нет.
+function scrollSelectedIntoView() {
+  const sc = currentJournalScroll();
+  const el = sc && sc.querySelector(".journal-row.sel");
+  if (!el) return;
+  const scBox = sc.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  if (r.top < scBox.top) sc.scrollTop -= scBox.top - r.top;
+  else if (r.bottom > scBox.bottom) sc.scrollTop += r.bottom - scBox.bottom;
+}
+function journalJump(toLast) {
+  if (!jRows.length) return;
+  const idx = toLast ? jRows.length - 1 : 0;
+  jSel = jRows[idx].seq;
+  const sc = currentJournalScroll();
+  if (sc) sc.scrollTop = toLast ? jRows.length * jRowH : 0;
+  renderJournalWindow();
+  scrollSelectedIntoView();
+}
+function runsStep(delta) {
+  const rows = Array.from(document.querySelectorAll("#runs-body tbody tr"));
+  if (!rows.length) return;
+  let idx = rows.findIndex((r) => r.dataset.run === runSel);
+  idx = idx < 0 ? (delta > 0 ? 0 : rows.length - 1) : clamp(idx + delta, 0, rows.length - 1);
+  runSel = rows[idx].dataset.run;
+  for (const r of rows) r.classList.toggle("sel", r.dataset.run === runSel);
+  rows[idx].scrollIntoView({ block: "nearest" });
+}
+function toggleHelp(show) {
+  const help = $("#help");
+  if (!help) return;
+  help.hidden = show == null ? !help.hidden : !show;
+}
 document.addEventListener("keydown", (ev) => {
+  const field = ev.target && ev.target.closest ? ev.target.closest("input,select,textarea,[contenteditable]") : null;
   if (ev.key === "Escape") {
+    const help = $("#help");
+    if (help && !help.hidden) { toggleHelp(false); return; }
     const drawer = $("#drawer");
-    if (drawer && !drawer.hidden) closeDrawer();
+    if (drawer && !drawer.hidden) { closeDrawer(); return; }
+    if (field) { field.blur(); return; }
+    if (jSel !== null) { jSel = null; renderJournalWindow(); }
+    if (runSel !== null) {
+      runSel = null;
+      for (const r of document.querySelectorAll("#runs-body tbody tr.sel")) r.classList.remove("sel");
+    }
+    return;
+  }
+  if (field || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  const onRun = !$("#view-run").hidden;
+  const onRuns = !$("#view-runs").hidden;
+  if (ev.key === "?") { toggleHelp(); return; }
+  if (ev.key === "/") {
+    const input = onRun ? $("#p7-filter-text") : onRuns ? $("#runs-q") : null;
+    if (input) { ev.preventDefault(); input.focus(); input.select(); }
+    return;
+  }
+  if (ev.key === "j" || ev.key === "k") {
+    if (onRun) { ev.preventDefault(); journalStep(ev.key === "j" ? 1 : -1); }
+    else if (onRuns) { ev.preventDefault(); runsStep(ev.key === "j" ? 1 : -1); }
+    return;
+  }
+  if (ev.key === "Enter") {
+    if (onRun && jSel != null) { ev.preventDefault(); showDrawerEvent(jSel); }
+    else if (onRuns && runSel) { ev.preventDefault(); location.search = `?run=${encodeURIComponent(runSel)}`; }
+    return;
+  }
+  if (ev.key === "g") {
+    const now = Date.now();
+    if (now - gPressedAt < 500 && onRun) journalJump(false);
+    gPressedAt = now;
+    return;
+  }
+  if (ev.key === "G") { if (onRun) journalJump(true); return; }
+  if (ev.key === "r") {
+    if (onRun) { etag = null; poll(); }
+    else if (onRuns) { runsEtag = null; loadRuns(); }
   }
 });
-const overlayEl = $("#drawer-overlay");
-if (overlayEl) overlayEl.addEventListener("click", closeDrawer);
-const closeBtn = $("#drawer-close");
-if (closeBtn) closeBtn.addEventListener("click", closeDrawer);
 
 // Deep link for event drawer
 setTimeout(() => {
@@ -2138,7 +2532,16 @@ setTimeout(() => {
 
 // #view-compare and the drawer markup live after this script in the document,
 // so boot has to wait for the parser to reach them.
-document.addEventListener("DOMContentLoaded", boot);
+document.addEventListener("DOMContentLoaded", () => {
+  boot();
+  // Drawer wiring: overlay and close button must be bound after markup exists.
+  const overlayEl = $("#drawer-overlay");
+  if (overlayEl) overlayEl.addEventListener("click", closeDrawer);
+  const closeBtn = $("#drawer-close");
+  if (closeBtn) closeBtn.addEventListener("click", closeDrawer);
+  const help = $("#help");
+  if (help) help.addEventListener("click", (ev) => { if (ev.target === help) help.hidden = true; });
+});
 </script>
 <div id="drawer" class="drawer" hidden>
   <div class="drawer-head">
@@ -2148,6 +2551,23 @@ document.addEventListener("DOMContentLoaded", boot);
   <div class="drawer-body" id="drawer-body"></div>
 </div>
 <div id="drawer-overlay" class="drawer-overlay"></div>
+
+<div id="help" hidden role="dialog" aria-modal="true" aria-label="Клавиатурные шорткаты">
+  <div class="help-card">
+    <h2>Шорткаты</h2>
+    <table><tbody>
+      <tr><td class="k">j / k</td><td>следующее / предыдущее событие журнала или строка прогона</td></tr>
+      <tr><td class="k">Enter</td><td>открыть выбранное событие / прогон</td></tr>
+      <tr><td class="k">/</td><td>фильтр журнала / поиск прогонов</td></tr>
+      <tr><td class="k">g g</td><td>к первому событию журнала</td></tr>
+      <tr><td class="k">G</td><td>к последнему событию</td></tr>
+      <tr><td class="k">r</td><td>обновить данные сейчас</td></tr>
+      <tr><td class="k">Esc</td><td>закрыть карточку, снять фокус и выделение</td></tr>
+      <tr><td class="k">?</td><td>эта справка</td></tr>
+    </tbody></table>
+    <p class="muted" style="margin:8px 0 0">Журнал виртуализирован: Ctrl+F видит только отрисованные строки — ищите через «/».</p>
+  </div>
+</div>
 
 <section id="view-compare" hidden>
   <header class="topbar">
@@ -2160,6 +2580,7 @@ document.addEventListener("DOMContentLoaded", boot);
     </div>
     <div class="toolbar">
       <button class="btn" id="c-pause" aria-pressed="false">Пауза</button>
+      <button class="btn icon" data-theme-toggle aria-label="Тема" title="Тема">🌙</button>
     </div>
   </header>
   <div class="grid" id="c-grid" style="padding: 16px 24px 40px;">
@@ -2202,6 +2623,14 @@ document.addEventListener("DOMContentLoaded", boot);
         <span class="head-badge">оверлей</span>
       </div>
       <div class="panel-body" id="c-ts-body"><div class="empty">загрузка…</div></div>
+    </div>
+    <div class="panel" data-panel="cp6" style="grid-column: span 12; grid-row: span 5;">
+      <div class="panel-head">
+        <span class="grip" aria-hidden="true">⠿</span>
+        <h2>Артефакты (A vs B)</h2>
+        <span class="head-badge">diff</span>
+      </div>
+      <div class="panel-body" id="c-artifacts-body"><div class="empty">загрузка…</div></div>
     </div>
   </div>
 </section>

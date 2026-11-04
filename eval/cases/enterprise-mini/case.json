@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0.0",
+  "id": "enterprise-mini",
+  "mode": "enterprise",
+  "title": "CLI todo: полный цикл через все стадии в режиме enterprise (все 22 роли)",
+  "tags": ["enterprise", "all-roles", "cli", "smoke"],
+  "max_steps": 200,
+  "max_cycles": 20,
+  "thresholds": {"steps_growth": 0, "events_fall": 0, "tokens_growth": 0.1, "usd_growth": 0.1}
+}

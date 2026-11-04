@@ -447,6 +447,46 @@ def test_task_reset_unblocks_an_escalated_task(nano_run):
     assert task["attempts"] == 0
 
 
+def test_gate_reject_self_rework_returns_produce_with_feedback(nano_run):
+    """После gate_reject при rework_to == stage_id: задачи → pending,
+    стадия → in_progress, next_action → produce с feedback верификатора."""
+    run, _, _ = nano_run
+    _advance_to(run, "s4_build")
+    _write(run, "artifacts/plan.md", PLAN)
+    from factory.engine import import_plan
+
+    import_plan("run-01", root=run.parent)
+
+    task_claim("run-01", "TASK-001", "12-fullstack-developer", root=run.parent)
+    _write(run, "product/src/todo.py", "print('ok')\n")
+    task_submit("run-01", "TASK-001", "12-fullstack-developer",
+                ["product/src/todo.py"], root=run.parent)
+    write_task_verification(run, "TASK-001")
+    task_accept("run-01", "TASK-001", root=run.parent)
+    assert load_state(run)["tasks"]["TASK-001"]["status"] == "accepted"
+
+    # Верификатор вернул FAIL — отчёт на диске.
+    write_stage_verification(run, "s4_build", verdict="FAIL",
+                             reason="хакерские байты в product/src/todo.py")
+
+    gate_reject("run-01", gate_id="gate_s4", approver="02-independent-verifier",
+                evidence=["verifier FAIL"], root=run.parent)
+
+    state = load_state(run)
+    assert state["stage_status"]["s4_build"] == "in_progress"
+    assert state["gate_status"]["gate_s4"]["status"] == "rejected"
+    assert state["gate_status"]["gate_s4"]["attempts"] == 1
+    task = state["tasks"]["TASK-001"]
+    assert task["status"] == "pending"
+    assert task["lease"] is None
+
+    order = next_action("run-01", root=run.parent)
+    assert order["action"] == "produce"
+    assert order["task_id"] == "TASK-001"
+    assert "12-fullstack-developer" in order["roles"]
+    assert any("FAIL" in note for note in order["feedback"]), order["feedback"]
+
+
 def test_prompt_is_not_clipped_at_runtime_limit(nano_run):
     """Промпт возвращается целиком: никакого silenzного обрезания рантаймом."""
     run, _, _ = nano_run

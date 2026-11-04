@@ -553,7 +553,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 fields, rows = export.journal_table(run_path, limit, filters=filters)
             else:
                 payload = data.run_payload(run_id, self.runs_dir)
-                if dataset == "tasks":
+                if dataset == "stages":
+                    fields, rows = export.stages_table(payload)
+                elif dataset == "tasks":
                     fields, rows = export.tasks_table(payload)
                 elif dataset == "usage":
                     fields, rows = export.usage_table(payload, by)

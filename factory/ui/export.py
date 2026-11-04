@@ -83,7 +83,7 @@ TRACE_FIELDS = (
     "covered",
     "test_problems",
 )
-DATASETS = ("journal", "tasks", "usage", "trace")
+DATASETS = ("journal", "tasks", "usage", "trace", "stages")
 GROUPINGS = ("stage", "role", "task")
 
 Table = tuple[tuple[str, ...], list[dict[str, Any]]]

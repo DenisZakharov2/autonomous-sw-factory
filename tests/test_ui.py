@@ -440,6 +440,21 @@ def test_journal_export_is_the_whole_log_not_the_tail(served):
     assert status == 400 and "positive integer" in json.loads(body)["error"]
 
 
+def test_stages_export_has_all_thirteen_stages(served):
+    base, _root, _run_dir = served
+    rows = csv_rows(get(base, "/api/runs/run-01/export/stages.csv")[2])
+    assert rows[0] == list(export.STAGE_FIELDS)
+    assert len(rows) - 1 == 13  # header + 13 stages
+    stage_ids = [row[0] for row in rows[1:]]
+    assert "s_in" in stage_ids
+    assert "s0_vision" in stage_ids
+    assert "s9_learn" in stage_ids
+    # Unknown dataset is still 404
+    status, _headers, body = get(base, "/api/runs/run-01/export/nonexistent.csv")
+    assert status == 404
+    assert "unknown export dataset" in json.loads(body)["error"]
+
+
 def test_journal_filter_hides_fail_outside_the_tail(served):
     base, _root, run_dir = served
     # Build 117 events: first 67 contain FAIL, tail 68..117 are all PASS.

@@ -332,6 +332,38 @@ def build_prompt(
         lines.extend(f"- {item}" for item in notes)
         lines.append("")
 
+    # RAG: релевантные фрагменты из репозитория фабрики для контекста роли.
+    # Индекс вспомогательный — если не собран, промпт собирается без него.
+    try:
+        from ..retrieval import retrieve as _retrieve
+        rag_query = " ".join(
+            str(part)
+            for part in (
+                order.get("instructions") or "",
+                role,
+                str(order.get("stage") or ""),
+            )
+            if str(part).strip()
+        )
+        if rag_query:
+            rag_results = _retrieve(rag_query, k=3)
+            if rag_results:
+                lines.append("# Контекст из репозитория")
+                lines.append(
+                    "Релевантные фрагменты кода и документации репозитория фабрики:"
+                )
+                for r in rag_results:
+                    lines.append(
+                        f"- {r['path']}:{r['start_line']}-{r['end_line']} "
+                        f"(score={r['score']:.2f})"
+                    )
+                    lines.append("```")
+                    lines.append(r["text"].strip()[:500])
+                    lines.append("```")
+                lines.append("")
+    except Exception:
+        pass
+
     lines.append("# Разрешённые пути")
     lines.append(f"Работай только внутри `{workspace}`. Разрешено писать:")
     pending_paths = [str(item.get("path")) for item in own]

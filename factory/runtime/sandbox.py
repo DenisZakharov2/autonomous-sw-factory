@@ -100,8 +100,25 @@ def sandbox_command(
     read_write: tuple[str, ...] = (),
     enabled: bool = True,
     backend: str = BACKEND,
+    executor_user: str | None = None,
+    run_id: str = "run",
+    seq: int | str = 0,
 ) -> list[str]:
+    """Команда в песочнице; при `executor_user` — ещё и под чужим uid.
+
+    В обычном режиме корень `/` монтируется read-only.  В режиме отдельного
+    пользователя профиль сужен до явных привязок (системные каталоги ro,
+    каталог прогона rw): `/home` внутри пространства не существует, поэтому
+    мирочитаемые файлы домашней директории недоступны даже при traverse-гранте
+    на пути к прогону (см. `runtime/isolation.py`).
+    """
     if not enabled:
+        if executor_user:
+            from . import isolation
+
+            return isolation.executor_command(
+                list(command), user=executor_user, run_id=run_id, seq=seq
+            )
         return list(command)
     if backend != "bwrap":
         raise RuntimeFailure(
@@ -121,21 +138,28 @@ def sandbox_command(
         "--new-session",
         "--cap-drop",
         "ALL",
-        "--ro-bind",
-        "/",
-        "/",
-        "--dev",
-        "/dev",
-        "--proc",
-        "/proc",
-        "--tmpfs",
-        "/tmp",
-        # The run root is writable so an editor can create `<target>.tmp` and
-        # rename it into place; the control plane is re-bound read-only below.
-        "--bind",
-        str(run),
-        str(run),
     ]
+    if executor_user:
+        for system_dir in ("/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc", "/opt"):
+            if os.path.isdir(system_dir):
+                args.extend(["--ro-bind", system_dir, system_dir])
+    else:
+        args.extend(["--ro-bind", "/", "/"])
+    args.extend(
+        [
+            "--dev",
+            "/dev",
+            "--proc",
+            "/proc",
+            "--tmpfs",
+            "/tmp",
+            # The run root is writable so an editor can create `<target>.tmp` and
+            # rename it into place; the control plane is re-bound read-only below.
+            "--bind",
+            str(run),
+            str(run),
+        ]
+    )
     for name in CONTROL_PLANE_FILES:
         protected_file = run / name
         if protected_file.is_file():
@@ -170,4 +194,8 @@ def sandbox_command(
             bound_dirs.append(path)
     args.append("--")
     args.extend(command)
+    if executor_user:
+        from . import isolation
+
+        return isolation.executor_command(args, user=executor_user, run_id=run_id, seq=seq)
     return args

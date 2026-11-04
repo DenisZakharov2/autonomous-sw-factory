@@ -88,6 +88,7 @@ class OpenCodeExecutor:
         sandbox: bool = False,
         read_write: tuple[str, ...] = (),
         extra_args: tuple[str, ...] = (),
+        executor_user: str | None = None,
     ) -> None:
         if mode not in {"run", "prompt"}:
             raise ValueError("opencode mode must be 'run' or 'prompt'")
@@ -98,9 +99,15 @@ class OpenCodeExecutor:
         self.sandbox = sandbox
         self.read_write = tuple(read_write)
         self.extra_args = tuple(extra_args)
+        self.executor_user = executor_user
 
     def command(
-        self, prompt: str, run_dir: Path, extra_read_write: tuple[str, ...] = ()
+        self,
+        prompt: str,
+        run_dir: Path,
+        extra_read_write: tuple[str, ...] = (),
+        run_id: str = "run",
+        seq: int | str = 0,
     ) -> list[str]:
         if self.mode == "prompt":
             cmd = [self.binary, "--prompt", prompt, "--auto", "--standalone"]
@@ -113,12 +120,24 @@ class OpenCodeExecutor:
             cmd.extend(self.extra_args)
             cmd.append(prompt)
         return sandbox_command(
-            cmd, run_dir, read_write=self.read_write + tuple(extra_read_write), enabled=self.sandbox
+            cmd,
+            run_dir,
+            read_write=self.read_write + tuple(extra_read_write),
+            enabled=self.sandbox,
+            executor_user=self.executor_user,
+            run_id=run_id,
+            seq=seq,
         )
 
     def execute(self, order: dict[str, Any], context: RunContext) -> ExecutionResult:
         transcript = context.path_in_runtime()
-        cmd = self.command(context.prompt, context.run_dir, extra_read_write=context.extra_read_write)
+        cmd = self.command(
+            context.prompt,
+            context.run_dir,
+            extra_read_write=context.extra_read_write,
+            run_id=context.run_id,
+            seq=context.sequence or context.step,
+        )
         started = time.monotonic()
         try:
             completed = subprocess.run(
@@ -132,6 +151,11 @@ class OpenCodeExecutor:
             )
         except subprocess.TimeoutExpired as exc:
             elapsed = time.monotonic() - started
+            if self.executor_user:
+                # Убит только клиент systemd-run; сам юнит продолжает работу.
+                from . import isolation
+
+                isolation.stop_unit(context.run_id, context.sequence or context.step)
             stdout = exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
             stderr = exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
             safe_write_text(

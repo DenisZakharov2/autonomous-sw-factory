@@ -54,6 +54,7 @@ class HermesExecutor:
         toolset: str | None = "auto",
         skills: str | None = None,
         extra_args: tuple[str, ...] = (),
+        executor_user: str | None = None,
     ) -> None:
         self.binary = binary
         self.model = model or os.environ.get("FACTORY_HERMES_MODEL")
@@ -65,6 +66,7 @@ class HermesExecutor:
         self.toolset = toolset
         self.skills = skills
         self.extra_args = tuple(extra_args)
+        self.executor_user = executor_user
 
     def toolset_for(self, stage: str | None) -> str | None:
         """The narrowest toolset that can do this stage's work.
@@ -86,6 +88,8 @@ class HermesExecutor:
         usage_file: Path,
         extra_read_write: tuple[str, ...] = (),
         stage: str | None = None,
+        run_id: str = "run",
+        seq: int | str = 0,
     ) -> list[str]:
         cmd = [self.binary, "-z", prompt, "--in", str(run_dir), "--usage-file", str(usage_file)]
         if self.model:
@@ -101,7 +105,13 @@ class HermesExecutor:
             cmd.append("--yolo")
         cmd.extend(self.extra_args)
         return sandbox_command(
-            cmd, run_dir, read_write=self.read_write + tuple(extra_read_write), enabled=self.sandbox
+            cmd,
+            run_dir,
+            read_write=self.read_write + tuple(extra_read_write),
+            enabled=self.sandbox,
+            executor_user=self.executor_user,
+            run_id=run_id,
+            seq=seq,
         )
 
     def execute(self, order: dict[str, Any], context: RunContext) -> ExecutionResult:
@@ -113,6 +123,8 @@ class HermesExecutor:
             usage_path,
             extra_read_write=context.extra_read_write,
             stage=context.stage,
+            run_id=context.run_id,
+            seq=context.sequence or context.step,
         )
         started = time.monotonic()
         try:
@@ -127,6 +139,11 @@ class HermesExecutor:
             )
         except subprocess.TimeoutExpired as exc:
             elapsed = time.monotonic() - started
+            if self.executor_user:
+                # Убит только клиент systemd-run; сам юнит продолжает работу.
+                from . import isolation
+
+                isolation.stop_unit(context.run_id, context.sequence or context.step)
             stdout = exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
             stderr = exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
             safe_write_text(

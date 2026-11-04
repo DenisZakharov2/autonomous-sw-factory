@@ -90,6 +90,26 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 1 if errors else 0
 
 
+def cmd_setup_executor(args: argparse.Namespace) -> int:
+    """Одноразовая настройка отдельного Unix-пользователя исполнителя."""
+    import getpass
+
+    from .runtime.isolation import setup_executor_user
+
+    try:
+        operator = getpass.getuser()
+    except (OSError, KeyError):
+        operator = "anony"
+    result = setup_executor_user(args.user, operator)
+    if args.json:
+        _print_json(result)
+    else:
+        print(f"SETUP OK: пользователь {result['user']} (uid {result['uid']})")
+        for action in result["actions"]:
+            print(f"- {action}")
+    return 0
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     run_dir, state, event = init_run(
         args.run_id, args.mode, root=_runs_root(args), force=args.force, idea=args.idea
@@ -136,6 +156,7 @@ def _build_executor(args: argparse.Namespace):
             "after the fact).",
             file=sys.stderr,
         )
+    executor_user = getattr(args, "executor_user", None)
     if args.executor == "opencode":
         from .runtime.opencode import OpenCodeExecutor
 
@@ -145,6 +166,7 @@ def _build_executor(args: argparse.Namespace):
             timeout=args.timeout,
             sandbox=sandbox,
             read_write=tuple(args.sandbox_rw or ()),
+            executor_user=executor_user,
         )
     from .runtime.hermes import HermesExecutor
 
@@ -158,6 +180,7 @@ def _build_executor(args: argparse.Namespace):
         yolo=args.yolo,
         toolset=toolset,
         skills=args.executor_skills,
+        executor_user=executor_user,
     )
 
 
@@ -194,15 +217,31 @@ def cmd_run(args: argparse.Namespace) -> int:
             if value is not None:
                 mode_budget[key] = value
         budget = mode_budget
-    result = run_loop(
-        args.run_id,
-        executor,
-        max_steps=args.max_steps,
-        root=root,
-        budget=budget,
-        parallel_tasks=args.parallel_tasks,
-        progress=progress,
-    )
+    executor_user = getattr(args, "executor_user", None)
+    if executor_user:
+        from .runtime.isolation import executor_user_scope
+        from .runtime.sandbox import sandbox_env
+
+        with executor_user_scope(executor_user, args.run_id, run_dir, sandbox_env()):
+            result = run_loop(
+                args.run_id,
+                executor,
+                max_steps=args.max_steps,
+                root=root,
+                budget=budget,
+                parallel_tasks=args.parallel_tasks,
+                progress=progress,
+            )
+    else:
+        result = run_loop(
+            args.run_id,
+            executor,
+            max_steps=args.max_steps,
+            root=root,
+            budget=budget,
+            parallel_tasks=args.parallel_tasks,
+            progress=progress,
+        )
     if args.json:
         _print_json(
             {
@@ -674,6 +713,15 @@ def add_executor_arguments(parser: argparse.ArgumentParser) -> None:
         help="run the executor without the trust boundary (debugging only)",
     )
     parser.add_argument("--sandbox-rw", action="append", help="extra path the sandboxed executor may write (repeatable)")
+    parser.add_argument(
+        "--executor-user",
+        nargs="?",
+        const="factory-executor",
+        default=None,
+        metavar="USER",
+        help="run the executor as a separate Unix user via systemd-run "
+        "(default: factory-executor; one-time `factory setup-executor` required)",
+    )
     parser.add_argument("--yolo", action="store_true", help="pass --yolo to hermes")
     parser.add_argument("--reasoning", default="medium", help="reasoning effort passed to hermes")
     parser.add_argument("--opencode-mode", default="run", choices=["run", "prompt"])
@@ -692,6 +740,14 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = sub.add_parser("doctor", help="validate config, roles, schemas and templates")
     doctor.add_argument("--json", action="store_true")
     doctor.set_defaults(func=cmd_doctor)
+
+    setup_executor = sub.add_parser(
+        "setup-executor",
+        help="one-time setup for running the executor as a separate Unix user (polkit rule, user, ACLs)",
+    )
+    setup_executor.add_argument("--user", default="factory-executor", help="executor account name")
+    setup_executor.add_argument("--json", action="store_true")
+    setup_executor.set_defaults(func=cmd_setup_executor)
 
     init = sub.add_parser("init", help="create a new isolated run")
     init.add_argument("--run-id", required=True)

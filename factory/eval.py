@@ -35,7 +35,9 @@ from .paths import run_dir as safe_run_dir
 from .paths import runs_root as default_runs_root
 from .paths import validate_run_id
 from .runtime.base import Executor
+from .runtime.isolation import executor_user_scope
 from .runtime.loop import run_loop
+from .runtime.sandbox import sandbox_env
 from .runtime.usage import UsageLedger
 from .state import load_state
 from .trace import build_matrix
@@ -645,6 +647,7 @@ def run_case(
     runs_root: Path,
     stamp: str,
     budget_override: dict[str, Any] | None = None,
+    executor_user: str | None = None,
 ) -> dict[str, Any]:
     case = bundle["case"]
     expected = bundle["expected"]
@@ -659,68 +662,76 @@ def run_case(
     max_steps = int(case.get("max_steps", DEFAULT_MAX_STEPS))
     max_cycles = int(case.get("max_cycles", DEFAULT_MAX_CYCLES))
 
-    with _factory_root(run_dir):
-        init_run(run_id, case["mode"], root=runs_root, idea=bundle["idea"], force=run_dir.exists())
-        constraints = bundle.get("constraints")
-        if constraints:
-            (run_dir / CONSTRAINTS_NAME).write_text(constraints, encoding="utf-8")
-        seed = bundle.get("seed")
-        if seed is not None:
-            _seed_into(run_dir, seed)
-        drive = _drive_run(
-            run_id,
-            executor,
-            runs_root,
-            max_steps=max_steps,
-            max_cycles=max_cycles,
-            budget=budget,
-        )
-        state = load_state(run_dir)
-        events = read_events(run_dir / "blackbox.jsonl")
-        usage_rows = _usage_rows(run_dir)
-        verification_errors = verify_run(run_dir)
-        artifact_errors = _artifact_errors(run_dir, state, expected, registry)
-        requirement_errors = _requirement_errors(run_dir, expected)
-        state_errors = _state_errors(state, expected)
-        submitter_errors = _submitter_errors(events, expected)
-        product_tests = _product_tests(run_dir, expected.get("product_tests"))
-        checks = _run_checks(run_dir, bundle["checks"])
-        observed = _observed(
-            run_dir,
-            drive,
-            product_tests,
-            checks,
-            verification_errors,
-            state,
-            events,
-            usage_rows,
-        )
-        observed["artifact_errors"] = artifact_errors
-        observed["requirement_errors"] = requirement_errors
-        observed["state_errors"] = state_errors
-        observed["submitter_errors"] = submitter_errors
-        errors = _case_errors(observed, verification_errors)
-        try:
-            health = compute_metrics(run_dir)
-        except FactoryError as exc:
-            health = {"error": str(exc)}
+    def _run_with_scope() -> dict[str, Any]:
+        with _factory_root(run_dir):
+            init_run(run_id, case["mode"], root=runs_root, idea=bundle["idea"], force=run_dir.exists())
+            constraints = bundle.get("constraints")
+            if constraints:
+                (run_dir / CONSTRAINTS_NAME).write_text(constraints, encoding="utf-8")
+            seed = bundle.get("seed")
+            if seed is not None:
+                _seed_into(run_dir, seed)
+            drive = _drive_run(
+                run_id,
+                executor,
+                runs_root,
+                max_steps=max_steps,
+                max_cycles=max_cycles,
+                budget=budget,
+            )
+            state = load_state(run_dir)
+            events = read_events(run_dir / "blackbox.jsonl")
+            usage_rows = _usage_rows(run_dir)
+            verification_errors = verify_run(run_dir)
+            artifact_errors = _artifact_errors(run_dir, state, expected, registry)
+            requirement_errors = _requirement_errors(run_dir, expected)
+            state_errors = _state_errors(state, expected)
+            submitter_errors = _submitter_errors(events, expected)
+            product_tests = _product_tests(run_dir, expected.get("product_tests"))
+            checks = _run_checks(run_dir, bundle["checks"])
+            observed = _observed(
+                run_dir,
+                drive,
+                product_tests,
+                checks,
+                verification_errors,
+                state,
+                events,
+                usage_rows,
+            )
+            observed["artifact_errors"] = artifact_errors
+            observed["requirement_errors"] = requirement_errors
+            observed["state_errors"] = state_errors
+            observed["submitter_errors"] = submitter_errors
+            errors = _case_errors(observed, verification_errors)
+            try:
+                health = compute_metrics(run_dir)
+            except FactoryError as exc:
+                health = {"error": str(exc)}
 
-    expected_status = str(expected.get("status", "complete"))
-    if drive["status"] != expected_status:
-        errors.insert(0, f"run finished as {drive['status']!r}, expected {expected_status!r}")
-    return {
-        "case": case["id"],
-        "title": case["title"],
-        "mode": case["mode"],
-        "run_id": run_id,
-        "run_dir": str(run_dir),
-        "ok": not errors,
-        "status": drive["status"],
-        "message": drive["message"],
-        "errors": errors,
-        "observed": observed,
-        "metrics": health,
-    }
+        expected_status = str(expected.get("status", "complete"))
+        if drive["status"] != expected_status:
+            errors.insert(0, f"run finished as {drive['status']!r}, expected {expected_status!r}")
+        return {
+            "case": case["id"],
+            "title": case["title"],
+            "mode": case["mode"],
+            "run_id": run_id,
+            "run_dir": str(run_dir),
+            "ok": not errors,
+            "status": drive["status"],
+            "message": drive["message"],
+            "errors": errors,
+            "observed": observed,
+            "metrics": health,
+        }
+
+    if executor_user:
+        from .runtime.sandbox import sandbox_env
+
+        with executor_user_scope(executor_user, case["id"], run_dir, sandbox_env()):
+            return _run_with_scope()
+    return _run_with_scope()
 
 
 def _baseline_record(result: dict[str, Any]) -> dict[str, Any]:
@@ -823,7 +834,16 @@ def run_eval_set(
         if progress is not None:
             progress(index, bundle["case"])
         try:
-            results.append(run_case(bundle, executor, runs_root, stamp, budget))
+            results.append(
+                run_case(
+                    bundle,
+                    executor,
+                    runs_root,
+                    stamp,
+                    budget,
+                    executor_user=getattr(executor, "executor_user", None),
+                )
+            )
         except FactoryError as exc:
             results.append(
                 {

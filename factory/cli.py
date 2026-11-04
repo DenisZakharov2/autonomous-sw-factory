@@ -50,6 +50,7 @@ from .quarantine import (
 from .state import load_state
 from .trace import build_matrix
 from .verify import doctor_report, rerecord_summary, verify_run
+from .retrieval import build_index, retrieve, INDEX_DIR
 
 
 def _print_json(data: object) -> None:
@@ -570,6 +571,30 @@ def cmd_models(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_index(args: argparse.Namespace) -> int:
+    """RAG-индекс репозитория фабрики: перестройка и поиск по чанкам."""
+    if args.rebuild:
+        info = build_index()
+        print(
+            f"index rebuilt: {info['files']} файлов, {info['chunks']} чанков -> {info['index_dir']}"
+        )
+        return 0
+    if args.query:
+        results = retrieve(args.query, k=args.k)
+        if not results:
+            print("результаты не найдены")
+            return 0
+        for r in results:
+            print(
+                f"{r['path']}:{r['start_line']}-{r['end_line']} score={r['score']:.3f}"
+            )
+            print(r["text"].strip()[:500])
+            print()
+        return 0
+    print("используйте --rebuild или --query <текст>")
+    return 1
+
+
 def cmd_ui(args: argparse.Namespace) -> int:
     from .ui.server import serve
 
@@ -879,6 +904,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     models = sub.add_parser("models", help="show resolved model tiers")
     models.set_defaults(func=cmd_models)
+
+    index = sub.add_parser("index", help="RAG-индекс репозитория фабрики")
+    index.add_argument("--rebuild", action="store_true", help="перестроить индекс tracked-файлов")
+    index.add_argument("--query", help="текстовый запрос для поиска по чанкам")
+    index.add_argument("--k", type=int, default=5, help="число возвращаемых чанков")
+    index.set_defaults(func=cmd_index)
 
     budget = sub.add_parser("budget", help="show attempt limits and mode budgets")
     budget.add_argument("--run-id")

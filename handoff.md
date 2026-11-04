@@ -476,11 +476,15 @@ billable, 1830 с**, `usd` 0.0, `factory verify` — OK, `VERIFY` — 9.
   baseline из падающих кейсов запрещена самим `write_baseline`. Файл остался
   на старой семантике — это состояние, а не недоделка: чтобы его обновить,
   нужно сначала починить `traceability.json` (тесты) в двух nano-кейсах.
-- **`gate_reject` при `rework_to == stage_id`.** Для `s4_build` отказ
-  верификатора не переоткрывает задачи: продюсер не получает шага, причина
-  `FAIL` до него не доходит, верификатор трижды проверяет те же файлы и
-  гейт эскалируется. Нужен либо переоткрыватель задач в `gate_reject`, либо
-  перенос причины `FAIL` в заказ продюсера (лучше — оба).
+- **`gate_reject` при `rework_to == stage_id`.** Закрыто: `gate_reject`
+  вызывает `_reopen_stage_tasks(state, stage_id)` при self-rework
+  (`s4_build`): задачи `accepted`/`review`/`in_progress` → `pending`,
+  lease снимается, стадия `in_progress`, попытка гейта +1. Причина `FAIL`
+  читается из последнего `VERIFY` события через `_feedback` и попадает в
+  `feedback` заказа продюсера (`factory/engine.py:1578-1587`, `:644-678`,
+  `:596-618`). Регрессионный тест
+  `test_gate_reject_self_rework_returns_produce_with_feedback` зелёный,
+  `factory doctor → OK`, целевые pytest зелёные.
 - **`enterprise` не замерялся** (кейса нет) и остался на 6M — ниже
   измеренной потребности `standard` (9.5M).
 - **`--reasoning medium` у текущего провайдера отвечает `Invalid inference

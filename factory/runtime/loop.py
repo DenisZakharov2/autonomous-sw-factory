@@ -14,9 +14,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..artifacts import resolve_recorded_path, sha256_dir, validate_stage
-from ..config import load_artifacts, load_budget, load_pipeline, project_root
+from ..config import load_artifacts, load_budget, load_models, load_pipeline, project_root
 from ..engine import (
     VERIFIER,
+    _model_for,
     _task_deliverable_errors,
     gate_approve,
     gate_reject,
@@ -43,6 +44,27 @@ from .usage import UsageLedger
 HUMAN_STOP = 2
 COMPLETE = 0
 STOP = 3
+
+# Жёсткий лимит контекста роли в символах: max_tokens модели × 4 символа на
+# токен (русский текст) × MAX_CHARS_RATIO. Контекст больше лимита не подаётся
+# исполнителю вообще — стадия останавливается с context_exceeded.
+MAX_CHARS_RATIO = 0.75
+
+
+def _context_limit_chars(role: str | None) -> int:
+    """Лимит окна модели роли в символах по factory/models.yaml.
+
+    Tier берётся из фронтматтера карточки роли (default_model_tier),
+    tier-2-balanced — если карточки или её tier нет.
+    """
+    tier = "tier-2-balanced"
+    if role:
+        try:
+            tier = str(_model_for(role)["tier"])
+        except Exception:
+            tier = "tier-2-balanced"
+    max_tokens = int(load_models()["tiers"][tier]["max_tokens"])
+    return int(max_tokens * 4 * MAX_CHARS_RATIO)
 
 
 def _is_verification_order(order: dict[str, Any]) -> bool:
@@ -370,7 +392,6 @@ def run_loop(
     root: str | Path | None = None,
     budget: dict[str, Any] | None = None,
     enforce: dict[str, Any] | None = None,
-    prompt_limit: int = 26000,
     parallel_tasks: int = 0,
     progress: Callable[[int, dict[str, Any]], None] | None = None,
 ) -> LoopResult:
@@ -434,7 +455,6 @@ def run_loop(
                         executor,
                         root=root,
                         max_workers=parallel_tasks,
-                        prompt_limit=prompt_limit,
                     )
                 except FactoryError as exc:
                     path = evidence_store.write_step(
@@ -638,8 +658,36 @@ def run_loop(
         writable_entries = _collect_writable_paths(order, run_dir, task)
         writable, placeholders = _prepare_writable_paths(writable_entries)
         prompt = build_prompt(
-            order, run_dir=run_dir, role=order.get("next_role"), evidence=evidence, max_chars=prompt_limit
+            order, run_dir=run_dir, role=order.get("next_role"), evidence=evidence
         )
+        prompt_chars = len(prompt)
+        context_limit = _context_limit_chars(order.get("next_role"))
+        if prompt_chars > context_limit:
+            # Роль никогда не получает обрезанное вслепую сообщение: если
+            # свои артефакты + RAG-фрагменты не влезают в окно модели,
+            # задача останавливается с ошибкой и ждёт дробирования.
+            path = evidence_store.write_step(
+                step,
+                order,
+                {
+                    "status": "context_exceeded",
+                    "prompt_chars": prompt_chars,
+                    "limit_chars": context_limit,
+                    "model_tier": _model_for(order.get("next_role") or "")["tier"],
+                },
+            )
+            stop = finish(
+                "context_exceeded",
+                STOP,
+                (
+                    f"контекст слишком велик для окна модели "
+                    f"({prompt_chars} символов > {context_limit}); "
+                    "разбей задачу на подзадачи, а не подавай с обрезанным промптом"
+                ),
+                stage_id,
+            )
+            stop.evidence_path = str(path)
+            return stop
         context = RunContext(
             run_id=run_id,
             run_dir=run_dir,

@@ -391,7 +391,6 @@ def run_parallel_tasks(
     *,
     root: str | Path | None = None,
     max_workers: int | None = None,
-    prompt_limit: int = 26000,
     progress: Callable[[str, str], None] | None = None,
 ) -> ParallelBatch:
     """Execute independent tasks concurrently; merge and submit sequentially.
@@ -434,7 +433,6 @@ def run_parallel_tasks(
                 run_dir=run_dir,
                 role=str(task["owner"]),
                 workspace=worktree,
-                max_chars=prompt_limit,
             )
             writable, placeholders = _writable_paths(scoped, worktree, task, run_dir)
             context = RunContext(

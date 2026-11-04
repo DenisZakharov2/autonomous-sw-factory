@@ -97,7 +97,6 @@ def build_prompt(
     run_dir: Path,
     role: str | None = None,
     evidence: list[str] | None = None,
-    max_chars: int = 26000,
     workspace: Path | None = None,
 ) -> str:
     from ..config import load_artifacts, load_pipeline as _pipeline
@@ -431,6 +430,4 @@ def build_prompt(
     lines.append("2. Созданные или изменённые файлы (точные пути).")
     lines.append("3. Чем проверено — только если в твоём наборе инструментов есть терминал; иначе одной строкой: «проверку выполняет рантайм».")
     prompt = "\n".join(lines)
-    if len(prompt) > max_chars:
-        prompt = prompt[:max_chars].rstrip() + "\n\n… (промпт обрезан по лимиту рантайма)"
     return prompt

@@ -31,6 +31,9 @@ from factory.state import load_state, save_state
 from conftest import write_stage_verification, write_task_verification
 from factory.trace import build_matrix
 from factory.verify import verify_run
+from factory.runtime.base import ExecutionResult
+from factory.runtime.loop import run_loop
+from factory.runtime.prompt import build_prompt
 
 BRIEF = (
     "## 1. Цель (JTBD)\n\nХранить задачи.\n"
@@ -442,3 +445,43 @@ def test_task_reset_unblocks_an_escalated_task(nano_run):
     task = load_state(run)["tasks"]["TASK-001"]
     assert task["status"] == "pending"
     assert task["attempts"] == 0
+
+
+def test_prompt_is_not_clipped_at_runtime_limit(nano_run):
+    """Промпт возвращается целиком: никакого silenzного обрезания рантаймом."""
+    run, _, _ = nano_run
+    root = run.parent
+    order = next_action("run-01", root=root)
+    assert order["action"] == "produce"
+    prompt = build_prompt(order, run_dir=run)
+    assert "… (промпт обрезан по лимиту рантайма)" not in prompt
+
+
+def test_context_exceeded_returns_error_instead_of_trimmed_prompt(nano_run, monkeypatch):
+    """При превышении окна модели run_loop останавливается до executor.execute()."""
+    run, _, _ = nano_run
+    root = run.parent
+
+    executed: list[dict] = []
+
+    class Recorder:
+        name = "recorder"
+
+        def execute(self, order, context):
+            executed.append(order)
+            return ExecutionResult(exit_code=0)
+
+    # 500 000 символов превышает даже окно tier-3-frontier
+    # (0.75 × 131 072 × 4 = 393 216 символов); роль intake — tier-3-frontier.
+    monkeypatch.setattr(
+        "factory.runtime.loop.build_prompt", lambda *args, **kwargs: "x" * 500_000
+    )
+
+    result = run_loop("run-01", Recorder(), max_steps=1, root=root)
+
+    assert result.status == "context_exceeded"
+    assert result.code == 3
+    assert "слишком велик" in result.message
+    assert "контекст" in result.message
+    assert not executed, "исполнитель не должен получить обрезанный контекст"
+    assert result.evidence_path and Path(result.evidence_path).is_file()

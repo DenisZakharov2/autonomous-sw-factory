@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "generated_at": "2026-11-04T17:14:30Z",
+  "generated_at": "2026-11-04T21:04:43Z",
   "cases": {
     "brownfield-proxy-mini": {
       "status": "complete",
@@ -150,6 +150,36 @@
       "usd": null,
       "seconds": 0.34,
       "prompt_chars": 267257,
+      "verification_coverage": 1.0,
+      "traceability_coverage": 1.0
+    },
+    "enterprise-mini": {
+      "status": "complete",
+      "steps": 36,
+      "loop_steps": 50,
+      "events": 65,
+      "rework_events": 2,
+      "tasks": 2,
+      "gates_closed": [
+        "gate_s0",
+        "gate_s00",
+        "gate_s1",
+        "gate_s15",
+        "gate_s2",
+        "gate_s3",
+        "gate_s4",
+        "gate_s5",
+        "gate_s6",
+        "gate_s7",
+        "gate_s8",
+        "gate_s9"
+      ],
+      "pass_at_1": 0.9166666666666666,
+      "tokens": 11884354,
+      "tokens_billable": 11884354,
+      "usd": 0.0,
+      "seconds": 5664.663,
+      "prompt_chars": 412352,
       "verification_coverage": 1.0,
       "traceability_coverage": 1.0
     }

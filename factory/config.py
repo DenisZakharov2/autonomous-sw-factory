@@ -43,7 +43,10 @@ def project_root() -> Path:
     candidate = PACKAGE_ROOT.parent
     if (candidate / "pyproject.toml").exists():
         return candidate
-    return Path.cwd().resolve()
+    # Папка репозитория определяется расположением пакета factory, а не текущей
+    # директорией: иначе тест, сменивший CWD через monkeypatch.chdir, подсунет
+    # doctor'у чужой tmp_path с левым VERSION/LICENSE.
+    return candidate
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:

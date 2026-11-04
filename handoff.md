@@ -2,7 +2,7 @@
 
 ## M4: Контекстный лимит роли и самоповтор верификатора (1.0.9)
 
-Состояние на 4 ноября 2026. Ветка `main`, `VERSION` 1.0.9, коммит `4e17b0e` («Релиз 1.0.9») запушен в `main`. Тег `v1.0.9` создан локально, но **ещё не опубликован на GitHub** — `git push origin main` без `--tags` не отправляет теги, а GitHub Release для 1.0.9 не создан, поэтому на GitHub отображается версия 1.0.8.
+Состояние на 4 ноября 2026. Ветка `main`, `VERSION` 1.0.9, коммит `cffd5eb` (HEAD, push в origin main сделан). Тег `v1.0.9` опубликован на origin.
 
 Что появилось в 1.0.9:
 - **Жёсткий лимит контекста роли** (`context_exceeded` вместо молчаливого обрезания промпта) — в `factory/runtime/loop.py`, `prompt.py`, `worktree.py`; тест в `tests/test_v012_regressions.py`.
@@ -11,7 +11,7 @@
 
 Что осталось:
 - Опубликовать тег `v1.0.9` и создать GitHub Release 1.0.9 (`git push origin v1.0.9` или `git push origin --tags`).
-- Завершить открытые пункты из «Что осталось» (baseline `eval/baseline-hermes.json`, отдельный пользователь исполнителя, подпись журнала и т.д.).
+- Завершить открытые пункты из раздела «Что осталось» (отдельный пользователь исполнителя, подпись журнала и т.д.).
 
 ---
 
@@ -469,13 +469,16 @@ billable, 1830 с**, `usd` 0.0, `factory verify` — OK, `VERIFY` — 9.
 `eval/baseline.json` (fake) остался согласован: `nano-todo` 22/48,
 `standard-mini` 24/50 — `match`.
 
-### Что осталось
+### Что осталось|
 
-- **`eval/baseline-hermes.json`.** Прогон всех пяти кейсов сделан, но два
-  кейса красные по покрытию `REQ`, а `standard-mini` эскалировался; запись
-  baseline из падающих кейсов запрещена самим `write_baseline`. Файл остался
-  на старой семантике — это состояние, а не недоделка: чтобы его обновить,
-  нужно сначала починить `traceability.json` (тесты) в двух nano-кейсах.
+- **`eval/baseline-hermes.json`.** Перезаписан всеми пятью зелёными кейсами
+  (покрытие REQ 1.0/1.0, `standard-mini` не эскалируется) в коммите
+  `4350dfd`. Состояние файла актуально для версии 1.0.9. Повторный прогон
+  под `hermes` может дать другой результат из-за недетерминизма модели
+  (traceability.json генерируется моделью на `s1_spec`; в `nano-product-mini`
+  модель может сослаться на `product/tests/test_todo.py` вместо тестов в
+  `config.rs`/`router.rs`, что ломает покрытие). При повторном прогоне
+  сверить coverage перед `write_baseline`.
 - **`gate_reject` при `rework_to == stage_id`.** Закрыто: `gate_reject`
   вызывает `_reopen_stage_tasks(state, stage_id)` при self-rework
   (`s4_build`): задачи `accepted`/`review`/`in_progress` → `pending`,
@@ -485,8 +488,9 @@ billable, 1830 с**, `usd` 0.0, `factory verify` — OK, `VERIFY` — 9.
   `:596-618`). Регрессионный тест
   `test_gate_reject_self_rework_returns_produce_with_feedback` зелёный,
   `factory doctor → OK`, целевые pytest зелёные.
-- **`enterprise` не замерялся** (кейса нет) и остался на 6M — ниже
-  измеренной потребности `standard` (9.5M).
+- **`enterprise` не замерялся** (кейса нет в `eval/cases`) и остался на
+  6M токенов / 1440 мин / $120 — ниже измеренной потребности `standard`
+  (9.5M). Для замера нужен отдельный кейс с `mode: enterprise`.
 - **`--reasoning medium` у текущего провайдера отвечает `Invalid inference
   request`** (работают `low` и `high`). Замер сделан на `high`, то есть это
   верхняя оценка относительно `medium`. Дефолт адаптера не менялся.

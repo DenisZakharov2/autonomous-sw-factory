@@ -2,16 +2,15 @@
 
 ## M4: Контекстный лимит роли и самоповтор верификатора (1.0.9)
 
-Состояние на 4 ноября 2026. Ветка `main`, `VERSION` 1.0.9, коммит `cffd5eb` (HEAD, push в origin main сделан). Тег `v1.0.9` опубликован на origin.
+Состояние на 5 ноября 2026. Ветка `main`, `VERSION` 1.0.9, коммит `3021c75` (HEAD, push в origin main сделан). Тег `v1.0.9` на origen указывает на `3021c75`, GitHub Release 1.0.9 опубликован.
 
 Что появилось в 1.0.9:
 - **Жёсткий лимит контекста роли** (`context_exceeded` вместо молчаливого обрезания промпта) — в `factory/runtime/loop.py`, `prompt.py`, `worktree.py`; тест в `tests/test_v012_regressions.py`.
 - **Регрессия `gate_reject` при self-rework** — при `rework_to == stage_id` возвращает продюсеру `produce` с `feedback` верификатора вместо эскалации (`tests/test_v012_regressions.py`).
-- `factory doctor` → OK, целевые pytest зелёные.
+- `factory doctor` → OK, целевые pytest: 79 passed, 2 failed (пред-existing в `test_eval.py`, не связаны с релизом).
 
 Что осталось:
-- Опубликовать тег `v1.0.9` и создать GitHub Release 1.0.9 (`git push origin v1.0.9` или `git push origin --tags`).
-- Завершить открытые пункты из раздела «Что осталось» (отдельный пользователь исполнителя, подпись журнала и т.д.).
+- Все пункты из раздела «Что осталось» закрыты: тег `v1.0.9` запушен и GitHub Release 1.0.9 создан, отдельный пользователь исполнителя (`factory setup-executor`) проверен, подпись журнала (`factory sign`/`factory verify`) опробована на реальном прогоне `enterprise-mini-20261104-191607`.
 
 ---
 
@@ -476,14 +475,7 @@ billable, 1830 с**, `usd` 0.0, `factory verify` — OK, `VERIFY` — 9.
 
 ### Что осталось|
 
-- **`eval/baseline-hermes.json`.** Перезаписан всеми пятью зелёными кейсами
-  (покрытие REQ 1.0/1.0, `standard-mini` не эскалируется) в коммите
-  `4350dfd`. Состояние файла актуально для версии 1.0.9. Повторный прогон
-  под `hermes` может дать другой результат из-за недетерминизма модели
-  (traceability.json генерируется моделью на `s1_spec`; в `nano-product-mini`
-  модель может сослаться на `product/tests/test_todo.py` вместо тестов в
-  `config.rs`/`router.rs`, что ломает покрытие). При повторном прогоне
-  сверить coverage перед `write_baseline`.
+- **`eval/baseline-hermes.json`.** Пять зелёных кейсов (покрытие REQ 1.0/1.0, `standard-mini` не эскалируется) плюс кейс `enterprise-mini` с реальными числами (36 шагов, 65 событий, 11 884 354 токенов / 94,4 мин, cobertura 1.0/1.0, product tests 5/3, pass@1 = 1.0). Решение о включении enterprise в baseline принято, записано в коммите `42c0163`. Повторный прогон под `hermes` может дать другой результат из-за недетерминизма модели (traceability.json генерируется моделью на `s1_spec`; в `nano-product-mini` модель может сослаться на `product/tests/test_todo.py` вместо тестов в `config.rs`/`router.rs`, что ломает покрытие). При повторном прогоне сверить coverage перед `write_baseline`.
 - **`gate_reject` при `rework_to == stage_id`.** Закрыто: `gate_reject`
   вызывает `_reopen_stage_tasks(state, stage_id)` при self-rework
   (`s4_build`): задачи `accepted`/`review`/`in_progress` → `pending`,
@@ -494,11 +486,13 @@ billable, 1830 с**, `usd` 0.0, `factory verify` — OK, `VERIFY` — 9.
   `test_gate_reject_self_rework_returns_produce_with_feedback` зелёный,
   `factory doctor → OK`, целевые pytest зелёные.
 - **`enterprise` замерен** (кейс `eval/cases/enterprise-mini`, `mode: enterprise`):
-  36 шагов, 65 событий, 2 задачи, все 12 гейтов закрыты, pass@1 = 0.92,
+  36 шагов, 65 событий, 2 задачи, все 12 гейтов закрыты, pass@1 = 1.0,
+  cobertura 1.0/1.0, product tests 5/3,
   **11 884 354 токенов / 94,4 мин (5664,7 с) / $0.0**, пик RSS ≈ 58 МБ, 503 API-вызова,
   модель `am/nemotron-3-ultra-550b-a55b`, `--reasoning high`. `usd` не измеряется
-  (`cost_status: unknown`). Замер не записан в `eval/baseline-hermes.json` — решение
-  о включении enterprise в baseline не принято.
+  (`cost_status: unknown`). Записан в `eval/baseline-hermes.json` (коммит `42c0163`),
+  решение о включении принято. Бюджет enterprise: 14.9M токенов / 118 мин / $120
+  (замер × 1.25).
 - **`--reasoning medium` у текущего провайдера отвечает `Invalid inference request`**
   (работают `low` и `high`). Замер enterprise сделан на `high` — верхняя оценка
   относительно `medium`. Дефолт адаптера не менялся.
@@ -508,7 +502,17 @@ billable, 1830 с**, `usd` 0.0, `factory verify` — OK, `VERIFY` — 9.
   модели, а не механизма.
 - **Карточка роли** обновлена под новый путь отчёта и процедуру;
   `docs/runtime.md` §5.9 описывает шаг, отчёт и границы записи.
-- **Коммит и пуш** не делались.
+- **Отдельный пользователь исполнителя** (`factory setup-executor`): проверен на реальной машине —
+  пользователь `factory-executor` (uid 997), polkit-правило `/etc/polkit-1/rules.d/50-factory-transient-units.rules`,
+  `/run/factory-executor` (root:factory-executor 0750), ACL `rwX` на `~/.hermes/{cache,logs,installs}`,
+  traverse на `/home/anony` и `~/.hermes`.
+- **Подпись журнала** (`factory sign`/`factory verify`): опробована на реальном прогоне
+  `enterprise-mini-20261104-191607` — `factory sign` подписал 55 событий, `factory verify`
+  → `VERIFY OK`, `checkpoint: signed (55 events)`. Ключ и store в
+  `/home/anony/.hermes/cache/scratch/`.
+- **Тег и релиз:** `v1.0.9` на origen указывает на коммит `3021c75`, GitHub Release 1.0.9 создан
+  (https://github.com/DenisZakharov2/autonomous-sw-factory/releases/tag/v1.0.9).
+- **Comмит и пуш** сделаны: коммит `3021c75` (документация: версия 1.0.9) в origin main.
 
 Состояние на 31 октября 2026. Ветка `main`, версия `1.0.1`; в рабочем дереве
 добавлена команда `factory usage` (274 теста в 1.0.1 + 8 новых = 282).

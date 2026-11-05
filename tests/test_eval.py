@@ -135,7 +135,7 @@ def test_eval_writes_a_valid_baseline(tmp_path, monkeypatch):
     monkeypatch.delenv("FACTORY_ROOT", raising=False)
     baseline = tmp_path / "baseline.json"
 
-    def fake_run_case(bundle, executor, runs_root, stamp, budget=None):
+    def fake_run_case(bundle, executor, runs_root, stamp, budget=None, executor_user=None):
         return _synthetic_result(bundle["case"]["id"])
 
     monkeypatch.setattr(eval_module, "run_case", fake_run_case)
@@ -181,7 +181,7 @@ def test_eval_turns_a_baseline_delta_into_a_regression(tmp_path, monkeypatch):
         encoding="utf-8",
     )
 
-    def fake_run_case(bundle, executor, runs_root, stamp, budget=None):
+    def fake_run_case(bundle, executor, runs_root, stamp, budget=None, executor_user=None):
         return _synthetic_result(bundle["case"]["id"], steps=14)
 
     monkeypatch.setattr(eval_module, "run_case", fake_run_case)

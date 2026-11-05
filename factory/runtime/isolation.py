@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import contextlib
 import os
-import pwd
 import re
 import shutil
 import subprocess
@@ -90,6 +89,10 @@ def root_call(argv: list[str]) -> None:
 
 
 def executor_user_uid(user: str) -> int | None:
+    try:
+        import pwd  # отложенный импорт: модуля pwd нет на Windows
+    except ImportError:
+        return None
     try:
         return pwd.getpwnam(user).pw_uid
     except KeyError:

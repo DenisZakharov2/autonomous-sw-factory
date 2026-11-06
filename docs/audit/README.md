@@ -20,3 +20,10 @@ The active [`skills-lock.json`](../../skills-lock.json) is empty: the factory
 repository installs no external skills. To record a real install, run
 `factory quarantine scan` against the skill inside this repository and let the
 decision matrix write the lock.
+
+## `handoff-1.0.9.md`
+
+The root `handoff.md` session log up to release 1.0.9, archived here so the
+working history survives without claiming a permanent root path. References
+from `DESIGN.md`, `TECHNICAL.md`, `docs/runtime.md` and `factory/trace.py`
+point at this file. New milestones start a fresh root `handoff.md`.

@@ -4,7 +4,7 @@ A reference in `traceability.json` is `path` or `path::symbol`.  The file part
 must exist inside the run; the symbol part must be declared in that file.  The
 rule exists because the matrix used to accept `test_x.py::test_that_was_renamed`
 as long as `test_x.py` existed, so a run could report coverage 1.0 while every
-named test was a fiction (see `handoff.md`, the `nano-product-mini` BUG-001).
+named test was a fiction (see `docs/audit/handoff-1.0.9.md`, the `nano-product-mini` BUG-001).
 """
 from __future__ import annotations
 

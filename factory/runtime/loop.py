@@ -51,6 +51,13 @@ STOP = 3
 MAX_CHARS_RATIO = 0.75
 
 
+
+def _effective_prompt_chars(text: str) -> int:
+    """ASCII chars count as 1 (~0.25 tok); Cyrillic/non-ASCII count as 2 (~0.5 tok)."""
+    non_ascii = sum(1 for ch in text if ord(ch) >= 128)
+    return len(text) + non_ascii
+
+
 def _context_limit_chars(role: str | None) -> int:
     """Лимит окна модели роли в символах по factory/models.yaml.
 
@@ -660,7 +667,7 @@ def run_loop(
         prompt = build_prompt(
             order, run_dir=run_dir, role=order.get("next_role"), evidence=evidence
         )
-        prompt_chars = len(prompt)
+        prompt_chars = _effective_prompt_chars(prompt)
         context_limit = _context_limit_chars(order.get("next_role"))
         if prompt_chars > context_limit:
             # Роль никогда не получает обрезанное вслепую сообщение: если

@@ -4,7 +4,8 @@
 
 | Version | Supported |
 | :--- | :--- |
-| `0.2.x` | yes |
+| `1.0.x` | yes |
+| `0.2.x` | security fixes only |
 | `0.1.x` | yes |
 | older | no |
 
@@ -40,10 +41,10 @@ Out of scope:
 - a model that ignores its role card without any engine bypass;
 - vulnerabilities in third-party skills themselves (report upstream; the
   quarantine gate is our control);
-- the unsiged hash chain being rewritable by a writer who recomputes it — this
+- the unsigned hash chain being rewritable by a writer who recomputes it — this
   is a documented limitation, not a surprise.
 
-## Controls in `0.2.x`
+## Controls in `1.0.x`
 
 - strict run-id regex and resolved-path checks;
 - `fcntl.flock` around journal writes;

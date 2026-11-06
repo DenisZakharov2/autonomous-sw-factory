@@ -18,7 +18,7 @@ blackbox_logging: "required"
 Создаёт на стадии `s8_docs` документацию **готового продукта** в `runs/<run_id>/product/README.md` и `runs/<run_id>/product/docs/user-guide.md` на языке профиля заказчика, никогда не перезаписывая корневой `/README.md` самой Фабрики (защита корневого README).
 
 ## 2. Входы (Inputs)
-* Готовый продукт в `runs/<run_id>/product/`, `spec-human.md`, `GLOSSARY.md`, `runbook-deploy.md` и профиль клиента из `state.json`.
+* Готовый продукт в `runs/<run_id>/product/`, `spec-human.md`, `GLOSSARY.md`, `runbook-deploy.md` и профиль клиента из `artifacts/interview-brief.md`.
 
 ## 3. Процедура (Procedure)
 1. Напиши `runs/<run_id>/product/README.md` (запуск за 3 шага).

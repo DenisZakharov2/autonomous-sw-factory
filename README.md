@@ -13,11 +13,11 @@
 ## Посмотреть, как это работает
 
 ```bash
-pip install autonomous-sw-factory
-factory ui --runs-dir runs --open     # http://127.0.0.1:8420
+pip install "autonomous-sw-factory[xlsx]"
+factory ui --runs-dir examples --open     # http://127.0.0.1:8420
 ```
 
-Дашборд только для чтения: он показывает прогоны из `runs/` и ничего в них не пишет.
+Дашборд только для чтения: он показывает прогоны из `examples/` и ничего в них не пишет.
 
 ![Список прогонов](docs/screenshots/dashboard-runs.png)
 
@@ -44,7 +44,7 @@ factory ui --runs-dir runs --open     # http://127.0.0.1:8420
 
 Поставить `PASS` может только независимый верификатор. Продюсер — тот, кто писал код или документ — физически не может закрыть свой же гейт.
 
-Реальные исполнители (Hermes, OpenCode, Claude Code) работают в песочнице:
+Встроенные исполнители рантайма (Hermes, OpenCode) работают в Linux-песочнице `bwrap` (а внешние агенты Claude Code и Cursor подключаются через CLI):
 - Корень файловой системы — только для чтения
 - Управляющие файлы (`state.json`, журнал, evidence) — смонтированы read-only
 - Запись разрешена только в каталоги, объявленные в задании
@@ -149,15 +149,15 @@ factory verify --run-id nano-todo --stage s9_learn --require-gate
 | **Python-движок** | `init`, `next`, `submit`, `gate`, `verify`, `task`, `quarantine`, `trace`, `metrics`, `usage`, `doctor` |
 | **Рантайм `factory run`** | Задание → исполнитель → проверка → сдача → гейт; `pending_artifacts`, `next_role`, `usage.jsonl`, evidence, стоп-гарды. Исполнители: `fake`, `hermes`, `opencode`. Реальные CLI в `bwrap`, управляющая плоскость read-only |
 | **Подписанные чекпоинты** | `factory sign` — HMAC-SHA256 головы журнала вне `runs/`; `factory verify` отличает `stale` от `rolled_back` и `diverged` |
-| **Eval-набор и сравнение** | `factory eval` гоняет 5 эталонных кейсов, сверяет с baseline, падает при регрессии; `factory compare` показывает дельту двух прогонов по стадиям, стоимости, хешам артефактов |
+| **Eval-набор и сравнение** | `factory eval` гоняет 6 эталонных кейсов, сверяет с baseline, падает при регрессии; `factory compare` показывает дельту двух прогонов по стадиям, стоимости, хешам артефактов |
 | **Журнал с хеш-цепочкой** | SHA-256, `fcntl.flock`, state-якорь, семантическая проверка `PASS` |
 | **Независимый верификатор** | `PASS` только от `02-independent-verifier`; человек может принять риск отдельным событием |
 | **Карантин скиллов** | SkillSpector 2.12.0 с fail-closed и локом хешей |
 | **Дашборд прогона** | `factory ui` — локальный read-only пульт: 9 панелей, свободная сетка 12 колонок, пресеты, экспорт CSV/`.xlsx`, опрос 2 с, SSE, сравнение прогонов |
-| **Шаблоны и схемы** | 38 шаблонов и 13 JSON-схем; шаблоны не ставят `PASS` заранее |
+| **Шаблоны и схемы** | 39 шаблонов и 13 JSON-схем; шаблоны не ставят `PASS` заранее |
 | **Эталонный прогон** | `examples/nano-todo/`: 49 событий, 2 задачи, 3 REQ, все гейты пройдены, продукт запускается |
 
-Цифры: 4 режима (3 проверены на реальном проекте), 5 эталонных примеров, 398 тестов, CI на Ubuntu, macOS, Windows (Python 3.10–3.13).
+Цифры: 4 режима (все 4 проверены на реальных прогонах), 6 эталонных кейсов, 398 тестов, CI на Ubuntu, macOS, Windows (Python 3.10–3.13).
 
 ![Панель сравнения артефактов (spec/acceptance/plan)](docs/screenshots/compare-artifacts.png)
 

@@ -23,7 +23,7 @@ blackbox_logging: "required"
 ## 3. Процедура (Procedure)
 1. Создай `runs/<run_id>/state.json` и событие `EVT-000001` со статусом `INIT_OK` (без самоприсвоения `PASS`).
 2. Направь `Greenfield` на `s00_intake` (`01-smart-interviewer`), а `Brownfield` на `s_in` (сначала бэкап `git bundle` + `dirty-worktree.tar.gz` + `restore-drill.md`).
-3. Заблокируй переход `s1_spec -> s2_architecture` без одобрения `spec-human.md` человеком.
+3. Заблокируй переход `s1_spec -> s15_quarantine -> s2_architecture` без одобрения `spec-human.md` человеком.
 4. На `s15_quarantine` выполни `python3 -m factory.cli quarantine scan <path> --lock skills-lock.json`; при неполном скане установка блокируется.
 5. При достижении 3 возвратов по блокирующему вето останови цикл и эскалируй человеку.
 
@@ -40,4 +40,4 @@ blackbox_logging: "required"
 * Запрещено менять продуктовый код в `runs/<run_id>/product/src/`, ставить себе `PASS` и писать в лог при обычном чтении репозитория.
 
 ## 8. Эскалация (Escalation)
-* Групповая эскалация человеку на гейтах `s1_spec -> s2_architecture`, при `CAUTION` от `SkillSpector`, после 3 итераций вето и перед релизом `s7_release`.
+* Групповая эскалация человеку на гейтах `s1_spec -> s15_quarantine -> s2_architecture`, при `CAUTION` от `SkillSpector`, после 3 итераций вето и перед релизом `s7_release`.

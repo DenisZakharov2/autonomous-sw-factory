@@ -230,8 +230,17 @@ def checkpoint_state(run_dir: Path, store: Path | None = None) -> dict[str, Any]
             result["matched_checkpoint"] = index
             break
     else:
-        if newest.get("head_hash") and count > int(newest.get("event_count") or 0):
-            result["status"] = "stale"
+        signed_count = int(newest.get("event_count") or 0)
+        if newest.get("head_hash") and count > signed_count:
+            if signed_count > 0 and signed_count <= len(events):
+                anchor_ev = events[signed_count - 1]
+                anchor_hash = anchor_ev.get("event_hash") or anchor_ev.get("hash")
+                if anchor_hash == newest.get("head_hash"):
+                    result["status"] = "stale"
+                else:
+                    result["status"] = "diverged"
+            else:
+                result["status"] = "diverged"
     run_copy = run_dir / RUN_COPY
     if run_copy.is_file() and run_copy.read_text(encoding="utf-8") != json.dumps(
         document, indent=2, ensure_ascii=False, sort_keys=True

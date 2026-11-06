@@ -1,4 +1,4 @@
-"""Autonomous Software Factory v1.0.2.
+"""Autonomous Software Factory v1.0.9.
 
 A stage-gated, runtime-agnostic kit. The engine issues work orders; a host
 runtime (Hermes, Claude Code, OpenCode, Cursor) executes the roles.

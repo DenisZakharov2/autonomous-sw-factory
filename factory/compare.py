@@ -219,7 +219,8 @@ def compare_runs(
         left_value = left["totals"].get(key)
         right_value = right["totals"].get(key)
         if isinstance(left_value, (int, float)) and isinstance(right_value, (int, float)):
-            return right_value - left_value
+            diff = right_value - left_value
+            return round(diff, 6) if isinstance(diff, float) else diff
         return None
 
     return {

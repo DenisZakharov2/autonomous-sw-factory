@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "autonomous-sw-factory"
-version = "1.0.8"
+version = "1.0.9"
 description = "Runtime-agnostic, auditable software factory kit with stage gates, task work orders and a hash-chained flight recorder."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -44,7 +44,7 @@ factory = "factory.cli:main"
 include = ["factory*"]
 
 [tool.setuptools.package-data]
-factory = ["pipeline.yaml", "models.yaml", "budget.yaml", "artifacts.yaml", "FACTORY_GLOSSARY.md", "orchestrator/*.md", "roles/*.md", "schemas/*.json", "templates/*.tmpl", "memory/*.md", "ui/static/*", "runtime/fixtures/nano/*", "runtime/fixtures/nano/*/*", "runtime/fixtures/nano/*/*/*"]
+factory = ["pipeline.yaml", "models.yaml", "budget.yaml", "artifacts.yaml", "FACTORY_GLOSSARY.md", "orchestrator/*.md", "roles/*.md", "schemas/*.json", "templates/*.tmpl", "memory/*.md", "ui/static/*", "runtime/fixtures/nano/*", "runtime/fixtures/nano/*/*", "runtime/fixtures/nano/*/*/*", "runtime/fixtures/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

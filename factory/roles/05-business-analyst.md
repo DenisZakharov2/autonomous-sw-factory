@@ -18,7 +18,7 @@ blackbox_logging: "required"
 Создаёт на стадии `s1_spec` двухслойное техническое задание со сквозными кодами `REQ-001..REQ-NNN`: инженерную спецификацию `spec.md` для агентов и полностью эквивалентное понятное ТЗ `spec-human.md` на языке заказчика.
 
 ## 2. Входы (Inputs)
-* `runs/<run_id>/artifacts/interview-brief.md`, `vision.md`, `GLOSSARY.md` и профиль клиента из `state.json`.
+* `runs/<run_id>/artifacts/interview-brief.md`, `vision.md`, `GLOSSARY.md` и профиль клиента из `artifacts/interview-brief.md`.
 
 ## 3. Процедура (Procedure)
 1. Присвой каждому требованию сквозной код `REQ-###`.
@@ -33,10 +33,10 @@ blackbox_logging: "required"
 * Наборы кодов `REQ-###` в `spec.md` и `spec-human.md` совпадают на 100% (`factory verify --stage s1_spec` возвращает 0); нет размытых формулировок без метрик.
 
 ## 6. Право вето (Veto Power)
-* `blocking` (`VETO-BA-AMBIGUOUS-REQ`): блокирует гейт `s1_spec -> s2_architecture` при несовпадении `REQ-###` или отсутствии одобрения `spec-human.md` человеком.
+* `blocking` (`VETO-BA-AMBIGUOUS-REQ`): блокирует гейт `s1_spec -> s15_quarantine -> s2_architecture` при несовпадении `REQ-###` или отсутствии одобрения `spec-human.md` человеком.
 
 ## 7. Запреты (Prohibitions)
 * Запрещено включать в `spec.md` скрытые требования, отсутствующие в `spec-human.md`, и нарушать `GLOSSARY.md`.
 
 ## 8. Эскалация (Escalation)
-* Выносит противоречия между бизнес-требованиями в пакет вопросов человеку на гейте `s1_spec -> s2_architecture`.
+* Выносит противоречия между бизнес-требованиями в пакет вопросов человеку на гейте `s1_spec -> s15_quarantine -> s2_architecture`.

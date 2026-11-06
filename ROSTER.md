@@ -40,7 +40,7 @@
 | `enterprise` | все 22 |
 | `brownfield` | те же 12, что `standard` |
 
-В `nano` роли `01` дополнительно пишет spec/spec-human/traceability/plan; роль `12` — архитектуру, код, тесты, приёмку, security, release и docs. Это компромисс, а не скрытая пятая роль. Проверяется `factory doctor`.
+В `nano` роль `01` дополнительно пишет spec/spec-human/traceability/plan; роль `12` — архитектуру, код, тесты, приёмку, security, release и docs. Это компромисс, а не скрытая пятая роль. Проверяется `factory doctor`.
 
 ## 3. Матрица вето
 

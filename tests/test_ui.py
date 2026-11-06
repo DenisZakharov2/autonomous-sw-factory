@@ -528,6 +528,16 @@ def test_journal_filter_hides_fail_outside_the_tail(served):
     assert status == 404
 
 
+def test_export_escapes_formula_injection_prefixes():
+    assert export._cell("=SUM(A1:A2)") == "'=SUM(A1:A2)"
+    assert export._cell("-2+3") == "'-2+3"
+    assert export._cell("@mention") == "'@mention"
+    assert export._cell(["=x", "y"]) == "'=x; y"
+    assert export._cell("plain") == "plain"
+    assert export._cell(42) == 42
+    assert export._cell(None) == ""
+
+
 def test_usage_export_matches_the_usage_report(served):
     base, root, run_dir = served
     usage = run_dir / "runtime" / "usage.jsonl"
@@ -552,7 +562,8 @@ def test_usage_export_matches_the_usage_report(served):
         assert rows[0] == list(export.USAGE_FIELDS)
         report, _warning = build_usage_report("run-01", group_by=grouping, root=root)
         expected = [
-            [group["key"]] + ["" if group[name] is None else str(group[name]) for name in export.USAGE_FIELDS[1:]]
+            [export._cell(group["key"])]
+            + [export._cell("" if group[name] is None else str(group[name])) for name in export.USAGE_FIELDS[1:]]
             for group in report["groups"]
         ]
         assert rows[1:] == expected, grouping

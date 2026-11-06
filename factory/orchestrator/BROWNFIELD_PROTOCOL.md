@@ -11,10 +11,10 @@ RUN=runs/<run_id>/backups
 mkdir -p "$RUN"
 git bundle create "$RUN/pre-factory.bundle" --all
 tar --exclude='.env' --exclude='*.pem' --exclude='*.key' \
-    --exclude='node_modules' --exclude='.git' \
+    --exclude='node_modules' --exclude='.git' --exclude='./runs' \
     -czf "$RUN/dirty-worktree.tar.gz" .
 git status --porcelain > "$RUN/git-status.txt"
-find . -type f -not -path './.git/*' -not -name '.env' \
+find . -type f -not -path './.git/*' -not -path './runs/*' -not -path './node_modules/*' -not -name '*.env' -not -name '*.pem' -not -name '*.key' \
   -exec sha256sum {} + > "$RUN/manifest.sha256"
 ```
 

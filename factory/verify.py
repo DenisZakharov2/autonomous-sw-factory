@@ -109,7 +109,7 @@ def validate_role_card(path: Path, pipeline: dict[str, Any] | None = None, model
         words = len([w for w in chunk.replace("`", " ").split() if any(ch.isalpha() for ch in w)])
         if words < MIN_SECTION_WORDS:
             errors.append(f"{path.name}: section {section!r} is too short ({words} words)")
-    if "can_edit_project_files" in body:
+    if "can_edit_project_files" in body or "can_edit_project_files" in fm:
         errors.append(f"{path.name}: deprecated can_edit_project_files is forbidden")
     return errors
 

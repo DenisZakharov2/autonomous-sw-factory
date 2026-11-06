@@ -65,15 +65,15 @@ def parse_report(data: dict[str, Any]) -> ScanResult:
 
 
 def decide(exit_code: int, result: ScanResult, min_coverage: float = 95.0) -> str:
+    if result.recommendation == "DO_NOT_INSTALL" or result.severity in {"HIGH", "CRITICAL"}:
+        return REJECT_AND_PURGE
     if not result.is_complete or result.failed_analyzers:
+        return BLOCK_INCOMPLETE
+    if result.coverage_percent < min_coverage:
         return BLOCK_INCOMPLETE
     if exit_code != 0:
         # A scan that did not finish cleanly is not evidence of safety.
         return BLOCK_RETRY
-    if result.recommendation == "DO_NOT_INSTALL" or result.severity in {"HIGH", "CRITICAL"}:
-        return REJECT_AND_PURGE
-    if result.coverage_percent < min_coverage:
-        return BLOCK_INCOMPLETE
     if (
         result.recommendation == "SAFE"
         and result.severity == "LOW"
@@ -236,7 +236,14 @@ def verify_lock(path: Path, skills_root: Path | None = None) -> list[str]:
         scanner = entry.get("scanner") or {}
         if not entry.get("commit") or entry.get("commit") == "":
             errors.append(f"{entry.get('name')}: missing commit")
-        if scanner.get("recommendation") != "SAFE" or not scanner.get("is_complete"):
+        rec = scanner.get("recommendation")
+        human_ok = rec == "CAUTION" and str(entry.get("approved_by", "")).startswith("human:")
+        safe_ok = (
+            rec == "SAFE"
+            and scanner.get("severity", "LOW") == "LOW"
+            and float(scanner.get("coverage_percent", 100.0)) >= 95.0
+        )
+        if not scanner.get("is_complete") or not (safe_ok or human_ok):
             errors.append(f"{entry.get('name')}: not approved by a complete SAFE scan")
     return errors
 

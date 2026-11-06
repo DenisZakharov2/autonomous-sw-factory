@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -70,6 +71,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         version_file = repo_root / "VERSION"
         if version_file.exists() and version_file.read_text(encoding="utf-8").strip() != __version__:
             errors.append("VERSION does not match factory.__version__")
+        pyproject_text = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
+        m_ver = re.search(r'(?m)^version\s*=\s*"([^"]+)"', pyproject_text)
+        if m_ver and m_ver.group(1) != __version__:
+            errors.append(f"pyproject.toml version ({m_ver.group(1)}) does not match factory.__version__ ({__version__})")
         license_file = repo_root / "LICENSE"
         if license_file.exists() and "Permission is hereby granted" not in license_file.read_text(encoding="utf-8"):
             errors.append("LICENSE is missing the MIT grant text")
@@ -497,7 +502,7 @@ def cmd_quarantine(args: argparse.Namespace) -> int:
                 role="00-orchestrator",
                 event_type="SKILL_INSTALL",
                 why="Quarantine scan auto-allowed the skill",
-                for_what=f"Install {args.name}",
+                for_what=f"Install {display}",
                 action=f"Installed {display} sha256={entry['sha256'][:12]}",
                 verdict_status="DRAFT",
                 verified_by="00-orchestrator",

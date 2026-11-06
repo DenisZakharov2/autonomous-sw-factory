@@ -128,9 +128,12 @@ def build_index(root: Path | None = None, index_dir: Path | None = None) -> dict
         rel = str(path.relative_to(root))
         pieces = _chunk_text(text)
         start_line = 1
+        char_offset = 0
         for piece in pieces:
             head = piece[:80].strip()
-            idx = text.find(head, start_line - 1) if head else -1
+            idx = text.find(head, char_offset) if head else -1
+            if idx >= 0:
+                char_offset = max(0, idx + len(piece) - CHUNK_OVERLAP)
             if idx >= 0:
                 line_no = text[:idx].count("\n") + 1
             else:

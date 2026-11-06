@@ -1646,6 +1646,8 @@ def accept_risk(
         if expires:
             evidence.append(f"expires: {expires}")
         gate_record(state, stage, status="approved", decided_by=approver, evidence=evidence)
+        if stage["id"] == "s_in":
+            state["restore_drill_passed"] = True
         if stage["id"] == "s1_spec":
             state["human_spec_approved"] = True
         current_stage(state, pipeline)
@@ -1814,6 +1816,11 @@ def veto(
             action = f"Veto {code} by {role}: limit {limit} reached, escalated to human"
         else:
             state["stage_status"][stage["id"]] = "in_progress"
+            _reopen_stage_tasks(state, stage["id"])
+            if stage["id"] == "s1_spec":
+                state["human_spec_approved"] = False
+            elif stage["id"] == "s_in":
+                state["restore_drill_passed"] = False
             gate = stage_gate(state, stage)
             gate["status"] = "pending"
             action = f"Veto {code} by {role}: stage reopened for rework"

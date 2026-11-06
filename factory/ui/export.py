@@ -93,12 +93,21 @@ class ExportUnavailable(FactoryError):
     """The optional `.xlsx` dependency is not installed."""
 
 
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
 def _cell(value: Any) -> Any:
-    """`null` is an empty cell; a list is one cell joined with `; `."""
+    """`null` is an empty cell; a list is one cell joined with `; `.
+
+    Strings with a leading formula character are apostrophe-escaped
+    against CSV/Excel formula injection (CWE-1236).
+    """
     if value is None:
         return ""
     if isinstance(value, (list, tuple)):
-        return "; ".join(str(item) for item in value)
+        value = "; ".join(str(item) for item in value)
+    if isinstance(value, str) and value.startswith(_FORMULA_PREFIXES):
+        return "'" + value
     return value
 
 

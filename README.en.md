@@ -13,11 +13,11 @@
 ## See a run
 
 ```bash
-pip install autonomous-sw-factory
-factory ui --runs-dir runs --open     # http://127.0.0.1:8420
+pip install "autonomous-sw-factory[xlsx]"
+factory ui --runs-dir examples --open     # http://127.0.0.1:8420
 ```
 
-The dashboard is read-only: it shows runs under `runs/` and writes nothing there.
+The dashboard is read-only: it shows runs under `examples/` and writes nothing there.
 
 ![Run list](docs/screenshots/dashboard-runs.png)
 
@@ -132,15 +132,15 @@ Expected: `VERIFY OK`. The reference run has 49 events, 2 tasks, 3 requirements 
 | **Python engine** | `init`, `next`, `submit`, `gate`, `verify`, `task`, `quarantine`, `trace`, `metrics`, `usage`, `doctor` |
 | **`factory run` runtime** | Order → executor → verify → submit → gate; `pending_artifacts`, `next_role`, `usage.jsonl`, evidence, stop-guards. Executors: `fake`, `hermes`, `opencode`. Real CLIs in `bwrap`, control plane read-only |
 | **Signed checkpoints** | `factory sign` — HMAC-SHA256 of journal head outside `runs/`; `factory verify` tells `stale` from `rolled_back` and `diverged` |
-| **Eval set & comparison** | `factory eval` runs 5 reference cases, checks against baseline, fails on regression; `factory compare` shows delta of two runs by stages, cost, artifact hashes |
+| **Eval set & comparison** | `factory eval` runs 6 reference cases, checks against baseline, fails on regression; `factory compare` shows delta of two runs by stages, cost, artifact hashes |
 | **Hash-chained journal** | SHA-256, `fcntl.flock`, state anchor, semantic `PASS` checks |
 | **Independent verifier** | `PASS` only from `02-independent-verifier`; human can accept risk as separate event |
 | **Skill quarantine** | SkillSpector 2.12.0 with fail-closed and hash lock |
 | **Run dashboard** | `factory ui` — local read-only console: 9 panels, free 12-column grid, presets, CSV/`.xlsx` export, 2s polling, SSE, run comparison |
-| **Templates & schemas** | 38 templates and 13 JSON schemas; templates never pre-fill `PASS` |
+| **Templates & schemas** | 39 templates and 13 JSON schemas; templates never pre-fill `PASS` |
 | **Reference run** | `examples/nano-todo/`: 49 events, 2 tasks, 3 REQ, all gates passed, product runs |
 
-Numbers: 4 modes (3 exercised on a real project), 5 reference examples, 398 tests, CI on Ubuntu, macOS, Windows (Python 3.10–3.13).
+Numbers: 4 modes (3 exercised on a real project), 6 reference cases, 398 tests, CI on Ubuntu, macOS, Windows (Python 3.10–3.13).
 
 ![Compare artifacts panel (spec/acceptance/plan)](docs/screenshots/compare-artifacts.png)
 

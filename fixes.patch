@@ -1,0 +1,669 @@
+diff --git a/DESIGN.md b/DESIGN.md
+index f701512..6c78a80 100644
+--- a/DESIGN.md
++++ b/DESIGN.md
+@@ -23,7 +23,7 @@
+ 7. **Честный статус.** Версия `1.0.6`: движок, схемы, тесты, reference run и исполняемый рантайм (`factory run`) есть; в 1.0.2 независимый верификатор стал настоящим шагом перед каждым role-гейтом и каждым `TASK_DONE`, а его требования проверяются кодом, не текстом промпта; в 1.0.3 появился read-only дашборд прогона (`factory ui`) и экспорт его данных в CSV и `.xlsx`; в 1.0.4 метрики прогона стали отдельной панелью, а список прогонов больше не расширяет страницу; в 1.0.5 — фильтры журнала с состоянием в URL, честный счётчик, поиск/сортировка списка прогонов, drawer деталей с deep link, новый эндпоинт события и экспорт журнала с фильтрами; в 1.0.6 — панель «Time-series» с четырьмя canvas-графиками расхода (бакеты stage/event/minute, состояние в URL) и эндпоинт `/api/runs/<id>/timeseries` с ETag по штампу журнала и бакету; в 1.0.7 — эндпоинт `/api/compare/artifact` и панель «Артефакты (A vs B)» с трёхтабовым селектором и построчным диффом, фикс закрытия drawer крестиком/оверлеем.
+ - `1.0.9` — замер режима enterprise с реальными числами (36 шагов, 65 событий, 11 884 354 токенов / 94,4 мин), `eval/baseline-hermes.json` дополнен кейсом enterprise-mini, бюджет enterprise 14.9M токенов / 118 мин / $120, `factory sign` + `factory verify` подписывают и проверяют журнал, `factory setup-executor` запускает исполнителя под отдельным uid. Текущая.
+ - `1.0.8` — дашборд прогона: тема оформления (тёмная/светлая/системная) с кнопкой в шапке, выбор запоминается и не мигает при загрузке; управление с клавиатуры — `j`/`k` листают события и строки прогонов, `Enter` открывает выбранное, `/` — поиск, `?` — справка, `gg`/`G` — в начало и конец журнала, `r` — обновить данные; виртуализация журнала — события догружаются по SSE, рисуется только видимое окно, текстовый фильтр ищет по всему журналу. Исправлены фильтры журнала и переключатель бакета в time-series (падали на несуществующем `loadRun()`).
+-8. **Контекст не обрезается втихую.** Перед передаче роли рантайм считает размер промпта (артефакты + RAG-фрагменты) и сравнивает с окном модели из `factory/models.yaml`. При превышении прогон останавливается с `context_exceeded`, а не подаёт обрезанное вслепую сообщение. Роль никогда не получает обрезанный контекст.
++8. **Контекст не обрезается втихую.** Перед передачей роли рантайм считает размер промпта (артефакты + RAG-фрагменты) и сравнивает с окном модели из `factory/models.yaml`. При превышении прогон останавливается с `context_exceeded`, а не подаёт обрезанное вслепую сообщение. Роль никогда не получает обрезанный контекст.
+ 
+ ## 3. Модель исполнения
+ 
+diff --git a/MANIFEST.in b/MANIFEST.in
+index 5af857e..04beecc 100644
+--- a/MANIFEST.in
++++ b/MANIFEST.in
+@@ -18,5 +18,6 @@ recursive-include eval *
+ recursive-include examples *
+ recursive-include tests *.py
+ recursive-include factory *.yaml *.md *.json *.tmpl
++recursive-include factory/ui/static *
+ recursive-include factory/runtime/fixtures *
+ global-exclude __pycache__ *.py[cod]
+diff --git a/README.en.md b/README.en.md
+index 7c4d39f..5fd7c27 100644
+--- a/README.en.md
++++ b/README.en.md
+@@ -13,11 +13,11 @@
+ ## See a run
+ 
+ ```bash
+-pip install autonomous-sw-factory
+-factory ui --runs-dir runs --open     # http://127.0.0.1:8420
++pip install "autonomous-sw-factory[xlsx]"
++factory ui --runs-dir examples --open     # http://127.0.0.1:8420
+ ```
+ 
+-The dashboard is read-only: it shows runs under `runs/` and writes nothing there.
++The dashboard is read-only: it shows runs under `examples/` and writes nothing there.
+ 
+ ![Run list](docs/screenshots/dashboard-runs.png)
+ 
+@@ -132,15 +132,15 @@ Expected: `VERIFY OK`. The reference run has 49 events, 2 tasks, 3 requirements
+ | **Python engine** | `init`, `next`, `submit`, `gate`, `verify`, `task`, `quarantine`, `trace`, `metrics`, `usage`, `doctor` |
+ | **`factory run` runtime** | Order → executor → verify → submit → gate; `pending_artifacts`, `next_role`, `usage.jsonl`, evidence, stop-guards. Executors: `fake`, `hermes`, `opencode`. Real CLIs in `bwrap`, control plane read-only |
+ | **Signed checkpoints** | `factory sign` — HMAC-SHA256 of journal head outside `runs/`; `factory verify` tells `stale` from `rolled_back` and `diverged` |
+-| **Eval set & comparison** | `factory eval` runs 5 reference cases, checks against baseline, fails on regression; `factory compare` shows delta of two runs by stages, cost, artifact hashes |
++| **Eval set & comparison** | `factory eval` runs 6 reference cases, checks against baseline, fails on regression; `factory compare` shows delta of two runs by stages, cost, artifact hashes |
+ | **Hash-chained journal** | SHA-256, `fcntl.flock`, state anchor, semantic `PASS` checks |
+ | **Independent verifier** | `PASS` only from `02-independent-verifier`; human can accept risk as separate event |
+ | **Skill quarantine** | SkillSpector 2.12.0 with fail-closed and hash lock |
+ | **Run dashboard** | `factory ui` — local read-only console: 9 panels, free 12-column grid, presets, CSV/`.xlsx` export, 2s polling, SSE, run comparison |
+-| **Templates & schemas** | 38 templates and 13 JSON schemas; templates never pre-fill `PASS` |
++| **Templates & schemas** | 39 templates and 13 JSON schemas; templates never pre-fill `PASS` |
+ | **Reference run** | `examples/nano-todo/`: 49 events, 2 tasks, 3 REQ, all gates passed, product runs |
+ 
+-Numbers: 4 modes (3 exercised on a real project), 5 reference examples, 398 tests, CI on Ubuntu, macOS, Windows (Python 3.10–3.13).
++Numbers: 4 modes (3 exercised on a real project), 6 reference cases, 398 tests, CI on Ubuntu, macOS, Windows (Python 3.10–3.13).
+ 
+ ![Compare artifacts panel (spec/acceptance/plan)](docs/screenshots/compare-artifacts.png)
+ 
+diff --git a/README.md b/README.md
+index 24781da..14f6cd9 100644
+--- a/README.md
++++ b/README.md
+@@ -13,11 +13,11 @@
+ ## Посмотреть, как это работает
+ 
+ ```bash
+-pip install autonomous-sw-factory
+-factory ui --runs-dir runs --open     # http://127.0.0.1:8420
++pip install "autonomous-sw-factory[xlsx]"
++factory ui --runs-dir examples --open     # http://127.0.0.1:8420
+ ```
+ 
+-Дашборд только для чтения: он показывает прогоны из `runs/` и ничего в них не пишет.
++Дашборд только для чтения: он показывает прогоны из `examples/` и ничего в них не пишет.
+ 
+ ![Список прогонов](docs/screenshots/dashboard-runs.png)
+ 
+@@ -44,7 +44,7 @@ factory ui --runs-dir runs --open     # http://127.0.0.1:8420
+ 
+ Поставить `PASS` может только независимый верификатор. Продюсер — тот, кто писал код или документ — физически не может закрыть свой же гейт.
+ 
+-Реальные исполнители (Hermes, OpenCode, Claude Code) работают в песочнице:
++Встроенные исполнители рантайма (Hermes, OpenCode) работают в Linux-песочнице `bwrap` (а внешние агенты Claude Code и Cursor подключаются через CLI):
+ - Корень файловой системы — только для чтения
+ - Управляющие файлы (`state.json`, журнал, evidence) — смонтированы read-only
+ - Запись разрешена только в каталоги, объявленные в задании
+@@ -149,15 +149,15 @@ factory verify --run-id nano-todo --stage s9_learn --require-gate
+ | **Python-движок** | `init`, `next`, `submit`, `gate`, `verify`, `task`, `quarantine`, `trace`, `metrics`, `usage`, `doctor` |
+ | **Рантайм `factory run`** | Задание → исполнитель → проверка → сдача → гейт; `pending_artifacts`, `next_role`, `usage.jsonl`, evidence, стоп-гарды. Исполнители: `fake`, `hermes`, `opencode`. Реальные CLI в `bwrap`, управляющая плоскость read-only |
+ | **Подписанные чекпоинты** | `factory sign` — HMAC-SHA256 головы журнала вне `runs/`; `factory verify` отличает `stale` от `rolled_back` и `diverged` |
+-| **Eval-набор и сравнение** | `factory eval` гоняет 5 эталонных кейсов, сверяет с baseline, падает при регрессии; `factory compare` показывает дельту двух прогонов по стадиям, стоимости, хешам артефактов |
++| **Eval-набор и сравнение** | `factory eval` гоняет 6 эталонных кейсов, сверяет с baseline, падает при регрессии; `factory compare` показывает дельту двух прогонов по стадиям, стоимости, хешам артефактов |
+ | **Журнал с хеш-цепочкой** | SHA-256, `fcntl.flock`, state-якорь, семантическая проверка `PASS` |
+ | **Независимый верификатор** | `PASS` только от `02-independent-verifier`; человек может принять риск отдельным событием |
+ | **Карантин скиллов** | SkillSpector 2.12.0 с fail-closed и локом хешей |
+ | **Дашборд прогона** | `factory ui` — локальный read-only пульт: 9 панелей, свободная сетка 12 колонок, пресеты, экспорт CSV/`.xlsx`, опрос 2 с, SSE, сравнение прогонов |
+-| **Шаблоны и схемы** | 38 шаблонов и 13 JSON-схем; шаблоны не ставят `PASS` заранее |
++| **Шаблоны и схемы** | 39 шаблонов и 13 JSON-схем; шаблоны не ставят `PASS` заранее |
+ | **Эталонный прогон** | `examples/nano-todo/`: 49 событий, 2 задачи, 3 REQ, все гейты пройдены, продукт запускается |
+ 
+-Цифры: 4 режима (3 проверены на реальном проекте), 5 эталонных примеров, 398 тестов, CI на Ubuntu, macOS, Windows (Python 3.10–3.13).
++Цифры: 4 режима (все 4 проверены на реальных прогонах), 6 эталонных кейсов, 398 тестов, CI на Ubuntu, macOS, Windows (Python 3.10–3.13).
+ 
+ ![Панель сравнения артефактов (spec/acceptance/plan)](docs/screenshots/compare-artifacts.png)
+ 
+diff --git a/ROSTER.md b/ROSTER.md
+index a325a9f..6e40c30 100644
+--- a/ROSTER.md
++++ b/ROSTER.md
+@@ -40,7 +40,7 @@
+ | `enterprise` | все 22 |
+ | `brownfield` | те же 12, что `standard` |
+ 
+-В `nano` роли `01` дополнительно пишет spec/spec-human/traceability/plan; роль `12` — архитектуру, код, тесты, приёмку, security, release и docs. Это компромисс, а не скрытая пятая роль. Проверяется `factory doctor`.
++В `nano` роль `01` дополнительно пишет spec/spec-human/traceability/plan; роль `12` — архитектуру, код, тесты, приёмку, security, release и docs. Это компромисс, а не скрытая пятая роль. Проверяется `factory doctor`.
+ 
+ ## 3. Матрица вето
+ 
+diff --git a/SECURITY.md b/SECURITY.md
+index 0994dc3..52ec3bf 100644
+--- a/SECURITY.md
++++ b/SECURITY.md
+@@ -4,7 +4,8 @@
+ 
+ | Version | Supported |
+ | :--- | :--- |
+-| `0.2.x` | yes |
++| `1.0.x` | yes |
++| `0.2.x` | security fixes only |
+ | `0.1.x` | yes |
+ | older | no |
+ 
+@@ -40,10 +41,10 @@ Out of scope:
+ - a model that ignores its role card without any engine bypass;
+ - vulnerabilities in third-party skills themselves (report upstream; the
+   quarantine gate is our control);
+-- the unsiged hash chain being rewritable by a writer who recomputes it — this
++- the unsigned hash chain being rewritable by a writer who recomputes it — this
+   is a documented limitation, not a surprise.
+ 
+-## Controls in `0.2.x`
++## Controls in `1.0.x`
+ 
+ - strict run-id regex and resolved-path checks;
+ - `fcntl.flock` around journal writes;
+diff --git a/handoff.md b/docs/audit/handoff-1.0.9.md
+similarity index 100%
+rename from handoff.md
+rename to docs/audit/handoff-1.0.9.md
+diff --git a/docs/runtime.md b/docs/runtime.md
+index 56d081a..97bea6b 100644
+--- a/docs/runtime.md
++++ b/docs/runtime.md
+@@ -1,6 +1,6 @@
+ # Runtime: как фабрика исполняет work order
+ 
+-Документ описывает пакет `factory/runtime/` версии `1.0.2`: контракт исполнителя,
++Документ описывает пакет `factory/runtime/` версии `1.0.9`: контракт исполнителя,
+ цикл `factory run`, обогащение work order, учёт бюджета, защиту и состояние
+ адаптеров. Он дополняет `DESIGN.md` (концепция) и `PIPELINE.md` (стадии).
+ 
+diff --git a/eval/baseline.json b/eval/baseline.json
+index dc7d0e9..f358115 100644
+--- a/eval/baseline.json
++++ b/eval/baseline.json
+@@ -1,6 +1,6 @@
+ {
+   "schema_version": "1.0.0",
+-  "generated_at": "2026-10-31T19:38:23Z",
++  "generated_at": "2026-11-06T10:44:56Z",
+   "cases": {
+     "nano-todo": {
+       "status": "complete",
+@@ -27,8 +27,8 @@
+       "tokens": null,
+       "tokens_billable": null,
+       "usd": null,
+-      "seconds": 0.34,
+-      "prompt_chars": 208535,
++      "seconds": 0.475,
++      "prompt_chars": 249594,
+       "verification_coverage": 1.0,
+       "traceability_coverage": 1.0
+     },
+@@ -57,8 +57,8 @@
+       "tokens": null,
+       "tokens_billable": null,
+       "usd": null,
+-      "seconds": 0.355,
+-      "prompt_chars": 223430,
++      "seconds": 0.481,
++      "prompt_chars": 267991,
+       "verification_coverage": 1.0,
+       "traceability_coverage": 1.0
+     }
+diff --git a/factory/__init__.py b/factory/__init__.py
+index 8c9bcd7..b458370 100644
+--- a/factory/__init__.py
++++ b/factory/__init__.py
+@@ -1,4 +1,4 @@
+-"""Autonomous Software Factory v1.0.2.
++"""Autonomous Software Factory v1.0.9.
+ 
+ A stage-gated, runtime-agnostic kit. The engine issues work orders; a host
+ runtime (Hermes, Claude Code, OpenCode, Cursor) executes the roles.
+diff --git a/factory/checkpoint.py b/factory/checkpoint.py
+index 7b90c52..e38e36e 100644
+--- a/factory/checkpoint.py
++++ b/factory/checkpoint.py
+@@ -230,8 +230,17 @@ def checkpoint_state(run_dir: Path, store: Path | None = None) -> dict[str, Any]
+             result["matched_checkpoint"] = index
+             break
+     else:
+-        if newest.get("head_hash") and count > int(newest.get("event_count") or 0):
+-            result["status"] = "stale"
++        signed_count = int(newest.get("event_count") or 0)
++        if newest.get("head_hash") and count > signed_count:
++            if signed_count > 0 and signed_count <= len(events):
++                anchor_ev = events[signed_count - 1]
++                anchor_hash = anchor_ev.get("event_hash") or anchor_ev.get("hash")
++                if anchor_hash == newest.get("head_hash"):
++                    result["status"] = "stale"
++                else:
++                    result["status"] = "diverged"
++            else:
++                result["status"] = "diverged"
+     run_copy = run_dir / RUN_COPY
+     if run_copy.is_file() and run_copy.read_text(encoding="utf-8") != json.dumps(
+         document, indent=2, ensure_ascii=False, sort_keys=True
+diff --git a/factory/cli.py b/factory/cli.py
+index ef7705c..9e5071e 100644
+--- a/factory/cli.py
++++ b/factory/cli.py
+@@ -3,6 +3,7 @@ from __future__ import annotations
+ 
+ import argparse
+ import json
++import re
+ import sys
+ from pathlib import Path
+ 
+@@ -70,6 +71,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
+         version_file = repo_root / "VERSION"
+         if version_file.exists() and version_file.read_text(encoding="utf-8").strip() != __version__:
+             errors.append("VERSION does not match factory.__version__")
++        pyproject_text = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
++        m_ver = re.search(r'(?m)^version\s*=\s*"([^"]+)"', pyproject_text)
++        if m_ver and m_ver.group(1) != __version__:
++            errors.append(f"pyproject.toml version ({m_ver.group(1)}) does not match factory.__version__ ({__version__})")
+         license_file = repo_root / "LICENSE"
+         if license_file.exists() and "Permission is hereby granted" not in license_file.read_text(encoding="utf-8"):
+             errors.append("LICENSE is missing the MIT grant text")
+@@ -497,7 +502,7 @@ def cmd_quarantine(args: argparse.Namespace) -> int:
+                 role="00-orchestrator",
+                 event_type="SKILL_INSTALL",
+                 why="Quarantine scan auto-allowed the skill",
+-                for_what=f"Install {args.name}",
++                for_what=f"Install {display}",
+                 action=f"Installed {display} sha256={entry['sha256'][:12]}",
+                 verdict_status="DRAFT",
+                 verified_by="00-orchestrator",
+diff --git a/factory/compare.py b/factory/compare.py
+index 4ea777a..505a4dc 100644
+--- a/factory/compare.py
++++ b/factory/compare.py
+@@ -219,7 +219,8 @@ def compare_runs(
+         left_value = left["totals"].get(key)
+         right_value = right["totals"].get(key)
+         if isinstance(left_value, (int, float)) and isinstance(right_value, (int, float)):
+-            return right_value - left_value
++            diff = right_value - left_value
++            return round(diff, 6) if isinstance(diff, float) else diff
+         return None
+ 
+     return {
+diff --git a/factory/engine.py b/factory/engine.py
+index a0af4bc..e26e67d 100644
+--- a/factory/engine.py
++++ b/factory/engine.py
+@@ -1646,6 +1646,8 @@ def accept_risk(
+         if expires:
+             evidence.append(f"expires: {expires}")
+         gate_record(state, stage, status="approved", decided_by=approver, evidence=evidence)
++        if stage["id"] == "s_in":
++            state["restore_drill_passed"] = True
+         if stage["id"] == "s1_spec":
+             state["human_spec_approved"] = True
+         current_stage(state, pipeline)
+@@ -1814,6 +1816,11 @@ def veto(
+             action = f"Veto {code} by {role}: limit {limit} reached, escalated to human"
+         else:
+             state["stage_status"][stage["id"]] = "in_progress"
++            _reopen_stage_tasks(state, stage["id"])
++            if stage["id"] == "s1_spec":
++                state["human_spec_approved"] = False
++            elif stage["id"] == "s_in":
++                state["restore_drill_passed"] = False
+             gate = stage_gate(state, stage)
+             gate["status"] = "pending"
+             action = f"Veto {code} by {role}: stage reopened for rework"
+diff --git a/factory/models.yaml b/factory/models.yaml
+index bb8fc42..192703e 100644
+--- a/factory/models.yaml
++++ b/factory/models.yaml
+@@ -31,4 +31,4 @@ tiers:
+     price_per_mtok_out: null
+ 
+ # Order used when a tier is unavailable. The first entry must be the default.
+-fallback: ["tier-3-frontier", "tier-2-balanced", "tier-1-economy"]
++fallback: ["tier-2-balanced", "tier-3-frontier", "tier-1-economy"]
+diff --git a/factory/orchestrator/BROWNFIELD_PROTOCOL.md b/factory/orchestrator/BROWNFIELD_PROTOCOL.md
+index 6b4c2ac..3403205 100644
+--- a/factory/orchestrator/BROWNFIELD_PROTOCOL.md
++++ b/factory/orchestrator/BROWNFIELD_PROTOCOL.md
+@@ -11,10 +11,10 @@ RUN=runs/<run_id>/backups
+ mkdir -p "$RUN"
+ git bundle create "$RUN/pre-factory.bundle" --all
+ tar --exclude='.env' --exclude='*.pem' --exclude='*.key' \
+-    --exclude='node_modules' --exclude='.git' \
++    --exclude='node_modules' --exclude='.git' --exclude='./runs' \
+     -czf "$RUN/dirty-worktree.tar.gz" .
+ git status --porcelain > "$RUN/git-status.txt"
+-find . -type f -not -path './.git/*' -not -name '.env' \
++find . -type f -not -path './.git/*' -not -path './runs/*' -not -path './node_modules/*' -not -name '*.env' -not -name '*.pem' -not -name '*.key' \
+   -exec sha256sum {} + > "$RUN/manifest.sha256"
+ ```
+ 
+diff --git a/factory/orchestrator/SELF_IMPROVEMENT.md b/factory/orchestrator/SELF_IMPROVEMENT.md
+index abf6ae4..e8a0295 100644
+--- a/factory/orchestrator/SELF_IMPROVEMENT.md
++++ b/factory/orchestrator/SELF_IMPROVEMENT.md
+@@ -49,4 +49,4 @@
+ - патч трогает `pipeline.yaml`, `roles/` или инварианты без отдельного human-коммита;
+ - нет метрик до/после.
+ 
+-Самообучение без eval — это переписывание промптов с ускорением. Поэтому `0.2.2` считает метрики, но не применяет патчи автоматически.
++Самообучение без eval — это переписывание промптов с ускорением. Поэтому `1.0.9` считает метрики, но не применяет патчи автоматически.
+diff --git a/factory/pipeline.yaml b/factory/pipeline.yaml
+index 2ae7faf..0288168 100644
+--- a/factory/pipeline.yaml
++++ b/factory/pipeline.yaml
+@@ -77,7 +77,7 @@ modes:
+   enterprise:
+     description: "All 22 roles."
+     roles: ["*"]
+-    budget: { tokens: 6000000, minutes: 1440, usd: 120 }
++    budget: { tokens: 15000000, minutes: 1440, usd: 120 }
+   brownfield:
+     description: "Standard team plus a mandatory backup/restore drill before any write."
+     roles: ["00-orchestrator", "01-smart-interviewer", "02-independent-verifier", "03-product-owner", "04-team-lead", "05-business-analyst", "06-system-analyst", "08-software-architect", "12-fullstack-developer", "14-qa-engineer", "16-security-engineer", "19-devops-engineer"]
+diff --git a/factory/quarantine.py b/factory/quarantine.py
+index de442b3..f92a1cb 100644
+--- a/factory/quarantine.py
++++ b/factory/quarantine.py
+@@ -65,15 +65,15 @@ def parse_report(data: dict[str, Any]) -> ScanResult:
+ 
+ 
+ def decide(exit_code: int, result: ScanResult, min_coverage: float = 95.0) -> str:
++    if result.recommendation == "DO_NOT_INSTALL" or result.severity in {"HIGH", "CRITICAL"}:
++        return REJECT_AND_PURGE
+     if not result.is_complete or result.failed_analyzers:
+         return BLOCK_INCOMPLETE
++    if result.coverage_percent < min_coverage:
++        return BLOCK_INCOMPLETE
+     if exit_code != 0:
+         # A scan that did not finish cleanly is not evidence of safety.
+         return BLOCK_RETRY
+-    if result.recommendation == "DO_NOT_INSTALL" or result.severity in {"HIGH", "CRITICAL"}:
+-        return REJECT_AND_PURGE
+-    if result.coverage_percent < min_coverage:
+-        return BLOCK_INCOMPLETE
+     if (
+         result.recommendation == "SAFE"
+         and result.severity == "LOW"
+@@ -236,7 +236,14 @@ def verify_lock(path: Path, skills_root: Path | None = None) -> list[str]:
+         scanner = entry.get("scanner") or {}
+         if not entry.get("commit") or entry.get("commit") == "":
+             errors.append(f"{entry.get('name')}: missing commit")
+-        if scanner.get("recommendation") != "SAFE" or not scanner.get("is_complete"):
++        rec = scanner.get("recommendation")
++        human_ok = rec == "CAUTION" and str(entry.get("approved_by", "")).startswith("human:")
++        safe_ok = (
++            rec == "SAFE"
++            and scanner.get("severity", "LOW") == "LOW"
++            and float(scanner.get("coverage_percent", 100.0)) >= 95.0
++        )
++        if not scanner.get("is_complete") or not (safe_ok or human_ok):
+             errors.append(f"{entry.get('name')}: not approved by a complete SAFE scan")
+     return errors
+ 
+diff --git a/factory/retrieval.py b/factory/retrieval.py
+index c1d94a9..a1fbe7a 100644
+--- a/factory/retrieval.py
++++ b/factory/retrieval.py
+@@ -128,9 +128,12 @@ def build_index(root: Path | None = None, index_dir: Path | None = None) -> dict
+         rel = str(path.relative_to(root))
+         pieces = _chunk_text(text)
+         start_line = 1
++        char_offset = 0
+         for piece in pieces:
+             head = piece[:80].strip()
+-            idx = text.find(head, start_line - 1) if head else -1
++            idx = text.find(head, char_offset) if head else -1
++            if idx >= 0:
++                char_offset = max(0, idx + len(piece) - CHUNK_OVERLAP)
+             if idx >= 0:
+                 line_no = text[:idx].count("\n") + 1
+             else:
+diff --git a/factory/roles/00-orchestrator.md b/factory/roles/00-orchestrator.md
+index 843834d..a28ee03 100644
+--- a/factory/roles/00-orchestrator.md
++++ b/factory/roles/00-orchestrator.md
+@@ -23,7 +23,7 @@ blackbox_logging: "required"
+ ## 3. Процедура (Procedure)
+ 1. Создай `runs/<run_id>/state.json` и событие `EVT-000001` со статусом `INIT_OK` (без самоприсвоения `PASS`).
+ 2. Направь `Greenfield` на `s00_intake` (`01-smart-interviewer`), а `Brownfield` на `s_in` (сначала бэкап `git bundle` + `dirty-worktree.tar.gz` + `restore-drill.md`).
+-3. Заблокируй переход `s1_spec -> s2_architecture` без одобрения `spec-human.md` человеком.
++3. Заблокируй переход `s1_spec -> s15_quarantine -> s2_architecture` без одобрения `spec-human.md` человеком.
+ 4. На `s15_quarantine` выполни `python3 -m factory.cli quarantine scan <path> --lock skills-lock.json`; при неполном скане установка блокируется.
+ 5. При достижении 3 возвратов по блокирующему вето останови цикл и эскалируй человеку.
+ 
+@@ -40,4 +40,4 @@ blackbox_logging: "required"
+ * Запрещено менять продуктовый код в `runs/<run_id>/product/src/`, ставить себе `PASS` и писать в лог при обычном чтении репозитория.
+ 
+ ## 8. Эскалация (Escalation)
+-* Групповая эскалация человеку на гейтах `s1_spec -> s2_architecture`, при `CAUTION` от `SkillSpector`, после 3 итераций вето и перед релизом `s7_release`.
++* Групповая эскалация человеку на гейтах `s1_spec -> s15_quarantine -> s2_architecture`, при `CAUTION` от `SkillSpector`, после 3 итераций вето и перед релизом `s7_release`.
+diff --git a/factory/roles/01-smart-interviewer.md b/factory/roles/01-smart-interviewer.md
+index c65fec0..b179868 100644
+--- a/factory/roles/01-smart-interviewer.md
++++ b/factory/roles/01-smart-interviewer.md
+@@ -30,7 +30,7 @@ blackbox_logging: "required"
+ * `runs/<run_id>/artifacts/interview-brief.md` (`s00_intake`), `onboarding-plan.md` и `restore-drill.md` (`s_in`), `runs/<run_id>/artifacts/GLOSSARY.md`; в `Nano` — также `spec.md`, `spec-human.md`, `traceability.json`, `plan.md`.
+ 
+ ## 5. Критерии готовности (Definition of Done)
+-* Профиль клиента зафиксирован в `state.json`; заполнены цели, `Out-of-Scope` и словарь `GLOSSARY.md`; получено одобрение человека.
++* Профиль клиента зафиксирован в `artifacts/interview-brief.md`; заполнены цели, `Out-of-Scope` и словарь `GLOSSARY.md`; получено одобрение человека.
+ 
+ ## 6. Право вето (Veto Power)
+ * `blocking` (`VETO-INT-NO-BACKUP` / `VETO-INT-MISSING-CONTEXT`): старт без интервью или работа в `Brownfield` без проверенного `restore-drill.md`.
+diff --git a/factory/roles/02-independent-verifier.md b/factory/roles/02-independent-verifier.md
+index 810f3ba..4aba08d 100644
+--- a/factory/roles/02-independent-verifier.md
++++ b/factory/roles/02-independent-verifier.md
+@@ -6,7 +6,7 @@ reasoning_effort: "max"
+ active_stages: ["s_in", "s00_intake", "s0_vision", "s1_spec", "s15_quarantine", "s2_architecture", "s3_plan", "s4_build", "s5_acceptance", "s6_security", "s7_release", "s8_docs", "s9_learn"]
+ write_scopes: ["own_artifacts"]
+ veto_type: "blocking"
+-veto_scope: "all_stage_gates_s0_vision_to_s9_learn"
++veto_scope: "all_stage_gates_s_in_to_s9_learn"
+ model_invocable_skills: ["factory-verify-runner", "req-traceability-checker"]
+ human_slash_skills: ["/review", "/grill"]
+ blackbox_logging: "required"
+diff --git a/factory/roles/05-business-analyst.md b/factory/roles/05-business-analyst.md
+index 3b63477..c7e6be2 100644
+--- a/factory/roles/05-business-analyst.md
++++ b/factory/roles/05-business-analyst.md
+@@ -18,7 +18,7 @@ blackbox_logging: "required"
+ Создаёт на стадии `s1_spec` двухслойное техническое задание со сквозными кодами `REQ-001..REQ-NNN`: инженерную спецификацию `spec.md` для агентов и полностью эквивалентное понятное ТЗ `spec-human.md` на языке заказчика.
+ 
+ ## 2. Входы (Inputs)
+-* `runs/<run_id>/artifacts/interview-brief.md`, `vision.md`, `GLOSSARY.md` и профиль клиента из `state.json`.
++* `runs/<run_id>/artifacts/interview-brief.md`, `vision.md`, `GLOSSARY.md` и профиль клиента из `artifacts/interview-brief.md`.
+ 
+ ## 3. Процедура (Procedure)
+ 1. Присвой каждому требованию сквозной код `REQ-###`.
+@@ -33,10 +33,10 @@ blackbox_logging: "required"
+ * Наборы кодов `REQ-###` в `spec.md` и `spec-human.md` совпадают на 100% (`factory verify --stage s1_spec` возвращает 0); нет размытых формулировок без метрик.
+ 
+ ## 6. Право вето (Veto Power)
+-* `blocking` (`VETO-BA-AMBIGUOUS-REQ`): блокирует гейт `s1_spec -> s2_architecture` при несовпадении `REQ-###` или отсутствии одобрения `spec-human.md` человеком.
++* `blocking` (`VETO-BA-AMBIGUOUS-REQ`): блокирует гейт `s1_spec -> s15_quarantine -> s2_architecture` при несовпадении `REQ-###` или отсутствии одобрения `spec-human.md` человеком.
+ 
+ ## 7. Запреты (Prohibitions)
+ * Запрещено включать в `spec.md` скрытые требования, отсутствующие в `spec-human.md`, и нарушать `GLOSSARY.md`.
+ 
+ ## 8. Эскалация (Escalation)
+-* Выносит противоречия между бизнес-требованиями в пакет вопросов человеку на гейте `s1_spec -> s2_architecture`.
++* Выносит противоречия между бизнес-требованиями в пакет вопросов человеку на гейте `s1_spec -> s15_quarantine -> s2_architecture`.
+diff --git a/factory/roles/21-technical-writer.md b/factory/roles/21-technical-writer.md
+index 8f95d55..b47db97 100644
+--- a/factory/roles/21-technical-writer.md
++++ b/factory/roles/21-technical-writer.md
+@@ -18,7 +18,7 @@ blackbox_logging: "required"
+ Создаёт на стадии `s8_docs` документацию **готового продукта** в `runs/<run_id>/product/README.md` и `runs/<run_id>/product/docs/user-guide.md` на языке профиля заказчика, никогда не перезаписывая корневой `/README.md` самой Фабрики (защита корневого README).
+ 
+ ## 2. Входы (Inputs)
+-* Готовый продукт в `runs/<run_id>/product/`, `spec-human.md`, `GLOSSARY.md`, `runbook-deploy.md` и профиль клиента из `state.json`.
++* Готовый продукт в `runs/<run_id>/product/`, `spec-human.md`, `GLOSSARY.md`, `runbook-deploy.md` и профиль клиента из `artifacts/interview-brief.md`.
+ 
+ ## 3. Процедура (Procedure)
+ 1. Напиши `runs/<run_id>/product/README.md` (запуск за 3 шага).
+diff --git a/factory/runtime/loop.py b/factory/runtime/loop.py
+index 9c4bb89..81dd474 100644
+--- a/factory/runtime/loop.py
++++ b/factory/runtime/loop.py
+@@ -51,6 +51,13 @@ STOP = 3
+ MAX_CHARS_RATIO = 0.75
+ 
+ 
++
++def _effective_prompt_chars(text: str) -> int:
++    """ASCII chars count as 1 (~0.25 tok); Cyrillic/non-ASCII count as 2 (~0.5 tok)."""
++    non_ascii = sum(1 for ch in text if ord(ch) >= 128)
++    return len(text) + non_ascii
++
++
+ def _context_limit_chars(role: str | None) -> int:
+     """Лимит окна модели роли в символах по factory/models.yaml.
+ 
+@@ -660,7 +667,7 @@ def run_loop(
+         prompt = build_prompt(
+             order, run_dir=run_dir, role=order.get("next_role"), evidence=evidence
+         )
+-        prompt_chars = len(prompt)
++        prompt_chars = _effective_prompt_chars(prompt)
+         context_limit = _context_limit_chars(order.get("next_role"))
+         if prompt_chars > context_limit:
+             # Роль никогда не получает обрезанное вслепую сообщение: если
+diff --git a/factory/schemas/event.schema.json b/factory/schemas/event.schema.json
+index 8228a44..eb12410 100644
+--- a/factory/schemas/event.schema.json
++++ b/factory/schemas/event.schema.json
+@@ -11,7 +11,7 @@
+     "seq": {"type": "integer", "minimum": 1},
+     "timestamp_utc": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},
+     "stage": {"type": "string", "enum": ["init", "s_in", "s00_intake", "s0_vision", "s1_spec", "s15_quarantine", "s2_architecture", "s3_plan", "s4_build", "s5_acceptance", "s6_security", "s7_release", "s8_docs", "s9_learn"]},
+-    "task_id": {"type": ["string", "null"], "pattern": "^TASK-[A-Z0-9-]+$"},
++    "task_id": {"type": ["string", "null"], "pattern": "^TASK-[A-Z0-9][A-Z0-9-]{0,62}$"},
+     "role": {"type": "string", "pattern": "^[0-9]{2}-[a-z0-9-]+$"},
+     "event_type": {"type": "string", "enum": ["INIT", "STAGE_RESET", "TASK_ADD", "TASK_CLAIM", "TASK_DONE", "TASK_RESET", "ARTIFACT_SUBMIT", "ARTIFACT_RERECORD", "GATE_DECISION", "VERIFY", "VETO", "REWORK", "RISK_ACCEPTANCE", "SKILL_INSTALL"]},
+     "model": {
+diff --git a/factory/schemas/state.schema.json b/factory/schemas/state.schema.json
+index 42bead2..674fdde 100644
+--- a/factory/schemas/state.schema.json
++++ b/factory/schemas/state.schema.json
+@@ -28,7 +28,7 @@
+       "additionalProperties": false,
+       "required": ["task_id", "stage", "owner", "reqs", "allowed_files", "deps", "status", "attempts", "artifacts", "lease"],
+       "properties": {
+-        "task_id": {"type": "string", "pattern": "^TASK-[A-Z0-9-]+$"},
++        "task_id": {"type": "string", "pattern": "^TASK-[A-Z0-9][A-Z0-9-]{0,62}$"},
+         "stage": {"type": "string"},
+         "owner": {"type": "string"},
+         "reqs": {"type": "array", "items": {"type": "string", "pattern": "^REQ-[A-Z0-9-]+$"}},
+diff --git a/factory/schemas/task.schema.json b/factory/schemas/task.schema.json
+index 73b59c3..beacc8d 100644
+--- a/factory/schemas/task.schema.json
++++ b/factory/schemas/task.schema.json
+@@ -7,7 +7,7 @@
+   "additionalProperties": false,
+   "required": ["task_id", "stage", "owner", "reqs", "allowed_files", "deps", "status", "attempts", "artifacts", "lease"],
+   "properties": {
+-    "task_id": {"type": "string", "pattern": "^TASK-[A-Z0-9-]+$"},
++    "task_id": {"type": "string", "pattern": "^TASK-[A-Z0-9][A-Z0-9-]{0,62}$"},
+     "stage": {"type": "string"},
+     "owner": {"type": "string"},
+     "reqs": {"type": "array", "items": {"type": "string", "pattern": "^REQ-[A-Z0-9-]+$"}},
+diff --git a/factory/schemas/traceability.schema.json b/factory/schemas/traceability.schema.json
+index cc770a3..1e9be39 100644
+--- a/factory/schemas/traceability.schema.json
++++ b/factory/schemas/traceability.schema.json
+@@ -17,7 +17,7 @@
+           "required": ["spec", "tasks", "tests", "acceptance"],
+           "properties": {
+             "spec": {"type": "string", "minLength": 1},
+-            "tasks": {"type": "array", "items": {"type": "string", "pattern": "^TASK-[A-Z0-9-]+$"}},
++            "tasks": {"type": "array", "items": {"type": "string", "pattern": "^TASK-[A-Z0-9][A-Z0-9-]{0,62}$"}},
+             "tests": {"type": "array", "items": {"type": "string"}},
+             "acceptance": {"type": "string", "minLength": 1}
+           }
+diff --git a/factory/ui/export.py b/factory/ui/export.py
+index 7cf091c..d6e3be1 100644
+--- a/factory/ui/export.py
++++ b/factory/ui/export.py
+@@ -93,12 +93,21 @@ class ExportUnavailable(FactoryError):
+     """The optional `.xlsx` dependency is not installed."""
+ 
+ 
++_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
++
++
+ def _cell(value: Any) -> Any:
+-    """`null` is an empty cell; a list is one cell joined with `; `."""
++    """`null` is an empty cell; a list is one cell joined with `; `.
++
++    Strings with a leading formula character are apostrophe-escaped
++    against CSV/Excel formula injection (CWE-1236).
++    """
+     if value is None:
+         return ""
+     if isinstance(value, (list, tuple)):
+-        return "; ".join(str(item) for item in value)
++        value = "; ".join(str(item) for item in value)
++    if isinstance(value, str) and value.startswith(_FORMULA_PREFIXES):
++        return "'" + value
+     return value
+ 
+ 
+diff --git a/factory/verify.py b/factory/verify.py
+index b48a3ed..64ae944 100644
+--- a/factory/verify.py
++++ b/factory/verify.py
+@@ -109,7 +109,7 @@ def validate_role_card(path: Path, pipeline: dict[str, Any] | None = None, model
+         words = len([w for w in chunk.replace("`", " ").split() if any(ch.isalpha() for ch in w)])
+         if words < MIN_SECTION_WORDS:
+             errors.append(f"{path.name}: section {section!r} is too short ({words} words)")
+-    if "can_edit_project_files" in body:
++    if "can_edit_project_files" in body or "can_edit_project_files" in fm:
+         errors.append(f"{path.name}: deprecated can_edit_project_files is forbidden")
+     return errors
+ 
+diff --git a/pyproject.toml b/pyproject.toml
+index d187dd4..550e190 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
+ 
+ [project]
+ name = "autonomous-sw-factory"
+-version = "1.0.8"
++version = "1.0.9"
+ description = "Runtime-agnostic, auditable software factory kit with stage gates, task work orders and a hash-chained flight recorder."
+ readme = "README.md"
+ requires-python = ">=3.10"
+@@ -44,7 +44,7 @@ factory = "factory.cli:main"
+ include = ["factory*"]
+ 
+ [tool.setuptools.package-data]
+-factory = ["pipeline.yaml", "models.yaml", "budget.yaml", "artifacts.yaml", "FACTORY_GLOSSARY.md", "orchestrator/*.md", "roles/*.md", "schemas/*.json", "templates/*.tmpl", "memory/*.md", "ui/static/*", "runtime/fixtures/nano/*", "runtime/fixtures/nano/*/*", "runtime/fixtures/nano/*/*/*"]
++factory = ["pipeline.yaml", "models.yaml", "budget.yaml", "artifacts.yaml", "FACTORY_GLOSSARY.md", "orchestrator/*.md", "roles/*.md", "schemas/*.json", "templates/*.tmpl", "memory/*.md", "ui/static/*", "runtime/fixtures/nano/*", "runtime/fixtures/nano/*/*", "runtime/fixtures/nano/*/*/*", "runtime/fixtures/**/*"]
+ 
+ [tool.pytest.ini_options]
+ testpaths = ["tests"]
+diff --git a/tests/test_ui.py b/tests/test_ui.py
+index 74dff5d..0256aab 100644
+--- a/tests/test_ui.py
++++ b/tests/test_ui.py
+@@ -528,6 +528,16 @@ def test_journal_filter_hides_fail_outside_the_tail(served):
+     assert status == 404
+ 
+ 
++def test_export_escapes_formula_injection_prefixes():
++    assert export._cell("=SUM(A1:A2)") == "'=SUM(A1:A2)"
++    assert export._cell("-2+3") == "'-2+3"
++    assert export._cell("@mention") == "'@mention"
++    assert export._cell(["=x", "y"]) == "'=x; y"
++    assert export._cell("plain") == "plain"
++    assert export._cell(42) == 42
++    assert export._cell(None) == ""
++
++
+ def test_usage_export_matches_the_usage_report(served):
+     base, root, run_dir = served
+     usage = run_dir / "runtime" / "usage.jsonl"
+@@ -552,7 +562,8 @@ def test_usage_export_matches_the_usage_report(served):
+         assert rows[0] == list(export.USAGE_FIELDS)
+         report, _warning = build_usage_report("run-01", group_by=grouping, root=root)
+         expected = [
+-            [group["key"]] + ["" if group[name] is None else str(group[name]) for name in export.USAGE_FIELDS[1:]]
++            [export._cell(group["key"])]
++            + [export._cell("" if group[name] is None else str(group[name])) for name in export.USAGE_FIELDS[1:]]
+             for group in report["groups"]
+         ]
+         assert rows[1:] == expected, grouping

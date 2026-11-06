@@ -6,7 +6,7 @@ reasoning_effort: "max"
 active_stages: ["s_in", "s00_intake", "s0_vision", "s1_spec", "s15_quarantine", "s2_architecture", "s3_plan", "s4_build", "s5_acceptance", "s6_security", "s7_release", "s8_docs", "s9_learn"]
 write_scopes: ["own_artifacts"]
 veto_type: "blocking"
-veto_scope: "all_stage_gates_s0_vision_to_s9_learn"
+veto_scope: "all_stage_gates_s_in_to_s9_learn"
 model_invocable_skills: ["factory-verify-runner", "req-traceability-checker"]
 human_slash_skills: ["/review", "/grill"]
 blackbox_logging: "required"

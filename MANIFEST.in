@@ -18,5 +18,6 @@ recursive-include eval *
 recursive-include examples *
 recursive-include tests *.py
 recursive-include factory *.yaml *.md *.json *.tmpl
+recursive-include factory/ui/static *
 recursive-include factory/runtime/fixtures *
 global-exclude __pycache__ *.py[cod]

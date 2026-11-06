@@ -31,4 +31,4 @@ tiers:
     price_per_mtok_out: null
 
 # Order used when a tier is unavailable. The first entry must be the default.
-fallback: ["tier-3-frontier", "tier-2-balanced", "tier-1-economy"]
+fallback: ["tier-2-balanced", "tier-3-frontier", "tier-1-economy"]

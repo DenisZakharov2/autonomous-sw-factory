@@ -7,7 +7,7 @@
   "additionalProperties": false,
   "required": ["task_id", "stage", "owner", "reqs", "allowed_files", "deps", "status", "attempts", "artifacts", "lease"],
   "properties": {
-    "task_id": {"type": "string", "pattern": "^TASK-[A-Z0-9-]+$"},
+    "task_id": {"type": "string", "pattern": "^TASK-[A-Z0-9][A-Z0-9-]{0,62}$"},
     "stage": {"type": "string"},
     "owner": {"type": "string"},
     "reqs": {"type": "array", "items": {"type": "string", "pattern": "^REQ-[A-Z0-9-]+$"}},

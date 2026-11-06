@@ -77,7 +77,7 @@ modes:
   enterprise:
     description: "All 22 roles."
     roles: ["*"]
-    budget: { tokens: 6000000, minutes: 1440, usd: 120 }
+    budget: { tokens: 15000000, minutes: 1440, usd: 120 }
   brownfield:
     description: "Standard team plus a mandatory backup/restore drill before any write."
     roles: ["00-orchestrator", "01-smart-interviewer", "02-independent-verifier", "03-product-owner", "04-team-lead", "05-business-analyst", "06-system-analyst", "08-software-architect", "12-fullstack-developer", "14-qa-engineer", "16-security-engineer", "19-devops-engineer"]

@@ -30,7 +30,7 @@ blackbox_logging: "required"
 * `runs/<run_id>/artifacts/interview-brief.md` (`s00_intake`), `onboarding-plan.md` и `restore-drill.md` (`s_in`), `runs/<run_id>/artifacts/GLOSSARY.md`; в `Nano` — также `spec.md`, `spec-human.md`, `traceability.json`, `plan.md`.
 
 ## 5. Критерии готовности (Definition of Done)
-* Профиль клиента зафиксирован в `state.json`; заполнены цели, `Out-of-Scope` и словарь `GLOSSARY.md`; получено одобрение человека.
+* Профиль клиента зафиксирован в `artifacts/interview-brief.md`; заполнены цели, `Out-of-Scope` и словарь `GLOSSARY.md`; получено одобрение человека.
 
 ## 6. Право вето (Veto Power)
 * `blocking` (`VETO-INT-NO-BACKUP` / `VETO-INT-MISSING-CONTEXT`): старт без интервью или работа в `Brownfield` без проверенного `restore-drill.md`.

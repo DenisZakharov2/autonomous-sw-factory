@@ -92,6 +92,19 @@ def paths_overlap(left: str, right: str) -> bool:
     return a.startswith(b + "/") or b.startswith(a + "/")
 
 
+def _reject_symlink_chain(root: Path, candidate: Path) -> None:
+    """Refuse any symlink in the path from root to candidate.
+
+    Both leaf symlinks and intermediate directory symlinks are blocked.
+    """
+    rel_parts = candidate.relative_to(root).parts
+    probe = root
+    for part in rel_parts:
+        probe = probe / part
+        if probe.is_symlink():
+            raise RuntimeFailure(f"refusing symlink in worktree merge path: {probe}")
+
+
 def parallel_conflicts(tasks: list[dict[str, Any]]) -> list[str]:
     """Pairs of tasks whose Allowed Files intersect, with the shared path."""
     conflicts: list[str] = []
@@ -320,7 +333,10 @@ class WorktreeWorkspace:
 
         backups: list[tuple[Path, bytes | None]] = []
         for relative, (target, _base, current) in zip(changed, checks):
-            source = worktree / normalise_allowed(relative)
+            rel_norm = normalise_allowed(relative)
+            source = worktree / rel_norm
+            _reject_symlink_chain(worktree, source)
+            _reject_symlink_chain(self.run_dir, target)
             backups.append((target, current))
             if source.is_file():
                 target.parent.mkdir(parents=True, exist_ok=True)

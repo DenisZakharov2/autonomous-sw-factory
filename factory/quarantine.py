@@ -237,7 +237,12 @@ def verify_lock(path: Path, skills_root: Path | None = None) -> list[str]:
         if not entry.get("commit") or entry.get("commit") == "":
             errors.append(f"{entry.get('name')}: missing commit")
         rec = scanner.get("recommendation")
-        human_ok = rec == "CAUTION" and str(entry.get("approved_by", "")).startswith("human:")
+        human_ok = (
+            rec == "CAUTION"
+            and str(entry.get("approved_by", "")).startswith("human:")
+            and scanner.get("severity", "CRITICAL") in {"LOW", "MEDIUM"}
+            and float(scanner.get("coverage_percent", 0.0)) >= 95.0
+        )
         safe_ok = (
             rec == "SAFE"
             and scanner.get("severity", "LOW") == "LOW"

@@ -20,7 +20,7 @@
 | `traceability` | Матрица `REQ → spec → task → test → acceptance` |
 | `runbook` | Регламент деплоя или эксплуатации с проверенными командами |
 | `rollback drill` | Фактический прогон отката с записанным выводом и RTO |
-| `restore drill` | Фактическое восстановление Brownfield-бэкапа |
+|| `restore drill` | Фактическое тестовое восстановление Brownfield-бэкапа на стадии s_in |
 | `Untouchable Paths` | Glob-список путей, которые нельзя менять |
 | `SkillSpector` | Внешний сканер скиллов; вердикты `SAFE`/`CAUTION`/`DO_NOT_INSTALL` |
 | `quarantine` | Карантин скиллов до вердикта; fail-closed |

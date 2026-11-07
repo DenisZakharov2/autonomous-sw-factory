@@ -238,9 +238,9 @@ next_action ─┬─ complete ────────────────�
 лимит = max_tokens(factory/models.yaml) × 4 символа × MAX_CHARS_RATIO (0.75)
 ```
 
-- `tier-1-economy` (8192 токенов): 24 576 символов
-- `tier-2-balanced` (32 768 токенов): 98 304 символа
-- `tier-3-frontier` (131 072 токена): 393 216 символа
+- `tier-1-economy` (8192 токена): 24 576 символов
+- `tier-2-balanced` (32 768 токенов): 98 304 символов
+- `tier-3-frontier` (131 072 токена): 393 216 символов
 
 При превышении `run_loop` возвращает `finish("context_exceeded", STOP, ...)`
 с ошибкой «разбей задачу на подзадачи» и пишет evidence (`prompt_chars`,

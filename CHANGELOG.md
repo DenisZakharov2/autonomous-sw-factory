@@ -9,7 +9,7 @@ All notable changes are recorded here. From `1.0.0` the project follows Semantic
 ### Исправлено
 - **`fixes.patch` убран из корня** — сырой дифф аудита 1.0.9, продублированный внутри коммита 53b3e21; не является продуктом.
 - **Ссылки на архивный handoff.md починили** — `DESIGN.md`, `TECHNICAL.md`, `docs/runtime.md`, `factory/trace.py` теперь указывают на `docs/audit/handoff-1.0.9.md`; `docs/audit/README.md` описывает архив по конвенции каталога. `CHANGELOG.md` не тронут — историческая запись.
-- **Flaky-тест `test_doctor_ignores_a_foreign_project_version` теперь стабильно зелёный** — падал только в полной прогоно из-за загрязнения CWD другими тестами; в чистом окружении и в полной прогоно 409/409 passed.
+- **Flaky-тест `test_doctor_ignores_a_foreign_project_version` теперь стабильно зелёный** — падал только при полном прогоне из-за загрязнения CWD другими тестами; в чистом окружении и при полном прогоне 409/409 passed.
 
 ---
 

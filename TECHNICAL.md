@@ -35,7 +35,7 @@ factory/                 # Engine and configs
     fixtures/nano/       # Reference artifacts for fake
   roles/                 # 22 role cards
   schemas/               # 13 JSON schemas
-  templates/             # 38 templates
+  templates/             # 39 templates
   pipeline.yaml          # Stage graph and modes
   artifacts.yaml         # Artifact registry
   models.yaml            # Tier → runtime/env
@@ -219,7 +219,7 @@ Full version — [`docs/threat-model.md`](docs/threat-model.md).
 - `1.0.1` — `traceability` checks test name, not just file; legal `re-record` of accepted artifact (`ARTIFACT_RERECORD`, §5.7 `docs/runtime.md`); new human-readable factory description in `README.md`/`README.en.md`; CI run `41221412801` (14/14)
 - `1.0.2` — Independent verifier executes before every role-gate and every `TASK_DONE` (`VERIFY` in journal, report with three checks); deterministic check in stage report, literal `PASS` in acceptance matrix and single word in verdict checked by code; evidence `report_invalid`; budgets `nano` 7.8M, `standard` 9.5M, `brownfield` 9.1M / 60 min from real measurements. CI run `41282195622` (14/14)
 - `1.0.3` — Read-only run dashboard `factory ui` (stdlib, only `GET`, seven panels, free 12-column grid, presets, 2s polling and `304`) and export M1: CSV of full journal, tasks, spend, traceability, `.xlsx` book of six sheets via extra `xlsx`, `runs.csv` for all runs; verifier rejection reaches producer, stage reworking itself reopens its tasks
-- `1.0.4` — Metrics panel with nine `compute_metrics` values (`null` = "not measured", calc error = warnbox), run list scrolls inside table not page, `factory ui --runs-dir` actually reads specified dir, old layout doesn't auto-open new panel; both READMEs — "See a run" block and honest metrics description
+- `1.0.4` — Metrics panel with eight `compute_metrics` values (`null` = "not measured", calc error = warnbox), run list scrolls inside table not page, `factory ui --runs-dir` actually reads specified dir, old layout doesn't auto-open new panel; both READMEs — "See a run" block and honest metrics description
 - `1.0.5` — Journal filters (verdict, stage, event_type, limit) with URL state and honest counter; client-side search/sort of run list (?q=&sort=&dir=); detail drawer 420px for stage/task/event with deep link ?event=<seq>; new endpoint GET /api/runs/<id>/events/<seq>; journal.csv export with same filters; ETag includes filter hash
 - `1.0.6` — Time-series panel (P9): four canvas charts (tokens, seconds, USD, API calls) without external libs, metric tabs, buckets stage/event/minute, URL state (?ts=&bucket=); endpoint GET /api/runs/<id>/timeseries with ETag by journal stamp and bucket; CHANGELOG.md created
 - `1.0.7` — Endpoint `/api/compare/artifact` and panel "Artifacts (A vs B)" with three-tab selector and line-by-line diff, drawer close fix. Current.

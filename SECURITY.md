@@ -6,7 +6,7 @@
 | :--- | :--- |
 | `1.0.x` | yes |
 | `0.2.x` | security fixes only |
-| `0.1.x` | yes |
+| `0.1.x` | security fixes only |
 | older | no |
 
 ## Reporting a vulnerability
@@ -75,5 +75,5 @@ checkpoint outside `runs/`.
 ## Residual risk
 
 The hash chain is unkeyed. It detects accidental edits and naive tampering, not
-a determined attacker with write access. Add an external HMAC/Ed25519
-checkpoint or an append-only store for a stronger threat model.
+a determined attacker with write access. An external HMAC checkpoint (`factory sign`)
+is implemented in v1.0.0+; use it for a stronger threat model.

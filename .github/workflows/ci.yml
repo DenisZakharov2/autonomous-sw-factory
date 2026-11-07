@@ -58,7 +58,7 @@ jobs:
       - name: Eval set (fake executor, invariants and baseline)
         run: >-
           factory eval --cases eval/cases --executor fake
-          --case nano-todo --case standard-mini
+          --case nano-todo --case standard-mini --case nano-product-mini --case product-mini --case enterprise-mini
       - name: Runtime reference run (no model)
         run: |
           export FACTORY_ROOT="$RUNNER_TEMP/factory-run"
@@ -107,3 +107,11 @@ jobs:
           tar -xzf dist/*.tar.gz -C /tmp/sdist-src --strip-components=1
           cd /tmp/sdist-src
           /tmp/sdist-venv/bin/python -m pytest -q
+      - name: Test the built wheel in a clean environment
+        run: |
+          python -m venv /tmp/wheel-venv
+          /tmp/wheel-venv/bin/pip install --upgrade pip
+          /tmp/wheel-venv/bin/pip install "dist/*.whl[xlsx]"
+          /tmp/wheel-venv/bin/factory doctor
+          /tmp/wheel-venv/bin/factory --help
+          /tmp/wheel-venv/bin/factory ui --help

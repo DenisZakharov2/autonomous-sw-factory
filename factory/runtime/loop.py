@@ -51,27 +51,24 @@ STOP = 3
 MAX_CHARS_RATIO = 0.75
 
 
+def _estimate_prompt_tokens(text: str) -> int:
+    """Estimate token count: ASCII ~4 chars/token, Cyrillic ~1.8 chars/token."""
+    ascii_chars = sum(1 for ch in text if ord(ch) < 128)
+    non_ascii_chars = len(text) - ascii_chars
+    return int((ascii_chars / 4.0) + (non_ascii_chars / 1.8))
 
-def _effective_prompt_chars(text: str) -> int:
-    """ASCII chars count as 1 (~0.25 tok); Cyrillic/non-ASCII count as 2 (~0.5 tok)."""
-    non_ascii = sum(1 for ch in text if ord(ch) >= 128)
-    return len(text) + non_ascii
 
-
-def _context_limit_chars(role: str | None) -> int:
-    """Лимит окна модели роли в символах по factory/models.yaml.
-
-    Tier берётся из фронтматтера карточки роли (default_model_tier),
-    tier-2-balanced — если карточки или её tier нет.
-    """
+def _context_limit_tokens(role: str | None) -> int:
+    """Context window limit in tokens from factory/models.yaml."""
     tier = "tier-2-balanced"
     if role:
         try:
             tier = str(_model_for(role)["tier"])
         except Exception:
-            tier = "tier-2-balanced"
-    max_tokens = int(load_models()["tiers"][tier]["max_tokens"])
-    return int(max_tokens * 4 * MAX_CHARS_RATIO)
+            pass
+    tier_cfg = load_models()["tiers"][tier]
+    window = int(tier_cfg.get("context_window") or tier_cfg["max_tokens"])
+    return int(window * MAX_CHARS_RATIO)
 
 
 def _is_verification_order(order: dict[str, Any]) -> bool:
@@ -667,8 +664,8 @@ def run_loop(
         prompt = build_prompt(
             order, run_dir=run_dir, role=order.get("next_role"), evidence=evidence
         )
-        prompt_chars = _effective_prompt_chars(prompt)
-        context_limit = _context_limit_chars(order.get("next_role"))
+        prompt_chars = _estimate_prompt_tokens(prompt)
+        context_limit = _context_limit_tokens(order.get("next_role"))
         if prompt_chars > context_limit:
             # Роль никогда не получает обрезанное вслепую сообщение: если
             # свои артефакты + RAG-фрагменты не влезают в окно модели,
@@ -678,8 +675,8 @@ def run_loop(
                 order,
                 {
                     "status": "context_exceeded",
-                    "prompt_chars": prompt_chars,
-                    "limit_chars": context_limit,
+                    "prompt_tokens": prompt_chars,
+                    "limit_tokens": context_limit,
                     "model_tier": _model_for(order.get("next_role") or "")["tier"],
                 },
             )
@@ -688,7 +685,7 @@ def run_loop(
                 STOP,
                 (
                     f"контекст слишком велик для окна модели "
-                    f"({prompt_chars} символов > {context_limit}); "
+                    f"({prompt_chars} токенов > {context_limit}); "
                     "разбей задачу на подзадачи, а не подавай с обрезанным промптом"
                 ),
                 stage_id,

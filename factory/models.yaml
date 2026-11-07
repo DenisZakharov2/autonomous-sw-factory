@@ -11,6 +11,7 @@ tiers:
     model_env: "FACTORY_MODEL_TIER_1"
     effort: "low"
     max_tokens: 8192
+    context_window: 8192
     price_per_mtok_in: null
     price_per_mtok_out: null
   tier-2-balanced:
@@ -19,6 +20,7 @@ tiers:
     model_env: "FACTORY_MODEL_TIER_2"
     effort: "medium"
     max_tokens: 32768
+    context_window: 32768
     price_per_mtok_in: null
     price_per_mtok_out: null
   tier-3-frontier:
@@ -27,6 +29,7 @@ tiers:
     model_env: "FACTORY_MODEL_TIER_3"
     effort: "high"
     max_tokens: 131072
+    context_window: 131072
     price_per_mtok_in: null
     price_per_mtok_out: null
 

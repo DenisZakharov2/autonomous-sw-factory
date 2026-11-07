@@ -71,10 +71,15 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         version_file = repo_root / "VERSION"
         if version_file.exists() and version_file.read_text(encoding="utf-8").strip() != __version__:
             errors.append("VERSION does not match factory.__version__")
-        pyproject_text = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
-        m_ver = re.search(r'(?m)^version\s*=\s*"([^"]+)"', pyproject_text)
-        if m_ver and m_ver.group(1) != __version__:
-            errors.append(f"pyproject.toml version ({m_ver.group(1)}) does not match factory.__version__ ({__version__})")
+        # When using dynamic version from VERSION file, pyproject.toml has a placeholder
+        # Read the actual version from VERSION file for comparison
+        if version_file.exists():
+            actual_version = version_file.read_text(encoding="utf-8").strip()
+            pyproject_text = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
+            m_ver = re.search(r'(?m)^version\s*=\s*"([^"]+)"', pyproject_text)
+            # If pyproject.toml uses dynamic version (placeholder), skip the check
+            if m_ver and m_ver.group(1) != "0.0.0" and m_ver.group(1) != actual_version:
+                errors.append(f"pyproject.toml version ({m_ver.group(1)}) does not match VERSION file ({actual_version})")
         license_file = repo_root / "LICENSE"
         if license_file.exists() and "Permission is hereby granted" not in license_file.read_text(encoding="utf-8"):
             errors.append("LICENSE is missing the MIT grant text")

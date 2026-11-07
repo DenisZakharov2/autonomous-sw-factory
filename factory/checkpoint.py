@@ -231,10 +231,10 @@ def checkpoint_state(run_dir: Path, store: Path | None = None) -> dict[str, Any]
             break
     else:
         signed_count = int(newest.get("event_count") or 0)
-        if newest.get("head_hash") and count > signed_count:
-            if signed_count > 0 and signed_count <= len(events):
+        if newest.get("head_hash") and count > signed_count and signed_count > 0:
+            if signed_count <= len(events):
                 anchor_ev = events[signed_count - 1]
-                anchor_hash = anchor_ev.get("event_hash") or anchor_ev.get("hash")
+                anchor_hash = anchor_ev.get("hash")
                 if anchor_hash == newest.get("head_hash"):
                     result["status"] = "stale"
                 else:

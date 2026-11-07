@@ -35,7 +35,7 @@ BACKEND = "bwrap"
 # Paths inside a run that must never be mounted writable.  `runtime/agent` is
 # the one exception under `runtime/`: the Hermes adapter writes its usage file
 # there, and its bind is applied after the read-only one, so it wins.
-FORBIDDEN_WRITABLE = ("runtime", "runtime/evidence")
+FORBIDDEN_WRITABLE = ("runtime/evidence", "checks")
 FORBIDDEN_FILES = ("state.json", "blackbox.jsonl", "blackbox.lock", "idea.md", "runtime/usage.jsonl")
 # Re-mounted read-only on top of the writable run root.  `checks/` is here
 # because the eval harness copies its product checks into the run: an executor
@@ -49,7 +49,7 @@ CONTROL_PLANE_FILES = (
     "checkpoint.json",
     "runtime/usage.jsonl",
 )
-CONTROL_PLANE_DIRS = ("runtime", "checks")
+CONTROL_PLANE_DIRS = ("runtime/evidence", "checks")
 # The `factory/` package itself; binding its repository root would let an
 # executor rewrite the code that judges it.
 PACKAGE_DIR = Path(__file__).resolve().parents[1]
@@ -78,17 +78,20 @@ def sandbox_env(base: dict[str, str] | None = None) -> dict[str, str]:
 
 
 def _forbidden(run: Path, path: Path) -> bool:
-    if path == run:
+    resolved_run = run.resolve()
+    resolved_path = path.resolve()
+    if resolved_path == resolved_run or resolved_path in resolved_run.parents:
         return True
-    package = PACKAGE_DIR
-    if path == package or path in package.parents or package in path.parents:
+    package = PACKAGE_DIR.resolve()
+    if resolved_path == package or resolved_path in package.parents or package in resolved_path.parents:
         return True
-    for name in FORBIDDEN_FILES:
-        if path == (run / name).resolve():
+    for name in (*FORBIDDEN_FILES, *CONTROL_PLANE_FILES):
+        target = (resolved_run / name).resolve()
+        if resolved_path == target or target in resolved_path.parents:
             return True
-    for relative in FORBIDDEN_WRITABLE:
-        protected = (run / relative).resolve()
-        if path == protected or path in protected.parents:
+    for relative in (*FORBIDDEN_WRITABLE, *CONTROL_PLANE_DIRS):
+        protected = (resolved_run / relative).resolve()
+        if resolved_path == protected or protected in resolved_path.parents or resolved_path in protected.parents:
             return True
     return False
 

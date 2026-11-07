@@ -44,7 +44,10 @@ factory = "factory.cli:main"
 include = ["factory*"]
 
 [tool.setuptools.package-data]
-factory = ["pipeline.yaml", "models.yaml", "budget.yaml", "artifacts.yaml", "FACTORY_GLOSSARY.md", "orchestrator/*.md", "roles/*.md", "schemas/*.json", "templates/*.tmpl", "memory/*.md", "ui/static/*", "runtime/fixtures/nano/*", "runtime/fixtures/nano/*/*", "runtime/fixtures/nano/*/*/*", "runtime/fixtures/**/*"]
+factory = ["pipeline.yaml", "models.yaml", "budget.yaml", "artifacts.yaml", "FACTORY_GLOSSARY.md", "orchestrator/*.md", "roles/*.md", "schemas/*.json", "templates/**/*.tmpl", "memory/*.md", "ui/static/*", "runtime/fixtures/**/*"]
+
+[tool.setuptools.dynamic]
+version = {file = ["VERSION"]}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

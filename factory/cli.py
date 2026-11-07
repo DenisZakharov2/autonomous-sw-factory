@@ -97,12 +97,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 def cmd_setup_executor(args: argparse.Namespace) -> int:
     """Одноразовая настройка отдельного Unix-пользователя исполнителя."""
-    import getpass
+    import os
+    import pwd
 
     from .runtime.isolation import setup_executor_user
 
     try:
-        operator = getpass.getuser()
+        operator = pwd.getpwuid(os.getuid()).pw_name
     except (OSError, KeyError):
         operator = "anony"
     result = setup_executor_user(args.user, operator)

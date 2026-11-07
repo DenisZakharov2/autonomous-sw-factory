@@ -33,6 +33,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -59,6 +60,7 @@ polkit.addRule(function(action, subject) {
 
 _HOME_GRANTS = ("cache", "logs", "installs")
 _UNIT_SAFE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
+USER_NAME_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 
 
 class ExecutorUserError(RuntimeFailure):
@@ -97,6 +99,13 @@ def executor_user_uid(user: str) -> int | None:
         return pwd.getpwnam(user).pw_uid
     except KeyError:
         return None
+
+
+def _validate_unix_user(user: str) -> str:
+    """Validate Unix username: lowercase, starts with letter/underscore, max 32 chars."""
+    if not USER_NAME_RE.fullmatch(user):
+        raise ExecutorUserError(f"invalid unix username: {user!r}")
+    return user
 
 
 def systemd_run_available() -> bool:
@@ -172,7 +181,13 @@ def grant_run_tree(user: str, run_dir: Path) -> None:
 def _env_escape(value: str) -> str:
     if re.fullmatch(r"[A-Za-z0-9_@%+=:,./-]*", value):
         return value
-    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    escaped = (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+    )
+    return f'"{escaped}"'
 
 
 def _render_env_file(env: dict[str, str]) -> str:
@@ -186,24 +201,23 @@ def install_env_file(user: str, run_id: str, env: dict[str, str], workdir: Path)
     юнит его получает.  Файл живёт в tmpfs `/run` и дополнительно удаляется
     по завершении прогона (`executor_user_scope`).
     """
+    _validate_unix_user(user)
+    ensure_env_root(user)
     target = env_file_path(run_id)
-    staging = workdir / f".{target.name}.staging"
-    staging.write_text(_render_env_file(env), encoding="utf-8")
-    staging.chmod(0o600)
-    root_call(
-        [
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False, prefix="factory-env-") as tmp:
+        tmp.write(_render_env_file(env))
+        staging = Path(tmp.name)
+    try:
+        staging.chmod(0o600)
+        root_call([
             "/usr/bin/install",
-            "-m",
-            "0640",
-            "-o",
-            "root",
-            "-g",
-            user,
-            str(staging),
-            str(target),
-        ]
-    )
-    staging.unlink(missing_ok=True)
+            "-m", "0640",
+            "-o", "root",
+            "-g", user,
+            str(staging), str(target)
+        ])
+    finally:
+        staging.unlink(missing_ok=True)
     return target
 
 
@@ -217,19 +231,17 @@ def remove_env_file(run_id: str) -> None:
 
 def ensure_env_root(user: str) -> None:
     """`/run/factory-executor` — tmpfs, поэтому каталог пересоздаётся при необходимости."""
+    _validate_unix_user(user)
     if ENV_ROOT.is_dir():
         return
-    root_call(
-        [
-            "/bin/sh",
-            "-c",
-            f"mkdir -p {ENV_ROOT} && chown root:{user} {ENV_ROOT} && chmod 0750 {ENV_ROOT}",
-        ]
-    )
+    root_call([
+        "/usr/bin/install", "-d", "-m", "0750", "-o", "root", "-g", user, str(ENV_ROOT)
+    ])
 
 
 def ensure_ready(user: str) -> None:
     """Проверить (и где возможно починить) инфраструктуру отдельного пользователя."""
+    _validate_unix_user(user)
     if executor_user_uid(user) is None:
         raise ExecutorUserError(
             f"пользователь {user!r} не существует; создайте его: `factory setup-executor`"
@@ -313,6 +325,8 @@ def _home_dir_grants(user: str) -> list[str]:
 
 def setup_executor_user(user: str, operator: str) -> dict[str, Any]:
     """Идемпотентная настройка: polkit-правило, пользователь, /run, гранты."""
+    _validate_unix_user(user)
+    _validate_unix_user(operator)
     actions: list[str] = []
     if POLKIT_RULE_PATH.is_file():
         actions.append(f"polkit-правило уже установлено: {POLKIT_RULE_PATH}")

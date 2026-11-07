@@ -89,42 +89,51 @@ class UsageLedger:
     def totals(self) -> UsageTotals:
         rows = self.records()
         seconds = sum(float(row.get("seconds") or 0.0) for row in rows)
-        tokens: int | None = 0
-        usd: float | None = 0.0
-        tokens_in: int | None = 0
-        tokens_out: int | None = 0
-        cache_read: int | None = 0
+        known_tokens = 0
+        has_known_tokens = False
+        known_usd = 0.0
+        has_known_usd = False
+        tokens_in = 0
+        has_known_in = False
+        tokens_out = 0
+        has_known_out = False
+        cache_read = 0
+        has_known_cache = False
         for row in rows:
             value = row.get("tokens_total")
             if value is None:
-                tokens = None
-            elif tokens is not None:
-                tokens += int(value)
+                pass
+            else:
+                known_tokens += int(value)
+                has_known_tokens = True
             cost = row.get("usd")
             if cost is None:
-                usd = None
-            elif usd is not None:
-                usd += float(cost)
-            for name, target in (
-                ("tokens_in", "in"),
-                ("tokens_out", "out"),
-                ("cache_read", "cache"),
+                pass
+            else:
+                known_usd += float(cost)
+                has_known_usd = True
+            for name, target, has_flag in (
+                ("tokens_in", "in", has_known_in),
+                ("tokens_out", "out", has_known_out),
+                ("cache_read", "cache", has_known_cache),
             ):
                 raw = row.get(name)
-                if raw is None:
-                    if target == "in":
-                        tokens_in = None
-                    elif target == "out":
-                        tokens_out = None
+                if raw is not None:
+                    val = int(raw)
+                    if name == "tokens_in":
+                        tokens_in += val
+                        has_known_in = True
+                    elif name == "tokens_out":
+                        tokens_out += val
+                        has_known_out = True
                     else:
-                        cache_read = None
-                else:
-                    if target == "in" and tokens_in is not None:
-                        tokens_in += int(raw)
-                    elif target == "out" and tokens_out is not None:
-                        tokens_out += int(raw)
-                    elif target == "cache" and cache_read is not None:
-                        cache_read += int(raw)
+                        cache_read += val
+                        has_known_cache = True
+        tokens = known_tokens if has_known_tokens else None
+        usd = known_usd if has_known_usd else None
+        tokens_in = tokens_in if has_known_in else None
+        tokens_out = tokens_out if has_known_out else None
+        cache_read = cache_read if has_known_cache else None
         return UsageTotals(
             steps=len(rows),
             seconds=seconds,

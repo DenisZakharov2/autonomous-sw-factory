@@ -357,13 +357,17 @@ def _timeseries(run_path: Path, metrics: list[str], bucket: str) -> dict[str, An
 
 
 def _usage_up_to_stage(usage_records: list[dict[str, Any]], stage: str | None, field: str) -> int | float | None:
-    """Sum usage field for all records up to and including the given stage."""
+    """Sum usage field for all records up to and including the given stage (cumulative)."""
     if not stage:
         return None
+    pipeline = load_pipeline()
+    stage_order = {s["id"]: s["order"] for s in pipeline["stages"]}
+    target_order = stage_order.get(stage, 0)
     total = 0
     has_value = False
     for record in usage_records:
-        if record.get("stage") == stage:
+        rec_stage = record.get("stage")
+        if rec_stage and stage_order.get(rec_stage, 0) <= target_order:
             val = _number(record.get(field))
             if val is not None:
                 total += val
@@ -796,8 +800,8 @@ def compare_revision(run_id_a: str, run_id_b: str, root: str | Path | None = Non
     return hashlib.sha1(f"{rev_a}|{rev_b}".encode("utf-8")).hexdigest()[:20]
 
 
-def timeseries_revision(run_id: str, root: str | Path | None = None, bucket: str = "stage") -> str | None:
-    """ETag for /api/runs/<id>/timeseries: hash of journal stamp + bucket."""
+def timeseries_revision(run_id: str, root: str | Path | None = None, bucket: str = "stage", metrics: list[str] | None = None) -> str | None:
+    """ETag for /api/runs/<id>/timeseries: hash of journal stamp + bucket + metrics."""
     try:
         run_path = _run_path(run_id, root)
     except RunNotFound:
@@ -808,10 +812,12 @@ def timeseries_revision(run_id: str, root: str | Path | None = None, bucket: str
     usage_stamp = _stamp(usage)
     if not journal_stamp:
         return None
+    metrics_key = ",".join(metrics or TIMESERIES_METRICS)
     parts = [
         f"journal={journal_stamp}",
         f"usage={usage_stamp}",
         f"bucket={bucket}",
+        f"metrics={metrics_key}",
     ]
     return hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:20]
 
@@ -1030,13 +1036,13 @@ def run_payload(run_id: str, root: str | Path | None = None,
             "event_types": sorted(EVENT_TYPES),
         }
     else:
-        shown_tail = tail[:limit]
+        shown_tail = tail[-limit:] if limit else tail[:TAIL_LIMIT]
         journal = {
             "events": shown_tail,
             "total": state.get("event_count"),
             "matched": state.get("event_count"),
             "shown": len(shown_tail),
-            "limit": TAIL_LIMIT,
+            "limit": limit or TAIL_LIMIT,
             "filters": {},
             "event_types": sorted(EVENT_TYPES),
         }

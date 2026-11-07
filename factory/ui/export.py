@@ -99,15 +99,17 @@ _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 def _cell(value: Any) -> Any:
     """`null` is an empty cell; a list is one cell joined with `; `.
 
-    Strings with a leading formula character are apostrophe-escaped
+    Strings with a leading formula character (after whitespace) are apostrophe-escaped
     against CSV/Excel formula injection (CWE-1236).
     """
     if value is None:
         return ""
     if isinstance(value, (list, tuple)):
         value = "; ".join(str(item) for item in value)
-    if isinstance(value, str) and value.startswith(_FORMULA_PREFIXES):
-        return "'" + value
+    if isinstance(value, str):
+        text = str(value)
+        if text.lstrip(" \t\r\n").startswith(_FORMULA_PREFIXES):
+            return "'" + text
     return value
 
 

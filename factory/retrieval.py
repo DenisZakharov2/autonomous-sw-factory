@@ -55,7 +55,7 @@ class Chunk:
 
 def _tokenize(text: str) -> list[str]:
     """Разбивает текст на токены: буквы (в т.ч. кириллица), цифры, подчёркивание."""
-    return re.findall(r"[A-Za-zА-Яа-яЁё0-9_]+", text.lower())
+    return re.findall(r"[a-zа-яё0-9_]+", text.lower())
 
 
 def _tracked_files(root: Path) -> list[Path]:
@@ -127,29 +127,25 @@ def build_index(root: Path | None = None, index_dir: Path | None = None) -> dict
             continue
         rel = str(path.relative_to(root))
         pieces = _chunk_text(text)
-        start_line = 1
-        char_offset = 0
+        char_cursor = 0
         for piece in pieces:
-            head = piece[:80].strip()
-            idx = text.find(head, char_offset) if head else -1
-            if idx >= 0:
-                char_offset = max(0, idx + len(piece) - CHUNK_OVERLAP)
-            if idx >= 0:
-                line_no = text[:idx].count("\n") + 1
-            else:
-                line_no = start_line
+            idx = text.find(piece, char_cursor)
+            if idx < 0:
+                idx = char_cursor
+            line_no = text.count("\n", 0, idx) + 1
+            end_line = line_no + piece.count("\n")
             chunk_text = piece
             tokens = _tokenize(chunk_text)
             chunks.append(
                 Chunk(
                     path=rel,
                     start_line=line_no,
-                    end_line=line_no + chunk_text.count("\n"),
+                    end_line=end_line,
                     text=chunk_text,
                     tokens=tokens,
                 )
             )
-            start_line = line_no + chunk_text.count("\n") + 1
+            char_cursor = max(0, idx + len(piece) - CHUNK_OVERLAP)
 
     N = len(chunks)
     df: dict[str, int] = defaultdict(int)
@@ -226,6 +222,8 @@ def retrieve(
 ) -> list[dict[str, Any]]:
     """Возвращает до k релевантных чанков с путями, строками и скором."""
     data = _load(index_dir)
+    if Path(data.get("root", "")).resolve() != PACKAGE_ROOT.parent.resolve():
+        data = build_index(PACKAGE_ROOT.parent, index_dir=index_dir)
     chunks = data["chunks"]
     df = data.get("df", {})
     avgdl = data.get("avgdl", 0.0)

@@ -59,6 +59,7 @@ jobs:
         run: >-
           factory eval --cases eval/cases --executor fake
           --case nano-todo --case standard-mini --case nano-product-mini --case product-mini --case enterprise-mini
+          --baseline eval/baseline-hermes.json
       - name: Runtime reference run (no model)
         run: |
           export FACTORY_ROOT="$RUNNER_TEMP/factory-run"

@@ -10,19 +10,6 @@
 
 **Version 1.0.11.**
 
-## See a run
-
-```bash
-pip install "autonomous-sw-factory[xlsx]"
-factory ui --runs-dir examples --open     # http://127.0.0.1:8420
-```
-
-The dashboard is read-only: it shows runs under `examples/` and writes nothing there.
-
-![Run list](docs/screenshots/dashboard-runs.png)
-
----
-
 ## What this is in plain words
 
 **Autonomous Software Factory** is a toolkit and a set of rules that turn chaotic development into a clear, verifiable process. It walks you from an idea to a working product through explicit stages: interview, requirements, architecture, build, acceptance, release, documentation, and lessons.
@@ -102,6 +89,19 @@ Numbers: 4 modes (all 4 exercised on real runs), 6 reference cases, 398 tests, C
 ![Compare runs — time-series panel](docs/screenshots/compare-timeseries.png)
 ![Compare artifacts panel](docs/screenshots/compare-artifacts.png)
 ![Drawer with stage/event/task details](docs/screenshots/drawer-details.png)
+
+---
+
+## See a run
+
+```bash
+pip install "autonomous-sw-factory[xlsx]"
+factory ui --runs-dir examples --open     # http://127.0.0.1:8420
+```
+
+The dashboard is read-only: it shows runs under `examples/` and writes nothing there.
+
+![Run list](docs/screenshots/dashboard-runs.png)
 
 ---
 

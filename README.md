@@ -10,19 +10,6 @@
 
 **Версия 1.0.11.**
 
-## Посмотреть, как это работает
-
-```bash
-pip install "autonomous-sw-factory[xlsx]"
-factory ui --runs-dir examples --open     # http://127.0.0.1:8420
-```
-
-Дашборд только для чтения: он показывает прогоны из `examples/` и ничего в них не пишет.
-
-![Список прогонов](docs/screenshots/dashboard-runs.png)
-
----
-
 ## Что это такое простыми словами
 
 **Autonomous Software Factory** — это набор инструментов и правил, который помогает превратить хаотичную разработку в понятный, проверяемый процесс. Он ведёт вас от идеи до работающего продукта через чёткие этапы: интервью, техническое задание, архитектура, сборка, приёмка, релиз, документация и выводы.
@@ -102,6 +89,19 @@ factory ui --runs-dir examples --open     # http://127.0.0.1:8420
 ![Панель сравнения прогонов — time-series](docs/screenshots/compare-timeseries.png)
 ![Панель сравнения артефактов](docs/screenshots/compare-artifacts.png)
 ![Детали этапа/события/задачи](docs/screenshots/drawer-details.png)
+
+---
+
+## Посмотреть, как это работает
+
+```bash
+pip install "autonomous-sw-factory[xlsx]"
+factory ui --runs-dir examples --open     # http://127.0.0.1:8420
+```
+
+Дашборд только для чтения: он показывает прогоны из `examples/` и ничего в них не пишет.
+
+![Список прогонов](docs/screenshots/dashboard-runs.png)
 
 ---
 

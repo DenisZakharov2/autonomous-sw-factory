@@ -8,7 +8,7 @@
 
 ---
 
-**Version 1.0.10.**
+**Version 1.0.11.**
 
 ## See a run
 
@@ -23,43 +23,26 @@ The dashboard is read-only: it shows runs under `examples/` and writes nothing t
 
 ---
 
-## Why this exists
+## What this is in plain words
 
 **Autonomous Software Factory** is a toolkit and a set of rules that turn chaotic development into a clear, verifiable process. It walks you from an idea to a working product through explicit stages: interview, requirements, architecture, build, acceptance, release, documentation, and lessons.
 
 Every stage has a document to submit, a check to pass, and an explicit decision — proceed or send it back.
 
-### Convenient — because the process leads you, not the other way around
+### Why this exists
 
-The factory asks the questions and adapts its language to your level:
-- **Newcomer** gets plain words, step by step, with recommended options
-- **Manager** sees options, constraints, and budgets
-- **Developer** gets files, templates, and exact commands
+If you've ever started a project and got lost — what to do next, how not to miss something important, how to know when the result is actually ready — the Factory solves exactly that problem. It doesn't write code for you; it asks the right questions in the right order and forces you to record answers before moving on.
 
-One process — three different languages.
+### How it works in practice
 
-![Run screen with stages and gates](docs/screenshots/run-screen.png)
+1. **Create a run** — an isolated folder for your project
+2. **Get the first work order** — the Factory says: "Now it's the interview stage, fill out these two templates"
+3. **Fill the templates** — answer questions in plain language, no jargon
+4. **Submit for review** — an independent verifier checks completeness and gives PASS or FAIL
+5. **Close the gate** — a human (you or the customer) confirms: "Yes, accepted, let's continue"
+6. **Repeat for all stages** — through release and documentation
 
-### Safe — because the author doesn't accept their own work
-
-Only an independent verifier can record `PASS`. The producer — the one who wrote the code or document — physically cannot close their own gate.
-
-Real executors (Hermes, OpenCode, Claude Code) run in a sandbox:
-- Filesystem root is read-only
-- Control files (`state.json`, journal, evidence) are mounted read-only
-- Writes are only allowed in directories declared by the work order
-
-Before touching existing code (`brownfield` mode), the factory creates a full backup, verifies restore in a separate clone, and only then allows edits.
-
-### Transparent and verifiable — because everything stays as files
-
-- Every stage leaves a document from a template
-- Every requirement links to a task and a test (`factory trace`)
-- Journal keeps a SHA-256 hash chain — tampering is caught automatically
-- Token, time, and money spend is visible by stage and task (`factory usage`)
-- A run can be archived, handed to a colleague, and verified later — not in chat, but as files
-
-![Compare runs — time-series panel](docs/screenshots/compare-timeseries.png)
+At any point you can stop, check status, see where you're stuck, and continue tomorrow or next week — nothing gets lost.
 
 ---
 
@@ -73,14 +56,56 @@ Before touching existing code (`brownfield` mode), the factory creates a full ba
 | Team lead or auditor who needs the decision trail | Hash chain, signed checkpoints (`factory sign`), requirements traceability |
 | Newcomer who needs questions without jargon and ready templates | Adaptive interview, role cards that forbid jargon, ready-made templates |
 
-**Not for you** if:
-- You want a chat that writes code without a human
-- This is a throwaway prototype nobody will accept
-- You're not willing to write requirements and architecture
+---
+
+## What the Factory does NOT do (important to know upfront)
+
+- **Does not write code fully autonomously** — it prepares documents, checks, and options, but you make the decision at every gate. The result won't need double-checking, but it won't appear without you either.
+- **Does not replace Jira, Linear, or task trackers** — that's a different tool level.
+- **Does not guarantee the model won't make mistakes** — the verifier catches obvious gaps, but doesn't vouch for the model's intelligence.
+- **Does not auto-merge to main without a human** — release is always behind a human gate.
+- **Does not work with non-git folders in brownfield mode** — for those cases use `standard` and back up manually.
 
 ---
 
-## What it looks like in practice
+## Modes
+
+| Mode | Use case | Roles |
+|---|---|---|
+| `nano` | Smallest product, one developer | 4 |
+| `standard` | Product team: PO, analysts, architect, fullstack, QA, security, DevOps | 12 |
+| `enterprise` | Full roster: mobile, DBA, data engineer, tech writer, SRE | 22 |
+| `brownfield` | Work on existing code (mandatory backup + restore drill) | 12 |
+
+Start with `nano` — it's the simplest way to see how it all works on a live example.
+
+---
+
+## What's inside (brief)
+
+- **22 role cards** — each knows its purpose, inputs, procedure, outputs, DoD, vetoes, escalation
+- **13 stages** — from intake (`s_in` / `s00_intake`) to lessons (`s9_learn`) with explicit gates
+- **Python engine** — `init`, `next`, `submit`, `gate`, `verify`, `task`, `quarantine`, `trace`, `metrics`, `usage`, `doctor`
+- **`factory run` runtime** — loop: order → executor → verify → submit → gate. Executors: `fake` (for tests), `hermes`, `opencode`. Real CLIs run in `bwrap` sandbox
+- **Signed checkpoints** — `factory sign` places HMAC checkpoint outside run folder; history tampering is detected
+- **Eval set & comparison** — `factory eval` runs 6 reference cases, checks against baseline; `factory compare` shows delta of two runs
+- **Hash-chained journal** — SHA-256, protects against accidental edits and naive tampering
+- **Independent verifier** — PASS only from `02-independent-verifier`; human can accept risk as separate event
+- **Skill quarantine** — SkillSpector with fail-closed and hash lock before installing third-party skills
+- **Run dashboard** — `factory ui`: local read-only console, 9 panels, free grid, CSV/`.xlsx` export, run comparison
+- **39 templates and 13 JSON schemas** — templates never pre-fill PASS
+- **Reference run** — `examples/nano-todo/`: 49 events, 2 tasks, 3 requirements with tests, all gates passed, product runs
+
+Numbers: 4 modes (all 4 exercised on real runs), 6 reference cases, 398 tests, CI on Ubuntu, macOS, Windows (Python 3.10–3.13).
+
+![Run screen with stages and gates](docs/screenshots/run-screen.png)
+![Compare runs — time-series panel](docs/screenshots/compare-timeseries.png)
+![Compare artifacts panel](docs/screenshots/compare-artifacts.png)
+![Drawer with stage/event/task details](docs/screenshots/drawer-details.png)
+
+---
+
+## Quick start (minimal)
 
 ```bash
 # 1. Install and check environment
@@ -123,104 +148,7 @@ Expected: `VERIFY OK`. The reference run has 49 events, 2 tasks, 3 requirements 
 
 ---
 
-## What's inside
-
-| Component | What it is |
-|---|---|
-| **22 role cards** | Purpose, inputs, procedure, outputs, DoD, veto, prohibitions, escalation |
-| **13 stages** | From `s_in`/`s00_intake` to `s9_learn` with explicit gates |
-| **Python engine** | `init`, `next`, `submit`, `gate`, `verify`, `task`, `quarantine`, `trace`, `metrics`, `usage`, `doctor` |
-| **`factory run` runtime** | Order → executor → verify → submit → gate; `pending_artifacts`, `next_role`, `usage.jsonl`, evidence, stop-guards. Executors: `fake`, `hermes`, `opencode`. Real CLIs in `bwrap`, control plane read-only |
-| **Signed checkpoints** | `factory sign` — HMAC-SHA256 of journal head outside `runs/`; `factory verify` tells `stale` from `rolled_back` and `diverged` |
-| **Eval set & comparison** | `factory eval` runs 6 reference cases, checks against baseline, fails on regression; `factory compare` shows delta of two runs by stages, cost, artifact hashes |
-| **Hash-chained journal** | SHA-256, `fcntl.flock`, state anchor, semantic `PASS` checks |
-| **Independent verifier** | `PASS` only from `02-independent-verifier`; human can accept risk as separate event |
-| **Skill quarantine** | SkillSpector 2.12.0 with fail-closed and hash lock |
-| **Run dashboard** | `factory ui` — local read-only console: 9 panels, free 12-column grid, presets, CSV/`.xlsx` export, 2s polling, SSE, run comparison |
-| **Templates & schemas** | 39 templates and 13 JSON schemas; templates never pre-fill `PASS` |
-| **Reference run** | `examples/nano-todo/`: 49 events, 2 tasks, 3 REQ, all gates passed, product runs |
-
-Numbers: 4 modes (3 exercised on a real project), 6 reference cases, 398 tests, CI on Ubuntu, macOS, Windows (Python 3.10–3.13).
-
-![Compare artifacts panel (spec/acceptance/plan)](docs/screenshots/compare-artifacts.png)
-
----
-
-## Modes
-
-| Mode | Roles | Use case |
-|---|---|---|
-| `nano` | 4 | Interviewer/spec-author, fullstack builder, verifier, orchestrator. Smallest product. |
-| `standard` | 12 | Product team: PO, analysts, architect, fullstack, QA, security, DevOps. |
-| `enterprise` | 22 | All roles, including mobile, DBA, data engineer, tech writer, SRE. |
-| `brownfield` | 12 | Standard plus mandatory backup/restore drill before first write. |
-
-In `nano`, role `01-smart-interviewer` also writes `spec.md`, `spec-human.md`, `traceability.json` and `plan.md`, because roles `05` and `04` are not active. This is encoded in the role card and checked by `factory doctor`.
-
----
-
-## Stages and gates
-
-```mermaid
-graph TD
-    subgraph "Intake & prep"
-        s_in["s_in: backup, restore drill, brownfield audit"] -->|human| gate_s_in["gate_s_in"]
-        s00["s00_intake: interview, glossary"] -->|human| gate_s00["gate_s00"]
-        s0["s0_vision: vision, backlog, competitors, metrics"] -->|human advisory| gate_s0["gate_s0"]
-    end
-
-    subgraph "Spec & quarantine"
-        s1["s1_spec: spec, spec-human, traceability, domain model, access matrix"] -->|human blocking| gate_s1["gate_s1"]
-        s15["s15_quarantine: skill security review, skills-lock"] -->|verifier| gate_s15["gate_s15"]
-    end
-
-    subgraph "Architecture & plan"
-        s2["s2_architecture: architecture, API contract, data model, threat model, ADR, UX, AI design"] -->|verifier| gate_s2["gate_s2"]
-        s3["s3_plan: plan, tech debt"] -->|verifier| gate_s3["gate_s3"]
-    end
-
-    subgraph "Build & acceptance"
-        s4["s4_build: deliverables, code, tests"] -->|verifier| gate_s4["gate_s4"]
-        s5["s5_acceptance: test report, acceptance matrix"] -->|verifier| gate_s5["gate_s5"]
-    end
-
-    subgraph "Security & release"
-        s6["s6_security: app security, DB report, data pipeline"] -->|verifier| gate_s6["gate_s6"]
-        s7["s7_release: deploy runbook, ops runbook, release notes"] -->|human| gate_s7["gate_s7"]
-    end
-
-    subgraph "Docs & lessons"
-        s8["s8_docs: product README, user guide"] -->|verifier| gate_s8["gate_s8"]
-        s9["s9_learn: metrics, lessons learned, improvement patches"] -->|human| gate_s9["gate_s9"]
-    end
-
-    gate_s_in --> s00
-    gate_s00 --> s0
-    gate_s0 --> s1
-    gate_s1 --> s15
-    gate_s15 --> s2
-    gate_s2 --> s3
-    gate_s3 --> s4
-    gate_s4 --> s5
-    gate_s5 --> s6
-    gate_s6 --> s7
-    gate_s7 --> s8
-    gate_s8 --> s9
-
-    classDef humanGate fill:#fef3c7,stroke:#f59e0b,stroke-width:2px;
-    classDef verifierGate fill:#d1fae5,stroke:#10b981,stroke-width:2px;
-    classDef stage fill:#e0e7ff,stroke:#6366f1,stroke-width:1px;
-
-    class gate_s_in,gate_s00,gate_s0,gate_s1,gate_s7,gate_s9 humanGate;
-    class gate_s15,gate_s2,gate_s3,gate_s4,gate_s5,gate_s6,gate_s8 verifierGate;
-    class s_in,s00,s0,s1,s15,s2,s3,s4,s5,s6,s7,s8,s9 stage;
-```
-
-![Drawer with stage/event/task details](docs/screenshots/drawer-details.png)
-
----
-
-## Key commands
+## Key commands (cheat sheet)
 
 | Command | Purpose |
 |---|---|
@@ -246,19 +174,20 @@ Full list — `factory --help`.
 
 ## Journal and trust
 
-`blackbox.jsonl` is the single source of truth. Each event carries `event_id`, `seq`, `timestamp_utc`, stage, task, role, model, `why`, `for_what`, `action`, artifact hashes, verdict, `prev_hash` and `hash`.
+`blackbox.jsonl` is the single source of truth. Each event carries an ID, sequence, timestamp, stage, task, role, model, why, for_what, action, artifact hashes, verdict, and link to previous event.
 
-Guarantees:
-- Writes serialized via `fcntl.flock` — parallel roles cannot corrupt the chain
-- `state.json` stores last hash and event count — tail truncation is visible
-- `submit`, `gate approve`, `task accept`, `artifact re-record` bind SHA-256 hashes; `factory verify` re-hashes files on disk — a change after submission is caught as `artifact tampered`
-- Producer `PASS` is rejected both at append time and at verification time
-- `AUDIT_TRAIL.md` is rendered from JSONL with escaping
-- The chain itself is **not signed**: it detects accidental edits and naive tampering, not a determined attacker who recomputes every hash. For that threat model there is `factory sign` — an HMAC checkpoint outside `runs/`.
+What this gives you:
+- Parallel roles cannot corrupt the chain (serialized via `fcntl.flock`)
+- Tail truncation is visible (`state.json` stores last hash and event count)
+- Artifact substitution after submission is caught as `artifact tampered` (re-hashing on `verify`)
+- Producer cannot PASS their own work — rejected both at append and at verification
+- `AUDIT_TRAIL.md` is rendered from JSONL for customer/auditor handoff
+
+The chain itself is **not signed**: it detects accidental edits and naive tampering, not a determined attacker who recomputes every hash. For that threat model there is `factory sign` — an HMAC checkpoint outside `runs/`.
 
 ---
 
-## Skill quarantine
+## Skill quarantine (supply chain security)
 
 ```bash
 factory quarantine scan ./skills/my-skill \
@@ -266,29 +195,31 @@ factory quarantine scan ./skills/my-skill \
   --lock skills-lock.json --no-llm
 ```
 
-Decision table:
+Scanner decision table:
 
-| `recommendation` | `is_complete` | exit code | Action |
+| Recommendation | Conditions | Exit code | Action |
 |---|---|---|---|
-| `SAFE` | `true`, coverage ≥ 95 | 0 | `AUTO_ALLOW`, write lock |
-| `CAUTION` | `true` | 0 | `ESCALATE_HUMAN` |
+| `SAFE` | complete, coverage ≥ 95% | 0 | `AUTO_ALLOW`, write lock |
+| `CAUTION` | complete | 0 | `ESCALATE_HUMAN` |
 | `DO_NOT_INSTALL` | any | 0 | `REJECT_AND_PURGE` |
-| any | `false` / failed analyzer | any | `BLOCK_INCOMPLETE` |
-| any | `true` | ≠ 0 | `BLOCK_RETRY` |
+| any | incomplete / failed analyzer | any | `BLOCK_INCOMPLETE` |
+| any | complete | ≠ 0 | `BLOCK_RETRY` |
 
-Lock stores `pack`, `commit`, `path`, directory `sha256`, `license`, scanner version, `severity`, `recommendation`, `is_complete`, `coverage_percent`, `scanned_at`, `approved_by`. `factory quarantine verify-lock` recomputes the hash and detects a substituted file.
+Lock stores directory hash, pack, commit, license, scanner version, verdict. `factory quarantine verify-lock` recomputes the hash and detects a substituted file.
 
 ---
 
-## Limitations
+## Limitations (honest and upfront)
 
 - `models.yaml` intentionally contains no vendor model IDs. Tiers resolve through the runtime or `FACTORY_MODEL_TIER_1/2/3`; the journal records the actual `model_id` the runtime passed.
 - Cost in `metrics` stays `null`: `cost_per_artifact_usd` is computed from the journal, but the journal doesn't store prices. Runtime writes tokens and cost separately in `runtime/usage.jsonl`.
 - `Brownfield` supports git repositories only. For a folder without git, use `standard` and back up manually.
-- `s4_build` imports tasks from `plan.md`; arbitrary plan formats are not parsed.
-- A full run requires a model or a human. `examples/nano-todo` is a deterministic reference run, not proof of model autonomy.
+- `s4_build` imports tasks from `plan.md` Markdown table; arbitrary plan formats are not parsed.
+- `examples/nano-todo` is a deterministic reference run, not proof of model autonomy.
 - `factory run` executes one step per executor call and stops at a human gate.
 - The hash chain is not signed; signing is a separate `factory sign` command, no auto-signing in `factory run`.
+- Token/time/money budgets are **guardrails**, not measured cost. `enterprise` is a calculated budget, never measured on real Hermes.
+- `factory metrics` returns `cost_per_artifact_usd: null` until the runtime writes tokens and price. Don't quote an estimate as fact.
 
 ---
 

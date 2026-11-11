@@ -24,6 +24,21 @@ def test_version_is_single_source():
         assert __version__ in (ROOT / name).read_text(encoding="utf-8"), name
 
 
+def test_the_distribution_version_is_dynamic():
+    """Статическая версия в `pyproject.toml` выигрывала у `[tool.setuptools.dynamic]`.
+
+    Собранный wheel назывался `autonomous_sw_factory-0.0.0`, хотя пакет внутри
+    отвечал `factory 1.0.12`: установка по `==1.0.12` не находилась.
+    """
+    import tomllib
+
+    data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    project = data["project"]
+    assert "version" not in project, "the version must not be static in pyproject.toml"
+    assert "version" in project.get("dynamic", [])
+    assert data["tool"]["setuptools"]["dynamic"]["version"] == {"file": ["VERSION"]}
+
+
 def test_docs_do_not_claim_an_older_current_version():
     for name in ("DESIGN.md", "docs/metrics.md", "docs/threat-model.md"):
         text = (ROOT / name).read_text(encoding="utf-8")

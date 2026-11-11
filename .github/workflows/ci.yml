@@ -103,6 +103,11 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install build
           python -m build
+      - name: The distribution version must be the VERSION file
+        run: |
+          VERSION=$(cat VERSION)
+          ls dist/*.whl | grep -q "autonomous_sw_factory-${VERSION}-" \
+            || { echo "the wheel is not versioned ${VERSION}:"; ls dist/; exit 1; }
       - name: Test the built sdist in a clean environment
         run: |
           python -m venv /tmp/sdist-venv

@@ -66,6 +66,48 @@ def test_operator_name_cannot_break_the_polkit_rule():
     assert OPERATOR_NAME_RE.fullmatch("first.last")
 
 
+def test_pid_file_name_passes_the_helper_name_check():
+    """Имя pid-файла обязано пройти собственную проверку helper'а."""
+    from factory.runtime.isolation import pid_file_path
+    from factory.runtime.root_helper import PID_NAME_RE
+
+    for seq in (5, 0, "s00_intake", "TASK-API-01"):
+        name = pid_file_path("run-01", seq).name
+        assert PID_NAME_RE.fullmatch(name), name
+
+
+def test_child_env_names_the_executor_not_the_operator():
+    from factory.runtime.root_helper import _child_env
+
+    parsed = {
+        "PATH": "/home/operator/bin",
+        "USER": "operator",
+        "LOGNAME": "operator",
+        "SHELL": "/bin/bash",
+        "HOME": "/home/operator",
+        "LD_PRELOAD": "/tmp/evil.so",
+        "FACTORY_ROOT": "/home/operator/factory",
+        "ANTHROPIC_API_KEY": "secret",
+    }
+    env = _child_env(parsed, "factory-executor")
+    assert env["PATH"] == "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    assert env["USER"] == "factory-executor"
+    assert env["LOGNAME"] == "factory-executor"
+    assert env["SHELL"] == "/usr/sbin/nologin"
+    assert env["HOME"] == "/home/operator"
+    assert "LD_PRELOAD" not in env
+    assert "FACTORY_ROOT" not in env
+    assert env["ANTHROPIC_API_KEY"] == "secret"
+
+
+def test_remove_pid_is_a_known_command():
+    command, args = prepare(["remove-pid", "/run/factory-executor/run-01-5.pid"])
+    assert command == "remove-pid"
+    assert args == ["/run/factory-executor/run-01-5.pid"]
+    with pytest.raises(HelperError, match="outside"):
+        prepare(["remove-pid", "/tmp/run-01-5.pid"])
+
+
 def test_helper_source_does_not_import_the_factory_package():
     """Root не должен исполнять код, который оператор может переписать."""
     source = Path("factory/runtime/root_helper.py").read_text(encoding="utf-8")

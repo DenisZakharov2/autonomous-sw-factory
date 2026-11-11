@@ -34,6 +34,7 @@ ENV_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,80}\.env$")
 PID_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,80}\.pid$")
 ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 DROPPED_ENV = {"LD_PRELOAD", "LD_LIBRARY_PATH", "PYTHONPATH", "BASH_ENV", "ENV", "SHELLOPTS"}
+IDENTITY_ENV = {"PATH", "USER", "LOGNAME", "SHELL"}
 SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 # Интерпретаторы, которым можно запускать установленный helper. Ни один из
@@ -199,6 +200,11 @@ def prepare(argv: list[str]) -> tuple[str, list[str]]:
             raise HelperError("remove-env DEST")
         _env_path(rest[0], ENV_NAME_RE)
         return command, rest
+    if command == "remove-pid":
+        if len(rest) != 1:
+            raise HelperError("remove-pid PIDFILE")
+        _env_path(rest[0], PID_NAME_RE)
+        return command, rest
     if command == "stop":
         if len(rest) != 2:
             raise HelperError("stop USER PIDFILE")
@@ -275,12 +281,24 @@ def _parse_env_file(path: Path) -> dict[str, str]:
     return env
 
 
-def _child_env(parsed: dict[str, str]) -> dict[str, str]:
+def _child_env(parsed: dict[str, str], user: str) -> dict[str, str]:
+    """Окружение исполнителя.
+
+    `PATH` — системный. `USER`/`LOGNAME`/`SHELL` — исполнителя: оператор не
+    должен выдавать себя за исполнителя в логах и в проверках прав. `HOME`
+    остаётся домашним каталогом оператора — там лежит `~/.hermes`, куда CLI
+    агента пишет (гранты на этот каталог выдаёт `factory setup-executor`).
+    """
     env = {"PATH": SAFE_PATH, "LANG": parsed.get("LANG", "C.UTF-8")}
     for key, value in parsed.items():
-        if key in DROPPED_ENV or key.startswith(("FACTORY_", "LD_")):
+        if key in DROPPED_ENV or key in IDENTITY_ENV:
+            continue
+        if key.startswith(("FACTORY_", "LD_")):
             continue
         env[key] = value
+    env["USER"] = user
+    env["LOGNAME"] = user
+    env["SHELL"] = "/usr/sbin/nologin"
     return env
 
 
@@ -349,6 +367,15 @@ def _install_env(user: str, dest: str, src: str) -> None:
 
 def _remove_env(dest: str) -> None:
     target = _env_path(dest, ENV_NAME_RE)
+    if target.is_symlink():
+        target.unlink()
+        return
+    if target.exists():
+        target.unlink()
+
+
+def _remove_pid(pid_file: str) -> None:
+    target = _env_path(pid_file, PID_NAME_RE)
     if target.is_symlink():
         target.unlink()
         return
@@ -429,7 +456,7 @@ def _run_as(user: str, env_file: str, pid_file: str, command: list[str]) -> None
     if os.geteuid() == 0:
         raise HelperError("privilege drop failed")
     try:
-        os.execvpe(command[0], command, _child_env(parsed))
+        os.execvpe(command[0], command, _child_env(parsed, user))
     except OSError as exc:
         print(f"factory-root-helper: cannot exec {command[0]}: {exc}", file=sys.stderr)
         os._exit(127)
@@ -455,6 +482,9 @@ def execute(command: str, args: list[str]) -> None:
         return
     if command == "remove-env":
         _remove_env(args[0])
+        return
+    if command == "remove-pid":
+        _remove_pid(args[0])
         return
     if command == "stop":
         _stop(args[0], args[1])

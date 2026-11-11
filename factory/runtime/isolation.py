@@ -255,6 +255,14 @@ def remove_env_file(run_id: str) -> None:
         pass  # tmpfs очистится при перезагрузке; не маскируем исходную ошибку прогона
 
 
+def remove_pid_file(run_id: str, seq: int | str) -> None:
+    """Убрать pid-файл шага (best-effort): он иначе остаётся в tmpfs навсегда."""
+    try:
+        privileged(["remove-pid", str(pid_file_path(run_id, seq))])
+    except ExecutorUserError:
+        pass
+
+
 def ensure_env_root(user: str) -> None:
     """`/run/factory-executor` — tmpfs, поэтому каталог пересоздаётся при необходимости."""
     _validate_unix_user(user)

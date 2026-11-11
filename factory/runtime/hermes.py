@@ -167,6 +167,14 @@ class HermesExecutor:
                 stderr=f"hermes binary not found: {self.binary}",
                 summary="hermes is not installed",
             )
+        finally:
+            if self.executor_user:
+                # pid-файл шага больше не нужен: процесс исполнителя завершён.
+                from . import isolation
+
+                isolation.remove_pid_file(
+                    context.run_id, context.sequence or context.step
+                )
         elapsed = time.monotonic() - started
         usage_raw = _read_usage(usage_path)
         failed = bool(usage_raw.get("failed")) or usage_raw.get("completed") is False

@@ -179,6 +179,14 @@ class OpenCodeExecutor:
                 stderr=f"opencode binary not found: {self.binary}",
                 summary="opencode is not installed",
             )
+        finally:
+            if self.executor_user:
+                # pid-файл шага больше не нужен: процесс исполнителя завершён.
+                from . import isolation
+
+                isolation.remove_pid_file(
+                    context.run_id, context.sequence or context.step
+                )
         elapsed = time.monotonic() - started
         error = _error_event(completed.stdout)
         exit_code = completed.returncode

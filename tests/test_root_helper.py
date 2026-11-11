@@ -108,6 +108,30 @@ def test_remove_pid_is_a_known_command():
         prepare(["remove-pid", "/tmp/run-01-5.pid"])
 
 
+def test_helper_refuses_malformed_arguments():
+    """Каждая подкоманда принимает только свой список аргументов."""
+    with pytest.raises(HelperError, match="missing helper command"):
+        prepare([])
+    with pytest.raises(HelperError, match="run-as"):
+        prepare(["run-as", "factory-executor", "--env-file", "/run/factory-executor/a.env"])
+    with pytest.raises(HelperError, match="missing a command"):
+        prepare(["run-as", "factory-executor", "--env-file", "/run/factory-executor/a.env",
+                 "--pid-file", "/run/factory-executor/a.pid", "--", ""])
+    with pytest.raises(HelperError, match="run-as"):
+        prepare(["run-as", "factory-executor", "--pid-file", "/run/factory-executor/a.pid",
+                 "--env-file", "/run/factory-executor/a.env", "--", "/bin/true"])
+    with pytest.raises(HelperError, match="absolute path"):
+        prepare(["install-env", "factory-executor", "/run/factory-executor/a.env", "relative/path"])
+    with pytest.raises(HelperError, match="username"):
+        prepare(["ensure-user", "root"])
+    with pytest.raises(HelperError, match="ensure-user"):
+        prepare(["ensure-user"])
+    with pytest.raises(HelperError, match="ping"):
+        prepare(["ping", "extra"])
+    with pytest.raises(HelperError, match="retire-legacy-polkit"):
+        prepare(["retire-legacy-polkit", "extra"])
+
+
 def test_helper_source_does_not_import_the_factory_package():
     """Root не должен исполнять код, который оператор может переписать."""
     source = Path("factory/runtime/root_helper.py").read_text(encoding="utf-8")

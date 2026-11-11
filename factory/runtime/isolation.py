@@ -121,11 +121,6 @@ def _validate_unix_user(user: str) -> str:
     return user
 
 
-def systemd_run_available() -> bool:
-    """Legacy: транзиентные юниты больше не используются (см. `root_helper`)."""
-    return shutil.which("systemd-run") is not None
-
-
 def helper_installed() -> bool:
     return HELPER_PATH.is_file()
 

@@ -26,7 +26,7 @@ from factory.runtime.loop import (
     _collect_writable_paths,
     _prepare_writable_paths,
 )
-from factory.runtime.isolation import executor_user_uid, systemd_run_available
+from factory.runtime.isolation import executor_user_uid
 from factory.runtime.sandbox import sandbox_available, sandbox_command, sandbox_env
 
 SANDBOX = pytest.mark.skipif(not sandbox_available(), reason="bubblewrap is not installed")
@@ -360,24 +360,28 @@ def test_symlinked_runtime_directory_is_refused(tmp_path):
         context.path_in_runtime("prompt.md")
 
 
-def _systemd_run_as(user: str, argv: list[str], *, timeout: int = 60) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [
-            "systemd-run",
-            "--system",
-            "--pipe",
-            "--wait",
-            "--collect",
-            "--quiet",
-            "-p",
-            f"User={user}",
-            *argv,
-        ],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=False,
-    )
+def _helper_ready() -> bool:
+    """Root-helper установлен и отвечает без пароля."""
+    from factory.runtime import isolation
+
+    return isolation.helper_installed() and isolation.polkit_allows_helper()
+
+
+def _run_as_executor(user: str, argv: list[str], *, timeout: int = 60) -> subprocess.CompletedProcess[str]:
+    """Запустить команду под uid исполнителя через root-helper."""
+    from factory.runtime import isolation
+
+    isolation.install_env_file(user, "trust-boundary", {"HOME": str(Path.home())}, Path.cwd())
+    try:
+        command = isolation.executor_command(
+            argv, user=user, run_id="trust-boundary", seq=1
+        )
+        return subprocess.run(
+            command, capture_output=True, text=True, timeout=timeout, check=False
+        )
+    finally:
+        isolation.remove_env_file("trust-boundary")
+        isolation.remove_pid_file("trust-boundary", 1)
 
 
 EXECUTOR_USER = "factory-executor"
@@ -385,11 +389,11 @@ EXECUTOR_USER = "factory-executor"
 
 def test_executor_runs_as_different_uid(tmp_path):
     """Исполнитель запускается не под uid владельца репозитория."""
-    if not systemd_run_available():
-        pytest.skip("systemd-run is not installed")
+    if not _helper_ready():
+        pytest.skip("root-helper is not installed; run `factory setup-executor`")
     if executor_user_uid(EXECUTOR_USER) is None:
         pytest.skip(f"user {EXECUTOR_USER} does not exist; run `factory setup-executor`")
-    proc = _systemd_run_as(EXECUTOR_USER, ["/usr/bin/id", "-u"])
+    proc = _run_as_executor(EXECUTOR_USER, ["/usr/bin/id", "-u"])
     assert proc.returncode == 0, proc.stderr
     executor_uid = int(proc.stdout.strip())
     assert executor_uid != os.getuid()
@@ -398,15 +402,15 @@ def test_executor_runs_as_different_uid(tmp_path):
 
 def test_executor_cannot_read_user_secret_files(tmp_path):
     """Отдельный uid не читает файлы пользователя с правами 0600."""
-    if not systemd_run_available():
-        pytest.skip("systemd-run is not installed")
+    if not _helper_ready():
+        pytest.skip("root-helper is not installed; run `factory setup-executor`")
     if executor_user_uid(EXECUTOR_USER) is None:
         pytest.skip(f"user {EXECUTOR_USER} does not exist; run `factory setup-executor`")
     secret = Path.home() / ".factory-trust-boundary-secret"
     secret.write_text("secret-content", encoding="utf-8")
     secret.chmod(0o600)
     try:
-        proc = _systemd_run_as(EXECUTOR_USER, ["/usr/bin/cat", str(secret)])
+        proc = _run_as_executor(EXECUTOR_USER, ["/usr/bin/cat", str(secret)])
         assert proc.returncode != 0, f"executor uid {executor_user_uid(EXECUTOR_USER)} read the user's 0600 file"
         assert "Permission denied" in proc.stderr
     finally:
@@ -415,9 +419,25 @@ def test_executor_cannot_read_user_secret_files(tmp_path):
 
 def test_executor_can_run_system_command(tmp_path):
     """Отдельный uid вообще живёт: простая системная команда выполняется."""
-    if not systemd_run_available():
-        pytest.skip("systemd-run is not installed")
+    if not _helper_ready():
+        pytest.skip("root-helper is not installed; run `factory setup-executor`")
     if executor_user_uid(EXECUTOR_USER) is None:
         pytest.skip(f"user {EXECUTOR_USER} does not exist; run `factory setup-executor`")
-    proc = _systemd_run_as(EXECUTOR_USER, ["/usr/bin/cat", "/etc/hostname"])
+    proc = _run_as_executor(EXECUTOR_USER, ["/usr/bin/cat", "/etc/hostname"])
     assert proc.returncode == 0, proc.stderr
+
+
+def test_executor_is_not_the_operator(tmp_path):
+    """Исполнитель не выдаёт себя за оператора: USER и LOGNAME — его."""
+    if not _helper_ready():
+        pytest.skip("root-helper is not installed; run `factory setup-executor`")
+    if executor_user_uid(EXECUTOR_USER) is None:
+        pytest.skip(f"user {EXECUTOR_USER} does not exist; run `factory setup-executor`")
+    proc = _run_as_executor(EXECUTOR_USER, ["/usr/bin/env"])
+    assert proc.returncode == 0, proc.stderr
+    env = dict(
+        line.split("=", 1) for line in proc.stdout.splitlines() if "=" in line
+    )
+    assert env.get("USER") == EXECUTOR_USER
+    assert env.get("LOGNAME") == EXECUTOR_USER
+    assert env.get("USER") != os.environ.get("USER")

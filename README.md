@@ -2,13 +2,13 @@
 
 [![CI](https://github.com/DenisZakharov2/autonomous-sw-factory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/DenisZakharov2/autonomous-sw-factory/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.11-blue.svg)](https://github.com/DenisZakharov2/autonomous-sw-factory/releases/tag/v1.0.11)
+[![Version](https://img.shields.io/badge/version-1.0.12-blue.svg)](https://github.com/DenisZakharov2/autonomous-sw-factory/releases/tag/v1.0.12)
 
 [English README](README.en.md) · [Лицензия](LICENSE) · [Пример прогона](examples/nano-todo/) · [Техническая документация](TECHNICAL.md) · [Быстрый старт](docs/quickstart.md)
 
 ---
 
-**Версия 1.0.11.**
+**Версия 1.0.12.**
 
 ## Что это такое простыми словами
 
@@ -47,7 +47,7 @@
 
 ## Чего Фабрика НЕ делает (важно знать перед началом)
 
-- **Не пишет код за вас полностью автономно** — она готовит документы, проверки и варианты, но решение на каждом этапе принимаете вы. Результат не придётся перепроверять за двумя, но и без вас он не появится.
+- **Фабрика не полностью автономная** — она не пишет код за вас на каждом этапе: готовит документы, проверки и варианты, но решение принимаете вы. Результат не придётся перепроверять за двумя, но и без вас он не появится.
 - **Не заменяет Jira, Linear или трекеры задач** — это другой уровень инструмента.
 - **Не гарантирует, что модель не ошибётся** — верификатор ловит очевидные пробелы, но ума за модель не отвечает.
 - **Не делает автоматический мерж в main без человека** — релиз всегда за человеческим воротом.

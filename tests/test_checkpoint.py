@@ -186,6 +186,17 @@ def test_env_key_is_accepted(tmp_path, monkeypatch):
     assert load_key() == KEY
 
 
+def test_a_checkpoint_from_another_run_is_not_this_run(signed_run):
+    run_dir, key_file, store = signed_run
+    sign_run(run_dir, key_file=key_file, store=store)
+    other, _state, _event = init_run("run-02", "nano", root=run_dir.parent)
+    (store / "run-02.json").write_bytes((store / "run-01.json").read_bytes())
+    status = checkpoint_state(other, store)
+    assert status["status"] == "foreign"
+    errors = verify_checkpoint(other, key_file=key_file, store=store)
+    assert any("belongs to" in error for error in errors)
+
+
 def test_edited_run_copy_is_reported(signed_run):
     run_dir, key_file, store = signed_run
     sign_run(run_dir, key_file=key_file, store=store)

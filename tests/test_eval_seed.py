@@ -195,3 +195,33 @@ def test_run_case_extracts_the_seed_before_the_loop(tmp_path, monkeypatch):
     eval_module.run_case(bundle, FakeExecutor(), tmp_path / "runs", "seed")
     assert seen["cargo"] is True
     assert seen["lib"] == "// seed\n"
+
+
+def test_seed_clears_setuid_and_legacy_extract_refuses_links(tmp_path, monkeypatch):
+    archive = tmp_path / "repo.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        info = tarfile.TarInfo("tool")
+        payload = b"#!/bin/sh\n"
+        info.size = len(payload)
+        info.mode = 0o4755
+        tar.addfile(info, io.BytesIO(payload))
+    case_dir = _case(tmp_path)
+    _pin(case_dir, archive)
+    bundle = load_case(case_dir)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    _seed_into(run_dir, bundle["seed"])
+    assert (run_dir / "tool").stat().st_mode & 0o4000 == 0
+
+    link = tmp_path / "link.tar.gz"
+    _write_tar(link, {"Cargo.toml": b"x\n"}, links={"inside": "Cargo.toml"})
+    real_extract = tarfile.TarFile.extractall
+
+    def no_data_filter(self, *args, **kwargs):
+        if "filter" in kwargs:
+            raise TypeError("filter is not supported")
+        return real_extract(self, *args, **kwargs)
+
+    monkeypatch.setattr(tarfile.TarFile, "extractall", no_data_filter)
+    with pytest.raises(ConfigError, match="link refused"):
+        _seed_into(tmp_path / "run-legacy", {"manifest": bundle["seed"]["manifest"], "archive": link})

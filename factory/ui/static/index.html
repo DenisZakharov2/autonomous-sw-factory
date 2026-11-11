@@ -1275,7 +1275,7 @@ function renderJournal(data) {
         </select>
         <select id="p7-filter-stage" title="Фильтр по стадии" aria-label="Фильтр по стадии">
           <option value="">любая стадия</option>
-          ${(journal.event_types || []).map((t) => `<option value="${esc(t)}">стадия ${esc(t)}</option>`).join("")}
+          ${(data.stages || []).map((s) => `<option value="${esc(s.id)}">${esc(s.id)}</option>`).join("")}
         </select>
         <select id="p7-filter-type" title="Фильтр по типу события" aria-label="Фильтр по типу события">
           <option value="">любой тип</option>

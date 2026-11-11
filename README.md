@@ -130,6 +130,11 @@ factory verify --run-id demo-01 --stage s00_intake
 factory gate approve --run-id demo-01 --gate gate_s00 \
   --approver human:your-name --evidence "brief accepted"
 
+# Если задан FACTORY_APPROVAL_KEY (32+ байта), токен живёт не дольше суток
+# и годится только для этого действия:
+factory approval-token --run-id demo-01 --gate gate_s00 \
+  --approver human:your-name --action approve --ttl 900
+
 # 5. Пройти остальные этапы: руками или исполнителем
 factory run --run-id demo-01 --executor fake --max-steps 60
 ```

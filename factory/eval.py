@@ -167,11 +167,7 @@ def _seed_into(run_dir: Path, seed: dict[str, Any]) -> None:
                 f"seed archive member {member.name!r} would overwrite the run control plane"
             )
         members.append(member)
-    with tarfile.open(seed["archive"], "r:gz") as tar:
-        try:
-            tar.extractall(run_dir, members=members, filter="data")
-        except TypeError:  # Python < 3.12 before the security backport
-            tar.extractall(run_dir, members=members)
+    _extract_members(seed["archive"], run_dir, members)
     manifest = seed["manifest"]
     if not manifest.get("require_git"):
         return
@@ -191,6 +187,54 @@ def _seed_into(run_dir: Path, seed: dict[str, Any]) -> None:
         raise ConfigError(
             f"seed HEAD is {actual or 'unreadable'!r}, manifest pins {manifest['commit']!r}"
         )
+
+
+def _extract_members(archive: Path, run_dir: Path, members: list[tarfile.TarInfo]) -> None:
+    """Extract a seed. Python without `filter="data"` must not fall open.
+
+    The data filter strips setuid bits and refuses links that escape the
+    destination. It reached 3.12 upstream and was backported to 3.11.4,
+    3.10.12, 3.9.17 and 3.8.17; on the older patch levels of 3.10 and 3.11 the
+    argument raises TypeError, and extracting anyway would keep the mode bits
+    and plant symlinks. The legacy path refuses links and special files and
+    forces 0644/0755.
+    """
+    root = run_dir.resolve()
+    with tarfile.open(archive, "r:gz") as tar:
+        try:
+            tar.extractall(root, members=members, filter="data")
+        except TypeError:
+            _extract_members_legacy(tar, root, members)
+
+
+def _extract_members_legacy(
+    tar: tarfile.TarFile, root: Path, members: list[tarfile.TarInfo]
+) -> None:
+    version = f"{sys.version_info.major}.{sys.version_info.minor}"
+    for member in members:
+        rel = _normalised_member(member.name)
+        if not rel.parts or rel.as_posix() == ".":
+            continue
+        if member.issym() or member.islnk():
+            raise ConfigError(
+                "seed archive link refused without tarfile data filter "
+                f"(Python {version}): {member.name}"
+            )
+        if not (member.isfile() or member.isdir()):
+            raise ConfigError(f"seed archive contains a special file: {member.name}")
+        target = root.joinpath(*rel.parts)
+        if root not in target.resolve().parents:
+            raise ConfigError(f"seed archive member escapes the run: {member.name}")
+        member.mode = 0o755 if member.isdir() else 0o644
+        member.uid = 0
+        member.gid = 0
+        tar.extract(member, root)
+        extracted = root.joinpath(*rel.parts)
+        if extracted.is_symlink():
+            extracted.unlink()
+            raise ConfigError(f"seed extract produced a symlink: {member.name}")
+        if extracted.exists():
+            os.chmod(extracted, 0o755 if extracted.is_dir() else 0o644)
 
 
 def _case_constraints(case_dir: Path) -> str | None:

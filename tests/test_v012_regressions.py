@@ -1,8 +1,6 @@
 """Regression tests for the 0.1.2 audit fixes."""
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 from pathlib import Path
 
@@ -12,8 +10,10 @@ from factory.artifacts import validate_acceptance, validate_markdown, validate_p
 from factory.config import load_pipeline
 from factory.engine import (
     accept_risk,
+    approval_key_bytes,
     gate_approve,
     gate_reject,
+    make_approval_token,
     next_action,
     stage_reset,
     submit_work,
@@ -308,13 +308,44 @@ def test_blocking_veto_reopens_and_then_escalates(nano_run):
 def test_human_gate_requires_a_token_when_key_is_set(nano_run, monkeypatch):
     run, _, _ = nano_run
     _submit_intake(run)
-    monkeypatch.setenv("FACTORY_APPROVAL_KEY", "secret")
+    monkeypatch.setenv("FACTORY_APPROVAL_KEY", bytes(range(32)).hex())
     with pytest.raises(RunError, match="approval-token"):
         gate_approve("run-01", gate_id="gate_s00", approver="human:denis",
                      evidence=["ok"], root=run.parent)
-    token = hmac.new(b"secret", b"run-01|gate_s00|human:denis", hashlib.sha256).hexdigest()
+    key = approval_key_bytes()
+    assert key is not None
+    approve = make_approval_token(
+        key=key, run_id="run-01", subject="gate_s00", approver="human:denis", action="approve"
+    )
+    with pytest.raises(RunError, match="does not match"):
+        gate_reject("run-01", gate_id="gate_s00", approver="human:denis",
+                    evidence=["no"], root=run.parent, approval_token=approve)
     gate_approve("run-01", gate_id="gate_s00", approver="human:denis",
-                 evidence=["ok"], root=run.parent, approval_token=token)
+                 evidence=["ok"], root=run.parent, approval_token=approve)
+
+
+def test_short_approval_key_is_refused(nano_run, monkeypatch):
+    run, _, _ = nano_run
+    _submit_intake(run)
+    monkeypatch.setenv("FACTORY_APPROVAL_KEY", "secret")
+    with pytest.raises(RunError, match="at least 32"):
+        gate_approve("run-01", gate_id="gate_s00", approver="human:denis",
+                     evidence=["ok"], root=run.parent)
+
+
+def test_expired_approval_token_is_refused(nano_run, monkeypatch):
+    run, _, _ = nano_run
+    _submit_intake(run)
+    monkeypatch.setenv("FACTORY_APPROVAL_KEY", bytes(range(32)).hex())
+    key = approval_key_bytes()
+    assert key is not None
+    stale = make_approval_token(
+        key=key, run_id="run-01", subject="gate_s00", approver="human:denis",
+        action="approve", ttl_s=60, now=0,
+    )
+    with pytest.raises(RunError, match="expired"):
+        gate_approve("run-01", gate_id="gate_s00", approver="human:denis",
+                     evidence=["ok"], root=run.parent, approval_token=stale)
 
 
 def test_event_model_tier_comes_from_the_role_card(nano_run):

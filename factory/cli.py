@@ -17,11 +17,13 @@ from .config import (
 )
 from .engine import (
     accept_risk,
+    approval_key_bytes,
     artifact_rerecord,
     gate_approve,
     gate_reject,
     import_plan,
     init_run,
+    make_approval_token,
     model_for,
     next_action,
     stage_reset,
@@ -344,6 +346,7 @@ def cmd_task(args: argparse.Namespace) -> int:
         event = task_reset(
             args.run_id, task_id=args.task_id, approver=args.approver or "",
             reason=args.reason, root=_runs_root(args),
+            approval_token=getattr(args, "approval_token", None),
         )
     else:
         raise FactoryError(f"unknown task command: {args.task_command}")
@@ -355,6 +358,7 @@ def cmd_stage(args: argparse.Namespace) -> int:
     event = stage_reset(
         args.run_id, stage_id=args.stage, approver=args.approver,
         reason=args.reason, root=_runs_root(args),
+        approval_token=getattr(args, "approval_token", None),
     )
     print(f"{event['event_type']} {event['event_id']} stage={args.stage}")
     return 0
@@ -388,6 +392,47 @@ def cmd_gate(args: argparse.Namespace) -> int:
             evidence=args.evidence or [], root=_runs_root(args), approval_token=token,
         )
     print(f"{event['verdict']['status']} {event['event_id']} gate={args.gate} by={args.approver}")
+    return 0
+
+
+APPROVAL_SUBJECT = {
+    "approve": "gate",
+    "reject": "gate",
+    "accept-risk": "gate",
+    "reset": "stage",
+    "task-reset": "task-id",
+}
+
+
+def cmd_approval_token(args: argparse.Namespace) -> int:
+    key = approval_key_bytes()
+    if key is None:
+        raise FactoryError(
+            "set FACTORY_APPROVAL_KEY (at least 32 bytes) before minting a token"
+        )
+    wanted = APPROVAL_SUBJECT[args.action]
+    given = {
+        "gate": args.gate,
+        "stage": args.stage,
+        "task-id": args.task_id,
+    }
+    if not given[wanted]:
+        raise FactoryError(f"--{wanted} is required for action {args.action!r}")
+    extra = [name for name, value in given.items() if value and name != wanted]
+    if extra:
+        raise FactoryError(
+            f"action {args.action!r} takes only --{wanted}; drop --{', --'.join(extra)}"
+        )
+    subject = given[wanted]
+    token = make_approval_token(
+        key=key,
+        run_id=args.run_id,
+        subject=subject,
+        approver=args.approver,
+        action=args.action,
+        ttl_s=args.ttl,
+    )
+    print(token)
     return 0
 
 
@@ -730,7 +775,7 @@ def add_executor_arguments(parser: argparse.ArgumentParser) -> None:
         const="factory-executor",
         default=None,
         metavar="USER",
-        help="run the executor as a separate Unix user via systemd-run "
+        help="run the executor as a separate Unix user via the root helper "
         "(default: factory-executor; one-time `factory setup-executor` required)",
     )
     parser.add_argument("--yolo", action="store_true", help="pass --yolo to hermes")
@@ -878,6 +923,7 @@ def build_parser() -> argparse.ArgumentParser:
     task.add_argument("--artifact", action="append")
     task.add_argument("--reason", default="verification failed")
     task.add_argument("--approver", help="human:<id> for reset")
+    task.add_argument("--approval-token", help="HMAC token required when FACTORY_APPROVAL_KEY is set")
     task.add_argument("--runs-root")
     task.set_defaults(func=cmd_task)
 
@@ -890,9 +936,23 @@ def build_parser() -> argparse.ArgumentParser:
     gate.add_argument("--risk", help="risk description for accept-risk")
     gate.add_argument("--mitigation", help="mitigation for accept-risk")
     gate.add_argument("--expires", help="risk acceptance expiry date")
-    gate.add_argument("--approval-token", help="HMAC token required when FACTORY_APPROVAL_KEY is set")
+    gate.add_argument("--approval-token", help="exp.HMAC token required when FACTORY_APPROVAL_KEY is set")
     gate.add_argument("--runs-root")
     gate.set_defaults(func=cmd_gate)
+
+    token = sub.add_parser("approval-token", help="mint a short-lived HMAC for one human decision")
+    token.add_argument("--run-id", required=True)
+    token.add_argument("--approver", required=True, help="human:<id>")
+    token.add_argument(
+        "--action",
+        required=True,
+        choices=["approve", "reject", "accept-risk", "reset", "task-reset"],
+    )
+    token.add_argument("--gate", help="gate id for approve, reject and accept-risk")
+    token.add_argument("--stage", help="stage id for reset")
+    token.add_argument("--task-id", help="task id for task-reset")
+    token.add_argument("--ttl", type=int, default=900, help="lifetime in seconds, at most 24h")
+    token.set_defaults(func=cmd_approval_token)
 
     stage = sub.add_parser("stage", help="stage recovery commands")
     stage.add_argument("stage_command", choices=["reset"])
@@ -900,6 +960,7 @@ def build_parser() -> argparse.ArgumentParser:
     stage.add_argument("--stage", required=True)
     stage.add_argument("--approver", required=True, help="human:<id>")
     stage.add_argument("--reason", required=True)
+    stage.add_argument("--approval-token", help="HMAC token required when FACTORY_APPROVAL_KEY is set")
     stage.add_argument("--runs-root")
     stage.set_defaults(func=cmd_stage)
 

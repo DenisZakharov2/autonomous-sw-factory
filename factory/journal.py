@@ -286,6 +286,8 @@ def record_event(
     """
     run_dir = run_dir.resolve()
     log_path = run_dir / "blackbox.jsonl"
+    if log_path.is_symlink():
+        raise JournalError(f"refusing to append through a symlink: {log_path}")
     evidence_list = [str(x) for x in evidence]
     reason = str(reason)
     _check_semantics(event_type, role, verdict_status, verified_by, evidence_list, reason)
@@ -332,7 +334,15 @@ def record_event(
     validate_against_schema(event, "event.schema.json", f"event {event['event_id']}")
 
     line = canonical_json(event) + "\n"
-    fd = os.open(log_path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o644)
+    flags = os.O_APPEND | os.O_CREAT | os.O_WRONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        # O_NOFOLLOW закрывает гонку между проверкой выше и открытием: подмена
+        # журнала ссылкой не проходит даже в этот миг.
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(log_path, flags, 0o644)
+    except OSError as exc:
+        raise JournalError(f"refusing to append journal {log_path}: {exc}") from exc
     try:
         os.write(fd, line.encode("utf-8"))
         os.fsync(fd)

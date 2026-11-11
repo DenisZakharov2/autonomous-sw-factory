@@ -7,13 +7,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def cli(*args, runs_root: Path):
-    env = dict(os.environ)
-    env["FACTORY_RUNS_ROOT"] = str(runs_root)
-    env["FACTORY_ROOT"] = str(runs_root.parent)
+def cli(*args, runs_root: Path, env: dict | None = None):
+    process_env = dict(os.environ)
+    process_env["FACTORY_RUNS_ROOT"] = str(runs_root)
+    process_env["FACTORY_ROOT"] = str(runs_root.parent)
+    process_env.update(env or {})
     return subprocess.run(
         [sys.executable, "-m", "factory.cli", *args],
-        cwd=ROOT, env=env, capture_output=True, text=True, encoding="utf-8", check=False,
+        cwd=ROOT, env=process_env, capture_output=True, text=True, encoding="utf-8", check=False,
     )
 
 
@@ -35,6 +36,52 @@ def test_doctor_json(tmp_path):
     data = json.loads(result.stdout)
     assert data["roles"] == 22
     assert data["errors"] == []
+
+
+def test_approval_token_mints_a_bound_token(tmp_path):
+    env_key = "a" * 32
+    result = cli(
+        "approval-token",
+        "--run-id", "demo-01",
+        "--gate", "gate_s00",
+        "--approver", "human:denis",
+        "--action", "approve",
+        "--ttl", "600",
+        runs_root=tmp_path,
+        env={"FACTORY_APPROVAL_KEY": env_key},
+    )
+    assert result.returncode == 0, result.stderr
+    expiry, digest = result.stdout.strip().split(".")
+    assert int(expiry) > 0
+    assert len(digest) == 64
+
+
+def test_approval_token_checks_action_against_subject(tmp_path):
+    result = cli(
+        "approval-token",
+        "--run-id", "demo-01",
+        "--stage", "s00_intake",
+        "--approver", "human:denis",
+        "--action", "approve",
+        runs_root=tmp_path,
+        env={"FACTORY_APPROVAL_KEY": "a" * 32},
+    )
+    assert result.returncode != 0
+    assert "--gate is required" in result.stderr
+
+
+def test_approval_token_refuses_a_short_key(tmp_path):
+    result = cli(
+        "approval-token",
+        "--run-id", "demo-01",
+        "--gate", "gate_s00",
+        "--approver", "human:denis",
+        "--action", "approve",
+        runs_root=tmp_path,
+        env={"FACTORY_APPROVAL_KEY": "secret"},
+    )
+    assert result.returncode != 0
+    assert "at least 32" in result.stderr
 
 
 def test_init_status_next(tmp_path):

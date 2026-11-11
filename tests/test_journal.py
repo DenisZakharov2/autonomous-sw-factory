@@ -313,3 +313,29 @@ def test_events_without_a_reason_still_validate(nano_run):
     event = _event(run_dir, "no reason here")
     assert "reason" not in event
     assert verify_chain(run_dir / "blackbox.jsonl", run_dir / "state.json") == []
+
+
+def test_journal_append_does_not_follow_a_symlink(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("safe\n", encoding="utf-8")
+    link = run_dir / "blackbox.jsonl"
+    try:
+        link.symlink_to(outside)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are not available on this platform")
+    with pytest.raises(JournalError, match="symlink"):
+        append_event(
+            run_dir,
+            stage="s00_intake",
+            task_id=None,
+            role="00-orchestrator",
+            event_type="STAGE_RESET",
+            why="should not follow the link",
+            for_what="journal symlink",
+            action="noop",
+            verdict_status="DRAFT",
+            verified_by="00-orchestrator",
+        )
+    assert outside.read_text(encoding="utf-8") == "safe\n"

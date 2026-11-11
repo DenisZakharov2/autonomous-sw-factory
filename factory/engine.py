@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -108,28 +109,95 @@ def _require_stage_status(state: dict[str, Any], stage: dict[str, Any], allowed:
     return status
 
 
+APPROVAL_ACTIONS = frozenset({"approve", "reject", "accept-risk", "reset", "task-reset"})
+MAX_APPROVAL_TTL_S = 24 * 60 * 60
+DEFAULT_APPROVAL_TTL_S = 15 * 60
+MIN_APPROVAL_KEY_BYTES = 32
+
+
+def approval_key_bytes() -> bytes | None:
+    """HMAC key for human decisions, or None when the gate is unauthenticated.
+
+    A set but short key is refused: falling through to "unauthenticated" would
+    turn a typo into a bypass. The key is the raw bytes of the variable — the
+    same convention as the journal key file — and must be at least 32 bytes.
+    """
+    env = os.environ.get("FACTORY_APPROVAL_KEY", "")
+    if not env.strip():
+        return None
+    raw = env.strip().encode("utf-8")
+    if len(raw) < MIN_APPROVAL_KEY_BYTES:
+        raise RunError(
+            f"FACTORY_APPROVAL_KEY is {len(raw)} bytes; "
+            f"need at least {MIN_APPROVAL_KEY_BYTES}"
+        )
+    return raw
+
+
+def make_approval_token(
+    *,
+    key: bytes,
+    run_id: str,
+    subject: str,
+    approver: str,
+    action: str,
+    ttl_s: int = DEFAULT_APPROVAL_TTL_S,
+    now: int | None = None,
+) -> str:
+    """Token `exp.hmac` bound to one run, one subject, one approver, one action."""
+    if action not in APPROVAL_ACTIONS:
+        raise RunError(f"unknown approval action {action!r}")
+    if not 1 <= int(ttl_s) <= MAX_APPROVAL_TTL_S:
+        raise RunError(f"approval ttl must be 1..{MAX_APPROVAL_TTL_S} seconds")
+    exp = int(now if now is not None else time.time()) + int(ttl_s)
+    digest = hmac.new(
+        key,
+        f"{run_id}|{subject}|{approver}|{action}|{exp}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{exp}.{digest}"
+
+
 def _check_human_approval(
-    run_id: str, gate_id: str, approver: str, token: str | None
+    run_id: str, gate_id: str, approver: str, token: str | None, action: str
 ) -> str:
     """Optional HMAC check for human gates.
 
     With `FACTORY_APPROVAL_KEY` set, a human decision must carry a token
-    `HMAC(key, run_id|gate_id|approver)`.  Without the key the decision is
-    recorded as unauthenticated: a local single-user setup cannot prove that a
-    human, rather than the calling agent, typed `human:<id>`.
+    `exp.HMAC(key, run_id|subject|approver|action|exp)`. The expiry is at most
+    24 hours ahead, so a captured token cannot approve a different action or
+    be replayed next week. Without the key the decision is recorded as
+    unauthenticated: a local single-user setup cannot prove that a human,
+    rather than the calling agent, typed `human:<id>`.
     """
-    key = os.environ.get("FACTORY_APPROVAL_KEY")
-    if not key:
+    if action not in APPROVAL_ACTIONS:
+        raise RunError(f"unknown approval action {action!r}")
+    key = approval_key_bytes()
+    if key is None:
         return "unauthenticated"
-    expected = hmac.new(
-        key.encode("utf-8"),
-        f"{run_id}|{gate_id}|{approver}".encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
-    if not token or not hmac.compare_digest(expected, token):
+    if not token or token.count(".") != 1:
         raise RunError(
             "FACTORY_APPROVAL_KEY is set: a valid --approval-token is required "
             "for human gate decisions"
+        )
+    exp_text, digest = token.split(".", 1)
+    try:
+        exp = int(exp_text)
+    except ValueError as exc:
+        raise RunError("approval token expiry is not an integer") from exc
+    now = int(time.time())
+    if exp < now:
+        raise RunError("approval token has expired; mint a new --approval-token")
+    if exp > now + MAX_APPROVAL_TTL_S:
+        raise RunError("approval token expiry is too far in the future")
+    expected = hmac.new(
+        key,
+        f"{run_id}|{gate_id}|{approver}|{action}|{exp}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(expected, digest):
+        raise RunError(
+            "approval token does not match this run, gate, approver and action"
         )
     return "hmac"
 
@@ -1451,7 +1519,7 @@ def gate_approve(
         raise RunError(f"unknown gate: {gate_id}")
     _check_gate_approver(stage, approver)
     approval = (
-        _check_human_approval(run_id, gate_id, approver, approval_token)
+        _check_human_approval(run_id, gate_id, approver, approval_token, "approve")
         if approver.startswith("human:")
         else "role"
     )
@@ -1540,7 +1608,7 @@ def gate_reject(
         raise RunError(f"unknown gate: {gate_id}")
     _check_gate_approver(stage, approver)
     approval = (
-        _check_human_approval(run_id, gate_id, approver, approval_token)
+        _check_human_approval(run_id, gate_id, approver, approval_token, "reject")
         if approver.startswith("human:")
         else "role"
     )
@@ -1633,7 +1701,7 @@ def accept_risk(
     stage = next((s for s in pipeline["stages"] if s["gate"]["id"] == gate_id), None)
     if stage is None:
         raise RunError(f"unknown gate: {gate_id}")
-    approval = _check_human_approval(run_id, gate_id, approver, approval_token)
+    approval = _check_human_approval(run_id, gate_id, approver, approval_token, "accept-risk")
     with run_lock(run_dir):
         state = load_state(run_dir)
         registry = load_artifacts(state["mode"])
@@ -1681,12 +1749,14 @@ def stage_reset(
     approver: str,
     reason: str,
     root: str | Path | None = None,
+    approval_token: str | None = None,
 ) -> dict[str, Any]:
     """Reset an escalated/blocked stage after a human decision."""
     if not approver.startswith("human:"):
         raise RunError("stage reset requires a human approver (human:<id>)")
     if not reason.strip():
         raise RunError("a reset reason is required")
+    _check_human_approval(run_id, stage_id, approver, approval_token, "reset")
     run_dir = safe_run_dir(run_id, root)
     pipeline = load_pipeline()
     stage = find_stage(pipeline, stage_id)
@@ -1741,10 +1811,12 @@ def task_reset(
     approver: str,
     reason: str,
     root: str | Path | None = None,
+    approval_token: str | None = None,
 ) -> dict[str, Any]:
     if not approver.startswith("human:"):
         raise RunError("task reset requires a human approver (human:<id>)")
     validate_task_id(task_id)
+    _check_human_approval(run_id, task_id, approver, approval_token, "task-reset")
     run_dir = safe_run_dir(run_id, root)
     pipeline = load_pipeline()
     stage = find_stage(pipeline, "s4_build")

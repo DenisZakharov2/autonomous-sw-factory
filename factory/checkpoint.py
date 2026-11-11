@@ -207,6 +207,13 @@ def checkpoint_state(run_dir: Path, store: Path | None = None) -> dict[str, Any]
     document = read_store(run_dir.name, store)
     if document is None:
         return {"status": "unsigned", "checkpoints": 0}
+    if document.get("run_id") != run_dir.name:
+        return {
+            "status": "foreign",
+            "checkpoints": len(document.get("checkpoints") or []),
+            "run_id": document.get("run_id"),
+            "store": str(store_path(run_dir.name, store)),
+        }
     checkpoints = list(document.get("checkpoints") or [])
     if not checkpoints:
         return {"status": "unsigned", "checkpoints": 0, "store": str(store_path(run_dir.name, store))}
@@ -265,6 +272,11 @@ def verify_checkpoint(
     state = checkpoint_state(run_dir, store)
     if state["status"] == "unsigned":
         return []
+    if state["status"] == "foreign":
+        return [
+            "checkpoint store belongs to "
+            f"{state.get('run_id')!r}, not {Path(run_dir).resolve().name!r}"
+        ]
     errors: list[str] = []
     document = read_store(Path(run_dir).resolve().name, store) or {}
     checkpoints = list(document.get("checkpoints") or [])
@@ -275,7 +287,14 @@ def verify_checkpoint(
         except ConfigError as exc:
             return [f"checkpoint exists but cannot be verified: {exc}"]
     expected_id = key_id(secret)
+    run_name = Path(run_dir).resolve().name
     for index, entry in enumerate(checkpoints, 1):
+        entry_run = entry.get("run_id", document.get("run_id"))
+        if entry_run != run_name:
+            errors.append(
+                f"checkpoint #{index} is for run {entry_run!r}, not {run_name!r}"
+            )
+            continue
         if entry.get("key_id") != expected_id:
             errors.append(
                 f"checkpoint #{index} was signed with key {entry.get('key_id')}, "
@@ -283,7 +302,7 @@ def verify_checkpoint(
             )
             continue
         body = {
-            "run_id": document.get("run_id"),
+            "run_id": entry_run,
             "key_id": entry.get("key_id"),
             "event_count": entry.get("event_count"),
             "head_hash": entry.get("head_hash"),

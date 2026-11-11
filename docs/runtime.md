@@ -495,10 +495,28 @@ legacy-заглушку. `examples/nano-todo` и исторические жур
 ### 6.1 Отдельный Unix-пользователь для исполнителя (граница после bwrap)
 
 `factory run --executor-user USER` запускает исполнителя под отдельным
-Unix-пользователем (по умолчанию `factory-executor`) через транзиентный
-юнит `systemd-run --system -p User=USER -- bwrap ...` — без пароля sudo
-(polkit-правило `run-*`/`factory-*` для оператора, устанавливается один раз
-командой `factory setup-executor`).
+Unix-пользователем (по умолчанию `factory-executor`). Root без пароля на
+произвольные команды не выдаётся. `factory setup-executor` ставит один раз
+программу `/usr/local/libexec/factory-root-helper` и polkit-правило только на
+неё (`org.freedesktop.policykit.exec`). Helper умеет создать системного
+пользователя без шелла, записать один env-файл в `/run/factory-executor/` и
+сбросить uid перед `exec`. Команду он получает списком аргументов, не через
+shell.
+
+Установка helper'а — единственная операция, которой нужен `sudo`: он
+исполняется root, поэтому ставить его должен человек.
+
+```bash
+factory setup-executor          # печатает одну команду `sudo install ...`
+sudo install -m 0755 -o root -g root <путь>/factory-root-helper \
+  /usr/local/libexec/factory-root-helper
+factory setup-executor          # helper сам ставит polkit-правило и снимает старое
+```
+
+Старое правило `50-factory-transient-units.rules` (юниты `run-*` и
+`factory-*`) нужно удалить: `systemd-run --system` без `--unit` называется
+`run-*` и вместе с тем правилом было равносильно root без пароля. Helper
+снимает его сам при следующем `factory setup-executor`.
 
 Два независимых слоя:
 
@@ -514,12 +532,12 @@ Unix-пользователем (по умолчанию `factory-executor`) ч�
    `checks/`) ro поверх, `runtime/agent` rw. `/home` внутри пространства не
    существует, кроме пути к каталогу прогона.
 
-Окружение исполнителя передаётся не в командной строке (она видна в `ps` и
-в свойствах D-Bus юнита), а через `EnvironmentFile` в
-`/run/factory-executor/<run-id>.env` (root:executor `0640`), который ставят
-и удаляют одноразовые root-вызовы. При таймауте шага убит только клиент
-`systemd-run`; сам юнит останавливается `systemctl stop`, чтобы не оставить
-висящий процесс исполнителя.
+Окружение исполнителя передаётся не в командной строке (она видна в `ps`),
+а через файл `/run/factory-executor/<run-id>.env` (root:executor `0640`).
+Его пишет только helper, и только если исходный файл принадлежит
+вызывающему `pkexec`. При таймауте шага helper по pid-файлу посылает
+`SIGKILL` процессу исполнителя, и только если этот pid принадлежит uid
+исполнителя, не root.
 
 `fake` не запускает внешних процессов и не использует `--executor-user`;
 `hermes` и `opencode` поддерживают флаг полностью.

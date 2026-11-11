@@ -74,7 +74,7 @@ def _validate_user(user: str) -> str:
     return user
 
 
-def _validate_operator(operator: str) -> str:
+def validate_operator(operator: str) -> str:
     """Имя оператора подставляется в polkit-правило как строка JS.
 
     Набор символов строгий: кавычка или обратный слэш в имени сломали бы
@@ -171,7 +171,7 @@ def prepare(argv: list[str]) -> tuple[str, list[str]]:
     if command == "install-policy":
         if len(rest) != 1:
             raise HelperError("install-policy OPERATOR")
-        return command, [_validate_operator(rest[0])]
+        return command, [validate_operator(rest[0])]
     if command == "retire-legacy-polkit":
         if rest:
             raise HelperError("retire-legacy-polkit takes no arguments")

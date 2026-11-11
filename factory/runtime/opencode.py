@@ -152,10 +152,12 @@ class OpenCodeExecutor:
         except subprocess.TimeoutExpired as exc:
             elapsed = time.monotonic() - started
             if self.executor_user:
-                # Убит только клиент systemd-run; сам юнит продолжает работу.
+                # Убит только клиент pkexec; процесс исполнителя продолжает работу.
                 from . import isolation
 
-                isolation.stop_unit(context.run_id, context.sequence or context.step)
+                isolation.stop_unit(
+                    context.run_id, context.sequence or context.step, self.executor_user
+                )
             stdout = exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
             stderr = exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
             safe_write_text(

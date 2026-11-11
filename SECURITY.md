@@ -60,7 +60,22 @@ Out of scope:
   only declared artifact directories and `runtime/agent/` are writable, so
   `state.json`, the journal, the lock and evidence cannot be changed from
   inside a step; `FACTORY_*`/`PYTHONPATH` are removed from the child
-  environment and runtime-owned files are written with `O_NOFOLLOW`.
+  environment and runtime-owned files, including the journal append, are
+  written with `O_NOFOLLOW`;
+- `factory setup-executor` does not grant `systemd1.manage-units`. The only
+  passwordless root action is `pkexec` of `/usr/local/libexec/factory-root-helper`,
+  which refuses arbitrary commands: its subcommand list is fixed, every path
+  is checked, and it runs under a root-owned system interpreter, never under
+  the operator's Python. `factory doctor` reports the old
+  `50-factory-transient-units.rules` rule if it is still installed;
+- with `--executor-user` the executor runs under a separate uid and gets no
+  write access to the control plane. It keeps network access (the agent needs
+  the model API) and can still read everything that is world-readable in the
+  operator's home — see `docs/threat-model.md` §3.1;
+- a human gate token is `exp.HMAC(key, run|subject|approver|action|exp)`,
+  the key is at least 32 bytes, and the token expires within 24 hours;
+- a checkpoint whose store belongs to another run is reported as `foreign`
+  and fails verification, even when the signature itself is valid.
 
 ### What the role checks are not
 

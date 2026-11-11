@@ -271,6 +271,23 @@ def test_budget_config_is_typed():
     assert budget["default_max_attempts"] >= 1
 
 
+def test_doctor_reports_the_legacy_polkit_rule(tmp_path, monkeypatch):
+    """Старое правило даёт root без пароля — doctor обязан об этом сказать."""
+    from factory.runtime import isolation
+    from factory.verify import doctor_report
+
+    legacy = tmp_path / "50-factory-transient-units.rules"
+    legacy.write_text(
+        'polkit.addRule(function(){ return polkit.Result.YES; });\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(isolation, "LEGACY_POLKIT_RULE", legacy)
+    errors = doctor_report()["errors"]
+    assert any("root без пароля" in error for error in errors), errors
+
+    monkeypatch.setattr(isolation, "LEGACY_POLKIT_RULE", tmp_path / "absent.rules")
+    assert not any("root без пароля" in error for error in doctor_report()["errors"])
+
+
 def test_root_artifact_ignores_a_stray_copy_inside_the_run(tmp_path, monkeypatch):
     monkeypatch.setenv("FACTORY_ROOT", str(tmp_path))
     run_dir = tmp_path / "runs" / "r"

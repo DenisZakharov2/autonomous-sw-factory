@@ -159,6 +159,19 @@ def _setfacl(args: list[str]) -> None:
         raise ExecutorUserError(f"setfacl {' '.join(args)}: {(completed.stderr or '').strip()}")
 
 
+def _setfacl_quiet(args: list[str]) -> None:
+    """`setfacl` без паники: «нет такой записи» — это нормальное состояние."""
+    completed = _run(["setfacl", *args])
+    if completed.returncode == 0:
+        return
+    detail = (completed.stderr or "").strip()
+    if "No such entry" in detail or "No such file" in detail:
+        return
+    if "Operation not supported" in detail:
+        return
+    raise ExecutorUserError(f"setfacl {' '.join(args)}: {detail}")
+
+
 def _grant_traverse(user: str, path: Path) -> None:
     """`--x` на каталоге, если мир его не видит: исполнитель проходит, но не читает."""
     if path.stat().st_mode & 0o001:
@@ -184,8 +197,9 @@ def grant_run_tree(user: str, run_dir: Path) -> None:
 
     Файлы, уже принадлежащие исполнителю (повторный прогон), пропускаются:
     доступ у него к ним есть по владению.  Control plane (`state.json`,
-    журнал) этот грант покрывает тоже — тонкая граница остаётся за ro-биндами
-    `bwrap` внутри песочницы (см. docs/runtime.md §6).
+    журнал) из гранта исключён: исполнитель не должен в него писать даже
+    без `bwrap`.  Тонкая граница `ro`-биндов внутри песочницы остаётся
+    основной (см. docs/runtime.md §6).
     """
     ensure_traverse(user, run_dir)
     completed = _run(
@@ -202,6 +216,26 @@ def grant_run_tree(user: str, run_dir: Path) -> None:
                 f"не удалось выдать грант на {run_dir}: {'; '.join(lines[:3])}"
             )
     _setfacl(["-d", "-m", f"u:{user}:rwX", "-d", "-m", "m::rwX", str(run_dir)])
+    _revoke_control_plane(user, run_dir)
+
+
+def _revoke_control_plane(user: str, run_dir: Path) -> None:
+    """Убрать доступ исполнителя к control plane.
+
+    Те же файлы и каталоги, что `bwrap` монтирует read-only: `state.json`,
+    журнал, `checkpoint.json`, `runtime/usage.jsonl`, `runtime/evidence`,
+    `checks`.  Чтение остаётся (файлы 0644), запись — нет.
+    """
+    from .sandbox import CONTROL_PLANE_DIRS, CONTROL_PLANE_FILES
+
+    for name in CONTROL_PLANE_FILES:
+        target = run_dir / name
+        if target.exists():
+            _setfacl_quiet(["-x", f"u:{user}", str(target)])
+    for name in CONTROL_PLANE_DIRS:
+        target = run_dir / name
+        if target.is_dir():
+            _setfacl_quiet(["-R", "-x", f"u:{user}", str(target)])
 
 
 def _env_escape(value: str) -> str:

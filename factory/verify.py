@@ -501,6 +501,25 @@ def verify_run(run_dir: Path, stage_id: str | None = None, require_gate: bool = 
     return errors
 
 
+def _executor_boundary_errors() -> list[str]:
+    """Привилегированная граница: старое polkit-правило = root без пароля.
+
+    Правило `50-factory-transient-units.rules` разрешало оператору любой
+    транзиентный юнит `run-*` / `factory-*`, а `systemd-run --system` без
+    `--unit` называется именно `run-*`.  Пока файл лежит на диске, любой
+    процесс оператора — включая агента вне песочницы — получает root без
+    пароля.
+    """
+    from .runtime.isolation import LEGACY_POLKIT_RULE
+
+    if LEGACY_POLKIT_RULE.is_file():
+        return [
+            f"старое polkit-правило {LEGACY_POLKIT_RULE} даёт root без пароля "
+            f"через `systemd-run --system`; удалите его: sudo rm -f {LEGACY_POLKIT_RULE}"
+        ]
+    return []
+
+
 def doctor_report() -> dict[str, Any]:
     pipeline = load_pipeline()
     registry = load_artifacts()
@@ -520,6 +539,7 @@ def doctor_report() -> dict[str, Any]:
         from .eval import validate_cases
 
         errors.extend(validate_cases(cases_dir))
+    errors.extend(_executor_boundary_errors())
     return {
         "roles": len(roles),
         "templates": len(list((PACKAGE_ROOT / "templates").glob("*.tmpl"))),

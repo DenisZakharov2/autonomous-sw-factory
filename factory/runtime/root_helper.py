@@ -504,6 +504,11 @@ def main(argv: list[str] | None = None) -> int:
     except HelperError as exc:
         print(f"factory-root-helper: {exc}", file=sys.stderr)
         return 1
+    except (OSError, ValueError) as exc:
+        # Ошибка файловой системы или разбор env-файла: сообщаем коротко,
+        # без трассировки от root.
+        print(f"factory-root-helper: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 

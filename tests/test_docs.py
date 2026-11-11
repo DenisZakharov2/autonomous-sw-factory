@@ -30,13 +30,20 @@ def test_the_distribution_version_is_dynamic():
     Собранный wheel назывался `autonomous_sw_factory-0.0.0`, хотя пакет внутри
     отвечал `factory 1.0.12`: установка по `==1.0.12` не находилась.
     """
-    import tomllib
-
-    data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    project = data["project"]
-    assert "version" not in project, "the version must not be static in pyproject.toml"
-    assert "version" in project.get("dynamic", [])
-    assert data["tool"]["setuptools"]["dynamic"]["version"] == {"file": ["VERSION"]}
+    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    project = re.search(r"(?ms)^\[project\]\s*\n(.*?)(?=^\[)", text)
+    assert project, "no [project] table in pyproject.toml"
+    block = project.group(1)
+    assert not re.search(r"(?m)^\s*version\s*=", block), (
+        "the version must not be static in pyproject.toml"
+    )
+    assert re.search(r"(?m)^\s*dynamic\s*=\s*\[[^\]]*\"version\"", block), (
+        "the version must be declared dynamic"
+    )
+    assert re.search(
+        r"(?ms)^\[tool\.setuptools\.dynamic\]\s*\nversion\s*=\s*\{\s*file\s*=\s*\[\"VERSION\"\]\s*\}",
+        text,
+    ), "the dynamic version must come from the VERSION file"
 
 
 def test_docs_do_not_claim_an_older_current_version():

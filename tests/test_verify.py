@@ -1,4 +1,5 @@
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -286,6 +287,64 @@ def test_doctor_reports_the_legacy_polkit_rule(tmp_path, monkeypatch):
 
     monkeypatch.setattr(isolation, "LEGACY_POLKIT_RULE", tmp_path / "absent.rules")
     assert not any("root без пароля" in error for error in doctor_report()["errors"])
+
+
+def test_doctor_probes_when_the_rules_directory_is_unreadable(tmp_path, monkeypatch):
+    """Каталог правил polkit закрыт (`0750 root:polkitd`) — наличие файла не проверить.
+
+    Тогда спрашиваем polkit напрямую: если транзиентный юнит запускается без
+    пароля, root у оператора есть, даже если файл правила ему не виден.
+    """
+    from factory import verify
+    from factory.runtime import isolation
+
+    monkeypatch.setattr(isolation, "LEGACY_POLKIT_RULE", tmp_path / "absent.rules")
+    monkeypatch.setattr(verify, "_transient_units_allowed", lambda: True)
+    monkeypatch.setattr(verify, "_has_passwordless_sudo", lambda: False)
+    warnings = verify.doctor_report()["warnings"]
+    assert any("транзиентные systemd-юниты" in warning for warning in warnings), warnings
+
+    # Root, выданный администратором машины через sudo, — не наша находка.
+    monkeypatch.setattr(verify, "_has_passwordless_sudo", lambda: True)
+    assert not verify.doctor_report()["warnings"]
+
+    monkeypatch.setattr(verify, "_transient_units_allowed", lambda: False)
+    assert not verify.doctor_report()["warnings"]
+
+
+def test_an_unreadable_rules_directory_is_not_a_crash(tmp_path, monkeypatch):
+    """`Path.is_file()` на закрытом каталоге поднимает PermissionError."""
+    from factory import verify
+    from factory.runtime import isolation
+
+    legacy = tmp_path / "rules.d" / "50-factory-transient-units.rules"
+    legacy.parent.mkdir()
+    legacy.write_text("polkit", encoding="utf-8")
+
+    def refuse(_path):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(isolation, "LEGACY_POLKIT_RULE", legacy)
+    monkeypatch.setattr(verify.Path, "is_file", refuse)
+    assert verify._legacy_rule_installed() is False
+    assert verify._executor_boundary_errors() == []
+
+
+def test_the_privilege_probe_runs_nothing_but_true(monkeypatch):
+    """Проба не должна давать root никому, кроме как на `true`."""
+    from factory import verify
+
+    seen: dict = {}
+
+    def fake_run(argv, **kwargs):
+        seen["argv"] = argv
+        return subprocess.CompletedProcess(argv, 1, "", "")
+
+    monkeypatch.setattr(verify.shutil, "which", lambda name: "/usr/bin/systemd-run")
+    monkeypatch.setattr(verify.subprocess, "run", fake_run)
+    assert verify._transient_units_allowed() is False
+    assert seen["argv"][-1] == "/usr/bin/true"
+    assert "/bin/sh" not in seen["argv"]
 
 
 def test_root_artifact_ignores_a_stray_copy_inside_the_run(tmp_path, monkeypatch):

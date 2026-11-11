@@ -86,6 +86,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         if license_file.exists() and "Permission is hereby granted" not in license_file.read_text(encoding="utf-8"):
             errors.append("LICENSE is missing the MIT grant text")
     report["errors"] = errors
+    warnings = list(report.get("warnings") or [])
     if args.json:
         _print_json(report)
     else:
@@ -99,6 +100,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 print(f"- {error}")
         else:
             print("DOCTOR OK: configuration, roles, schemas, templates and pipeline are consistent.")
+        for warning in warnings:
+            print(f"WARNING: {warning}")
     return 1 if errors else 0
 
 

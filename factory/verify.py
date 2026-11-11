@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -501,6 +503,69 @@ def verify_run(run_dir: Path, stage_id: str | None = None, require_gate: bool = 
     return errors
 
 
+def _transient_units_allowed() -> bool:
+    """Запускается ли транзиентный systemd-юнит от root без пароля.
+
+    Проба нужна, потому что каталог правил polkit обычно недоступен
+    непривилегированному пользователю (`0750 root:polkitd`): наличие файла
+    он проверить не может, а root у него есть.  Юнит ничего не делает —
+    это `/usr/bin/true`.
+    """
+    if shutil.which("systemd-run") is None:
+        return False
+    try:
+        completed = subprocess.run(
+            [
+                "systemd-run",
+                "--system",
+                "--pipe",
+                "--wait",
+                "--collect",
+                "--quiet",
+                "/usr/bin/true",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return completed.returncode == 0
+
+
+def _has_passwordless_sudo() -> bool:
+    """Разрешён ли оператору `sudo` без пароля (обычная настройка CI)."""
+    if shutil.which("sudo") is None:
+        return False
+    try:
+        completed = subprocess.run(
+            ["sudo", "-n", "true"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return completed.returncode == 0
+
+
+def _legacy_rule_installed() -> bool:
+    """Лежит ли старое правило на диске.
+
+    Каталог правил polkit обычно `0750 root:polkitd` — непривилегированный
+    пользователь не может его даже простатнуть, а `Path.is_file()` на
+    `PermissionError` не гасит, а поднимает. «Не знаю» — это не «нет».
+    """
+    from .runtime.isolation import LEGACY_POLKIT_RULE
+
+    try:
+        return LEGACY_POLKIT_RULE.is_file()
+    except OSError:
+        return False
+
+
 def _executor_boundary_errors() -> list[str]:
     """Привилегированная граница: старое polkit-правило = root без пароля.
 
@@ -512,12 +577,34 @@ def _executor_boundary_errors() -> list[str]:
     """
     from .runtime.isolation import LEGACY_POLKIT_RULE
 
-    if LEGACY_POLKIT_RULE.is_file():
+    if _legacy_rule_installed():
         return [
             f"старое polkit-правило {LEGACY_POLKIT_RULE} даёт root без пароля "
             f"через `systemd-run --system`; удалите его: sudo rm -f {LEGACY_POLKIT_RULE}"
         ]
     return []
+
+
+def _executor_boundary_warnings() -> list[str]:
+    """Root без пароля, которого оператор не выдавал сам себе через sudo.
+
+    Если `sudo -n` не проходит, а транзиентный systemd-юнит запускается —
+    root даёт polkit-правило, которого не писал оператор. Ровно это было
+    правилом `50-factory-transient-units.rules`.
+    """
+    from .runtime.isolation import LEGACY_POLKIT_RULE
+
+    if _legacy_rule_installed():
+        return []  # уже сказано в ошибках
+    if not _transient_units_allowed():
+        return []
+    if _has_passwordless_sudo():
+        return []  # root без пароля выдан администратором машины осознанно
+    return [
+        "транзиентные systemd-юниты запускаются без пароля, хотя sudo оператору "
+        "не выдан: root доступен любому его процессу. Проверьте polkit-правила и "
+        f"удалите старое: sudo rm -f {LEGACY_POLKIT_RULE}"
+    ]
 
 
 def doctor_report() -> dict[str, Any]:
@@ -548,4 +635,5 @@ def doctor_report() -> dict[str, Any]:
         "modes": sorted(pipeline["modes"]),
         "artifacts": len(registry["artifacts"]),
         "errors": errors,
+        "warnings": _executor_boundary_warnings(),
     }

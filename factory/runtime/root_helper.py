@@ -21,9 +21,10 @@ from __future__ import annotations
 import os
 import re
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 ENV_ROOT = Path("/run/factory-executor")
+ENV_ROOT_POSIX = PurePosixPath("/run/factory-executor")
 POLKIT_RULE_PATH = Path("/etc/polkit-1/rules.d/49-factory-root-helper.rules")
 LEGACY_POLKIT_RULE = Path("/etc/polkit-1/rules.d/50-factory-transient-units.rules")
 HELPER_PATH = Path("/usr/local/libexec/factory-root-helper")
@@ -87,12 +88,18 @@ def validate_operator(operator: str) -> str:
 
 
 def _env_path(value: str, pattern: re.Pattern[str]) -> Path:
-    path = Path(value)
-    if not path.is_absolute() or path.parent != ENV_ROOT:
+    """Путь внутри `/run/factory-executor`.
+
+    Сравнение — POSIX: helper работает только на Linux, но проверка обязана
+    вести себя одинаково на любой платформе, иначе тесты врали бы на Windows
+    (`Path('/run/...').is_absolute()` там ложно, а `parent` — другой объект).
+    """
+    path = PurePosixPath(value)
+    if not path.is_absolute() or path.parent != ENV_ROOT_POSIX:
         raise HelperError(f"refusing path outside {ENV_ROOT}: {value}")
     if not pattern.fullmatch(path.name) or ".." in path.name:
         raise HelperError(f"refusing env path name {path.name!r}")
-    return path
+    return Path(value)
 
 
 def _root_owned(path: Path) -> bool:

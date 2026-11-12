@@ -24,6 +24,7 @@ from .config import (
 from .errors import ConfigError, FactoryError, RunError
 from .journal import read_events, sha256_file, verify_chain
 from .pipeline import effective_roles, role_ids, validate_pipeline
+from .paths import runs_root
 from .state import current_stage, find_stage, load_state, stage_list
 
 ROLE_SECTIONS = [
@@ -662,6 +663,54 @@ def _executor_boundary_warnings() -> list[str]:
     ]
 
 
+def _run_root_acl_warnings() -> list[str]:
+    """Корень прогона: там лежит control plane, и права на каталог — это
+    права удалить его содержимое.
+
+    Корень безопасный, если на запись в нём нет **именованного** пользователя
+    (владелец — это оператор, ему так положено) и на нём нет default-ACL:
+    иначе новый файл движка (`state.json`, журнал) наследует чужие права, и
+    отзыв доступа перестаёт работать именно там, где он нужен.
+    """
+    import shutil
+
+    if shutil.which("getfacl") is None:
+        return []
+    base = runs_root()
+    if not base.is_dir():
+        return []
+    warnings: list[str] = []
+    for run in sorted(item for item in base.iterdir() if item.is_dir()):
+        mode = run.stat().st_mode & 0o777
+        if mode & 0o002:
+            warnings.append(
+                f"{run}: корень прогона доступен на запись всем "
+                f"({mode:04o}); в корне лежит control plane — chmod o-w {run}"
+            )
+        completed = subprocess.run(
+            ["getfacl", "-p", "-c", "--", str(run)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            continue
+        for line in completed.stdout.splitlines():
+            fields = line.split("#", 1)[0].split(":")
+            if len(fields) != 3 or not fields[1]:
+                continue
+            if fields[0] not in {"user", "default"}:
+                continue
+            if "w" not in fields[2]:
+                continue
+            where = "default-ACL" if fields[0] == "default" else "ACL"
+            warnings.append(
+                f"{run}: на корне прогона есть {where} на запись "
+                f"({line.split('#')[0].strip()}); в корне лежит control plane"
+            )
+    return warnings
+
+
 def doctor_report() -> dict[str, Any]:
     pipeline = load_pipeline()
     registry = load_artifacts()
@@ -682,6 +731,8 @@ def doctor_report() -> dict[str, Any]:
 
         errors.extend(validate_cases(cases_dir))
     errors.extend(_executor_boundary_errors())
+    warnings = list(_executor_boundary_warnings())
+    warnings.extend(_run_root_acl_warnings())
     return {
         "roles": len(roles),
         "templates": len(list((PACKAGE_ROOT / "templates").glob("*.tmpl"))),
@@ -690,5 +741,5 @@ def doctor_report() -> dict[str, Any]:
         "modes": sorted(pipeline["modes"]),
         "artifacts": len(registry["artifacts"]),
         "errors": errors,
-        "warnings": _executor_boundary_warnings(),
+        "warnings": warnings,
     }

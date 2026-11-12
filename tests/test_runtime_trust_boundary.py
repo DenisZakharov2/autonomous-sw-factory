@@ -165,6 +165,60 @@ def test_evidence_does_not_follow_a_planted_symlink(run):
     assert planted.is_file() and not planted.is_symlink()
 
 
+ACL = pytest.mark.skipif(
+    shutil.which("getfacl") is None or shutil.which("setfacl") is None,
+    reason="the acl package is not installed",
+)
+
+
+def _acl(path: Path) -> str:
+    completed = subprocess.run(
+        ["getfacl", "-p", "-c", "--", str(path)], capture_output=True, text=True, check=False
+    )
+    return completed.stdout
+
+
+@ACL
+def test_the_executor_grant_leaves_the_run_root_alone(tmp_path):
+    """The run root holds the control plane: write access there is access to it."""
+    from factory.runtime.isolation import grant_run_tree
+
+    run = tmp_path / "run-01"
+    for part in ("artifacts", "tasks", "product/src", "runtime/agent"):
+        (run / part).mkdir(parents=True)
+    (run / "state.json").write_text("{}", encoding="utf-8")
+
+    grant_run_tree("nobody", run)
+
+    root = _acl(run)
+    assert "user:nobody" not in root, root
+    assert "default:user:nobody" not in root, root
+    work = _acl(run / "artifacts")
+    assert "user:nobody" in work, work
+
+
+@ACL
+def test_a_new_control_plane_file_does_not_inherit_the_executor(tmp_path):
+    """The engine rewrites `state.json` atomically; the new inode must be clean."""
+    import os
+
+    from factory.runtime.isolation import grant_run_tree
+
+    run = tmp_path / "run-01"
+    for part in ("artifacts", "tasks", "product/src", "runtime/agent"):
+        (run / part).mkdir(parents=True)
+    state = run / "state.json"
+    state.write_text("{}", encoding="utf-8")
+
+    grant_run_tree("nobody", run)
+
+    tmp = state.with_name(f".{state.name}.{os.getpid()}.tmp")
+    tmp.write_text("{}", encoding="utf-8")
+    os.replace(tmp, state)
+
+    assert "user:nobody" not in _acl(state), _acl(state)
+
+
 @SANDBOX
 def test_run_root_is_writable_but_the_control_plane_is_not(run):
     """The root artifacts (skills-lock.json) need directory write to be replaced atomically."""

@@ -523,6 +523,8 @@ def cmd_log(args: argparse.Namespace) -> int:
     if args.log_command == "show":
         _print_json(read_events(run_dir / "blackbox.jsonl"))
         return 0
+    if args.log_command == "audit":
+        return _cmd_log_audit(args, run_dir)
     errors = verify_chain(run_dir / "blackbox.jsonl", run_dir / "state.json")
     if errors:
         print("CHAIN VERIFICATION FAILED:")
@@ -531,6 +533,37 @@ def cmd_log(args: argparse.Namespace) -> int:
         return 1
     print(f"CHAIN OK: {run_dir / 'blackbox.jsonl'}")
     return 0
+
+
+def _cmd_log_audit(args: argparse.Namespace, run_dir: Path) -> int:
+    """The readable mirror of the journal, and the way to rebuild it.
+
+    `AUDIT_TRAIL.md` is a view of the journal, never a second source of
+    truth.  It can fall behind — a full disk, a permission problem — and the
+    journal stays authoritative.  This command says which it is and rebuilds
+    it from the journal.
+    """
+    from .journal import read_events, render_audit_trail, write_audit_trail
+
+    path = run_dir / "AUDIT_TRAIL.md"
+    if getattr(args, "rebuild", False):
+        write_audit_trail(run_dir)
+        print(f"rebuilt: {path}")
+        return 0
+    events = read_events(run_dir / "blackbox.jsonl")
+    if not path.exists():
+        print(f"mirror missing: {path} (rebuild it with --rebuild)")
+        return 1
+    current = path.read_text(encoding="utf-8")
+    expected = render_audit_trail(events)
+    if current == expected:
+        print(f"mirror in sync: {path} ({len(events)} events)")
+        return 0
+    print(
+        f"mirror out of sync: {path} ({len(events)} events in the journal). "
+        "Rebuild it with --rebuild"
+    )
+    return 1
 
 
 def cmd_quarantine(args: argparse.Namespace) -> int:
@@ -1012,9 +1045,14 @@ def build_parser() -> argparse.ArgumentParser:
     sign.set_defaults(func=cmd_sign)
 
     log = sub.add_parser("log", help="journal commands")
-    log.add_argument("log_command", choices=["verify", "show"])
+    log.add_argument("log_command", choices=["verify", "show", "audit"])
     log.add_argument("--run-id", required=True)
     log.add_argument("--runs-root")
+    log.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="rebuild the AUDIT_TRAIL.md mirror from the journal (with `log audit`)",
+    )
     log.set_defaults(func=cmd_log)
 
     quarantine = sub.add_parser("quarantine", help="SkillSpector gate")

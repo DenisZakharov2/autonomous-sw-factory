@@ -150,6 +150,22 @@ def in_verdict_scope(
     return str(event.get("task_id") or "") == task_id
 
 
+def _write_all(fd: int, payload: bytes) -> None:
+    """Write every byte or fail.
+
+    `write(2)` is allowed to write less than it was given.  A short write
+    would leave a half line in the middle of the journal, and every later
+    read of it would stop on invalid JSON — the run would be unreadable
+    because of a partial append.
+    """
+    view = memoryview(payload)
+    while view:
+        written = os.write(fd, view)
+        if written <= 0:
+            raise JournalError("journal write made no progress")
+        view = view[written:]
+
+
 def _normalise_artifacts(run_dir: Path, artifacts: Iterable[str | dict[str, Any]]) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for item in artifacts:
@@ -359,7 +375,7 @@ def record_event(
     except OSError as exc:
         raise JournalError(f"refusing to append journal {log_path}: {exc}") from exc
     try:
-        os.write(fd, line.encode("utf-8"))
+        _write_all(fd, line.encode("utf-8"))
         os.fsync(fd)
     finally:
         os.close(fd)
@@ -367,7 +383,16 @@ def record_event(
         state["last_event_hash"] = event_hash
         state["event_count"] = seq
         state["updated_at"] = event["timestamp_utc"]
-    write_audit_trail(run_dir)
+    try:
+        append_audit_row(run_dir, event)
+    except OSError as exc:
+        # The mirror is a view of the journal, not a second source of truth.
+        # Its failure must not undo a committed event: the event is in the
+        # journal and the anchor has moved.  The mirror is rebuilt from the
+        # journal (`factory log audit --rebuild`), and the operator is told
+        # that it is stale.
+        if state is not None:
+            state["mirror_error"] = f"AUDIT_TRAIL.md: {exc}"
     return event
 
 
@@ -493,10 +518,31 @@ def verify_chain(log_path: Path, state_path: Path | None = None) -> list[str]:
     return errors
 
 
-def render_audit_trail(events: list[dict[str, Any]]) -> str:
-    def cell(value: object) -> str:
-        return str(value).replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+def _cell(value: object) -> str:
+    return str(value).replace("|", "\\|").replace("\r", " ").replace("\n", " ")
 
+
+def _audit_row(event: dict[str, Any]) -> str:
+    """One markdown row of the mirror."""
+    verdict = event.get("verdict", {})
+    return (
+        "| `{id}` | `{ts}` | `{stage}` | `{task}` | `{role}` | `{type}` | {action} | "
+        "`{status}` | `{prev}` | `{hash}` |".format(
+            id=_cell(event.get("event_id", "")),
+            ts=_cell(event.get("timestamp_utc", "")),
+            stage=_cell(event.get("stage", "")),
+            task=_cell(event.get("task_id") or "-"),
+            role=_cell(event.get("role", "")),
+            type=_cell(event.get("event_type", "")),
+            action=_cell(event.get("action", "")),
+            status=_cell(verdict.get("status", "")),
+            prev=_cell(str(event.get("prev_hash", ""))[:8]),
+            hash=_cell(str(event.get("hash", ""))[:8]),
+        )
+    )
+
+
+def render_audit_trail(events: list[dict[str, Any]]) -> str:
     lines = [
         "# Бортовой журнал прогона (`AUDIT_TRAIL.md`)",
         "",
@@ -504,28 +550,33 @@ def render_audit_trail(events: list[dict[str, Any]]) -> str:
         "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
     ]
     for event in events:
-        verdict = event.get("verdict", {})
-        lines.append(
-            "| `{id}` | `{ts}` | `{stage}` | `{task}` | `{role}` | `{type}` | {action} | `{status}` | `{prev}` | `{hash}` |".format(
-                id=cell(event.get("event_id", "")),
-                ts=cell(event.get("timestamp_utc", "")),
-                stage=cell(event.get("stage", "")),
-                task=cell(event.get("task_id") or "-"),
-                role=cell(event.get("role", "")),
-                type=cell(event.get("event_type", "")),
-                action=cell(event.get("action", "")),
-                status=cell(verdict.get("status", "")),
-                prev=cell(str(event.get("prev_hash", ""))[:8]),
-                hash=cell(str(event.get("hash", ""))[:8]),
-            )
-        )
+        lines.append(_audit_row(event))
     return "\n".join(lines) + "\n"
 
 
 def write_audit_trail(run_dir: Path) -> None:
+    """Rebuild the mirror from the journal — the journal is the source of truth."""
     events = read_events(run_dir / "blackbox.jsonl")
     content = render_audit_trail(events)
     path = run_dir / "AUDIT_TRAIL.md"
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     tmp.write_text(content, encoding="utf-8")
     os.replace(tmp, path)
+
+
+def append_audit_row(run_dir: Path, event: dict[str, Any]) -> None:
+    """Append one row to the mirror.
+
+    The mirror is a view of the journal, not a second source of truth, so it
+    is appended to rather than re-rendered: re-rendering the whole journal on
+    every event is quadratic in the length of the run.  A mirror that fell
+    behind is rebuilt with `write_audit_trail`.
+    """
+    path = run_dir / "AUDIT_TRAIL.md"
+    if not path.exists():
+        write_audit_trail(run_dir)
+        return
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(_audit_row(event) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())

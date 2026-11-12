@@ -193,6 +193,24 @@ def test_log_verify_and_show(tmp_path):
     assert json.loads(show.stdout)[0]["event_type"] == "INIT"
 
 
+def test_log_audit_reports_and_rebuilds_the_mirror(tmp_path):
+    """The mirror is a view of the journal; it can be rebuilt from it."""
+    assert cli("init", "--run-id", "demo", "--mode", "nano", runs_root=tmp_path).returncode == 0
+    audit = cli("log", "audit", "--run-id", "demo", runs_root=tmp_path)
+    assert audit.returncode == 0
+    assert "in sync" in audit.stdout
+
+    trail = tmp_path / "demo" / "AUDIT_TRAIL.md"
+    trail.write_text("stale\n", encoding="utf-8")
+    stale = cli("log", "audit", "--run-id", "demo", runs_root=tmp_path)
+    assert stale.returncode == 1
+    assert "out of sync" in stale.stdout
+
+    rebuilt = cli("log", "audit", "--run-id", "demo", "--rebuild", runs_root=tmp_path)
+    assert rebuilt.returncode == 0
+    assert cli("log", "audit", "--run-id", "demo", runs_root=tmp_path).returncode == 0
+
+
 def test_artifacts_and_models(tmp_path):
     artifacts = cli("artifacts", "--json", runs_root=tmp_path)
     assert artifacts.returncode == 0

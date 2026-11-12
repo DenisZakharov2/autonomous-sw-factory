@@ -414,7 +414,8 @@ def _home_dir_grants(user: str) -> list[str]:
 def _manual_install(helper: Path) -> str:
     return (
         "root-helper не установлен. Это единственная команда, которой нужен sudo:\n"
-        f"  sudo install -m 0755 -o root -g root {helper} {HELPER_PATH}\n"
+        f"  sudo install -D -m 0755 -o root -g root {helper} {HELPER_PATH}\n"
+        "(`-D` создаёт `/usr/local/libexec`, если его ещё нет.)\n"
         "После неё выполните `factory setup-executor` ещё раз: helper сам поставит "
         "polkit-правило и снимет старое правило `50-factory-transient-units.rules`.\n"
         "Пока helper не установлен, старое правило (если оно уже стоит) продолжает "

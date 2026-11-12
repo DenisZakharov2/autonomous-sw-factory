@@ -58,6 +58,20 @@ disable the sandbox; the verdict-freshness gap does not), and what it already
 implemented (the wheel/version contract in CI). It is a plan, not a record of
 work done.
 
+## `fix-plan-1.0.14.md`
+
+The leftovers of the audit that has never been closed: the context limit in
+the parallel branch, the TOCTOU on the executor's environment file, the E2BIG
+limit on a long prompt, the symbol detection by regex instead of an AST
+parser, the unbounded dashboard cache, the resource limits the doctor does not
+check, and the documentation drift. Every item was checked against the code of
+1.0.13, and the ones that were closed in the meantime — under other numbering
+— are listed too, so the next cycle does not redo them.
+
+It replaces the root `NEXT_SESSION_PROMPT.md`, which was a working note for a
+session that never happened and would have been lost with the working
+directory.
+
 ## `fix-plan-1.0.12.md`
 
 The plan the 1.0.12 fixes were made from: what the audit confirmed, what the

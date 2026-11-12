@@ -80,25 +80,44 @@ def load_state(run_dir: Path) -> dict[str, Any]:
     return state
 
 
+def _fsync_directory(directory: Path) -> None:
+    """Make a rename durable by syncing the directory that holds it.
+
+    POSIX only: Windows has no directory handle to sync, and opening a
+    directory as a file fails there.
+    """
+    if not hasattr(os, "O_DIRECTORY"):
+        return
+    try:
+        descriptor = os.open(directory, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(descriptor)
+
+
 def save_state(run_dir: Path, state: dict[str, Any]) -> None:
     state["updated_at"] = utc_now()
     validate_against_schema(state, "state.schema.json", "state.json")
     path = state_path(run_dir)
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    payload = (json.dumps(state, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
     # The journal fsyncs its line; the anchor has to be as durable as the
-    # line it points at, or a power cut leaves the two disagreeing.
-    descriptor = os.open(tmp, os.O_RDONLY)
+    # line it points at, or a power cut leaves the two disagreeing.  The file
+    # is written through a descriptor opened for writing: `fsync` on a
+    # read-only one fails on Windows.
+    descriptor = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
     try:
+        os.write(descriptor, payload)
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
     os.replace(tmp, path)
-    directory = os.open(path.parent, os.O_RDONLY)
-    try:
-        os.fsync(directory)
-    finally:
-        os.close(directory)
+    _fsync_directory(path.parent)
 
 
 def stage_list(pipeline: dict[str, Any]) -> list[dict[str, Any]]:

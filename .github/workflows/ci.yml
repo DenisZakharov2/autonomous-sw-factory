@@ -112,7 +112,7 @@ jobs:
       - name: Install the root helper
         run: |
           python -c "from pathlib import Path; from factory.runtime.root_helper import render_helper_script; Path('/tmp/factory-root-helper').write_text(render_helper_script())"
-          sudo install -m 0755 -o root -g root /tmp/factory-root-helper \
+          sudo install -D -m 0755 -o root -g root /tmp/factory-root-helper \
             /usr/local/libexec/factory-root-helper
           rm -f /tmp/factory-root-helper
       - name: Set up the executor user

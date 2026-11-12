@@ -147,6 +147,42 @@ def test_the_verifier_can_write_its_report(run):
     assert (report_dir / "verification.md").read_text() == "PASS: written\n"
 
 
+def test_the_executor_does_not_inherit_the_operators_credentials(monkeypatch):
+    """A token that leaks into the executor leaks out."""
+    from factory.runtime.sandbox import sandbox_env
+
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_operator_token")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "operator_secret")
+    monkeypatch.setenv("NPM_TOKEN", "npm_operator_token")
+    monkeypatch.setenv("SSH_AUTH_SOCK", "/run/user/1000/ssh-agent.socket")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-the-model-call")
+
+    env = sandbox_env()
+
+    assert "GITHUB_TOKEN" not in env
+    assert "AWS_SECRET_ACCESS_KEY" not in env
+    assert "NPM_TOKEN" not in env
+    assert "SSH_AUTH_SOCK" not in env
+    # Without the provider's key the agent cannot call the model, and the
+    # model call is the point of the executor.
+    assert env["OPENAI_API_KEY"] == "sk-the-model-call"
+
+
+@SANDBOX
+def test_the_operator_secret_directories_are_empty_inside_the_sandbox(run, tmp_path, monkeypatch):
+    """Read-only is not private: in the default mode the executor is the operator."""
+    home = tmp_path / "home"
+    (home / ".ssh").mkdir(parents=True)
+    (home / ".ssh" / "id_rsa").write_text("operator secret\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+
+    writable = _writable(run)
+    proc = _sandboxed(
+        run, writable, ["sh", "-c", f"cat {home / '.ssh' / 'id_rsa'} 2>&1 || true"]
+    )
+    assert "operator secret" not in proc.stdout, proc.stdout
+
+
 def test_evidence_does_not_follow_a_planted_symlink(run):
     """The evidence directory is in the executor's reach; the write must not be."""
     from factory.runtime.evidence import EvidenceStore

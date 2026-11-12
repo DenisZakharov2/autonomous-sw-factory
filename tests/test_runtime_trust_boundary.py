@@ -147,6 +147,24 @@ def test_the_verifier_can_write_its_report(run):
     assert (report_dir / "verification.md").read_text() == "PASS: written\n"
 
 
+def test_evidence_does_not_follow_a_planted_symlink(run):
+    """The evidence directory is in the executor's reach; the write must not be."""
+    from factory.runtime.evidence import EvidenceStore
+
+    outside = run.parent / "outside.txt"
+    outside.write_text("original\n", encoding="utf-8")
+    evidence_dir = run / "runtime" / "evidence"
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    store = EvidenceStore(run)
+    planted = evidence_dir / f"step-{store._sequence():04d}-s4_build-01.json"
+    planted.symlink_to(outside)
+
+    store.write_step(1, {"stage": "s4_build"}, {"status": "ok"})
+
+    assert outside.read_text() == "original\n"
+    assert planted.is_file() and not planted.is_symlink()
+
+
 @SANDBOX
 def test_run_root_is_writable_but_the_control_plane_is_not(run):
     """The root artifacts (skills-lock.json) need directory write to be replaced atomically."""

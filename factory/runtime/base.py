@@ -6,37 +6,18 @@ executor in tests and a real one on a workstation.
 """
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from ..errors import FactoryError
+from ..paths import safe_write_text  # noqa: F401  (re-export)
 
 
 class RuntimeFailure(FactoryError):
     """The runtime cannot continue without a human or a configuration fix."""
 
     exit_code = 3
-
-
-def safe_write_text(path: Path, text: str) -> None:
-    """Write a runtime-owned file without following a symlink.
-
-    The executor owns the run directory between steps.  A transcript path or
-    `prompt.md` could have been replaced by a symlink to a host file; a plain
-    `write_text` would then write outside the sandbox as the invoking user.
-    `O_NOFOLLOW` turns that into an error instead of a write.
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if path.is_symlink():
-        path.unlink()
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    descriptor = os.open(path, flags, 0o644)
-    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-        handle.write(text)
 
 
 @dataclass(slots=True)

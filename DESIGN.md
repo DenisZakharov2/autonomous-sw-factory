@@ -1,4 +1,4 @@
-# DESIGN.md — концепция Autonomous Software Factory v1.0.12
+# DESIGN.md — концепция Autonomous Software Factory v1.0.13
 
 ## 1. Задача
 

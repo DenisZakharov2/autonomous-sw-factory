@@ -54,6 +54,46 @@ CONTROL_PLANE_DIRS = ("runtime/evidence", "checks")
 # to them, never into them: the report is the witness, and a witness the
 # producer wrote is not a witness.
 VERIFICATION_DIRS = ("artifacts/verification",)
+# What the executor may not keep from the operator's environment.  The
+# provider's own key (`*_API_KEY`) stays: without it the agent cannot call
+# the model, and a model call is the whole point of the executor.
+ENV_DENIED = frozenset(
+    {
+        "NETRC",
+        "SSH_AUTH_SOCK",
+        "GPG_AGENT_INFO",
+        "KUBECONFIG",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+    }
+)
+ENV_DENIED_PREFIXES = (
+    "SSH_",
+    "GPG_",
+    "GNUPG_",
+    "AWS_",
+    "AZURE_",
+    "GOOGLE_",
+    "GCP_",
+    "DOCKER_",
+    "NPM_",
+    "PYPI_",
+    "STRIPE_",
+    "SENTRY_",
+    "TWILIO_",
+    "CLOUDFLARE_",
+)
+ENV_DENIED_SUFFIXES = ("_TOKEN", "_PASSWORD", "_SECRET", "_CREDENTIALS")
+# The operator's secret directories.  In the default mode the whole
+# filesystem is mounted read-only, and read-only is not private: the
+# executor runs as the operator and can read everything the operator can.
+SECRET_HOME_DIRS = (
+    ".ssh",
+    ".aws",
+    ".gnupg",
+    ".kube",
+    ".docker",
+    ".config/gh",
+)
 # The `factory/` package itself; binding its repository root would let an
 # executor rewrite the code that judges it.
 PACKAGE_DIR = Path(__file__).resolve().parents[1]
@@ -73,10 +113,21 @@ def sandbox_env(base: dict[str, str] | None = None) -> dict[str, str]:
     is: those variables only make an accidental `factory ...` call easier.
     `PYTHONPATH` is dropped for the same reason (module shadowing from the run
     directory).
+
+    Everything that belongs to the *operator* rather than to the model call is
+    dropped too: the executor is untrusted code, and a token that leaks into
+    it leaks out.  The provider's own key stays — without it the agent cannot
+    call the model — and so does the plain shell environment it needs to run.
     """
     env = dict(os.environ if base is None else base)
     for key in list(env):
         if key.startswith("FACTORY_") or key == "PYTHONPATH":
+            env.pop(key, None)
+            continue
+        if key in ENV_DENIED or key.startswith(ENV_DENIED_PREFIXES):
+            env.pop(key, None)
+            continue
+        if key.endswith(ENV_DENIED_SUFFIXES):
             env.pop(key, None)
     return env
 
@@ -173,6 +224,26 @@ def sandbox_command(
                 args.extend(["--ro-bind", system_dir, system_dir])
     else:
         args.extend(["--ro-bind", "/", "/"])
+        # Read-only is not private: the executor runs as the operator.  The
+        # operator's secret directories are mounted over as empty, and the
+        # session sockets (keyring, D-Bus, ssh-agent) are masked — a socket
+        # can be connected to through a read-only mount.
+        home = Path.home()
+        for relative in SECRET_HOME_DIRS:
+            candidate = home / relative
+            if candidate.is_dir():
+                args.extend(["--tmpfs", str(candidate)])
+        runtime_dir = Path(os.environ["XDG_RUNTIME_DIR"]) if os.environ.get(
+            "XDG_RUNTIME_DIR"
+        ) else None
+        if runtime_dir is not None and runtime_dir.is_dir():
+            for name in ("bus", "ssh-agent.socket"):
+                socket = runtime_dir / name
+                if socket.is_socket():
+                    args.extend(["--ro-bind", "/dev/null", str(socket)])
+            keyring = runtime_dir / "keyring"
+            if keyring.is_dir():
+                args.extend(["--tmpfs", str(keyring)])
     args.extend(
         [
             "--dev",

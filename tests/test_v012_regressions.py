@@ -190,6 +190,12 @@ def test_directory_artifact_is_hashed_and_tamper_detected(nano_run):
     )
     directory = next(item for item in event["artifacts"] if item["path"].endswith("/"))
     assert directory["path"] == "artifacts/screens/"
+    # The verifier hands its report in before the gate opens: the router only
+    # offers a gate once the report is current, and the gate requires the same.
+    submit_work(
+        "run-01", stage_id="s2_architecture", role="02-independent-verifier",
+        artifacts=["artifacts/verification/s2_architecture/verification.md"], root=run.parent,
+    )
     gate_approve("run-01", gate_id="gate_s2", approver="02-independent-verifier",
                  evidence=["arch ok"], root=run.parent)
     _write(run, "artifacts/screens/todo.md", "## 1. Экраны\n\nПодмена.\n")

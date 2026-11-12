@@ -36,6 +36,7 @@ except ImportError:  # pragma: no cover - POSIX
     msvcrt = None  # type: ignore[assignment]
 
 GENESIS_PREV_HASH = "0" * 64
+VERIFIER_ROLE = "02-independent-verifier"
 EVENT_TYPES = {
     "INIT", "STAGE_RESET", "TASK_ADD", "TASK_CLAIM", "TASK_DONE", "TASK_RESET",
     "ARTIFACT_SUBMIT", "ARTIFACT_RERECORD", "GATE_DECISION", "VERIFY", "VETO",
@@ -221,14 +222,14 @@ def _check_semantics(
     if event_type == "VERIFY":
         # The independent verifier's verdict is a fact about a report, not a
         # producer's opinion.  Only role 02 writes it, and only PASS or FAIL.
-        if role != "02-independent-verifier" or verified_by != role:
+        if role != VERIFIER_ROLE or verified_by != role:
             raise JournalError("VERIFY must be written by 02-independent-verifier")
         if verdict not in {"PASS", "FAIL"}:
             raise JournalError("VERIFY must use verdict PASS or FAIL")
         if not evidence:
             raise JournalError("VERIFY requires at least one evidence reference")
     if verdict == "PASS" and event_type not in HUMAN_EXEMPT:
-        if role != "02-independent-verifier" or verified_by != role:
+        if role != VERIFIER_ROLE or verified_by != role:
             raise JournalError(
                 "Producer != Verifier: only 02-independent-verifier may record PASS "
                 "for artifact events"

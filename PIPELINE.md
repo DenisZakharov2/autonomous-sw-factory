@@ -116,6 +116,8 @@ factory task reject --run-id <id> --task-id TASK-001 --reason "test missing"
 
 `task accept` пишет `TASK_DONE` со статусом `PASS` от `02-independent-verifier` и evidence — только если в `tasks/<task_id>/verification/verification.md` есть три проверки с командой и выводом и вердикт `PASS`; событие `VERIFY` идёт перед `TASK_DONE`. `task reject` пишет `REWORK FAIL` и увеличивает `attempts`.
 
+**Вердикт должен быть про текущие байты.** `VERIFY` и `REWORK` записывают не только отчёт, но и хеши артефактов, которые верификатор смотрел. Если после этого артефакты изменились, а отчёт на диске тот же, вердикт про старые байты: `task accept` и `gate approve` отказывают (`the verifier's report ... predates the last submission`). Отчёт, написанный верификатором *после* изменения, — это новый вердикт про новые байты, и он принимается. Повторная сдача тех же самых байтов изменением не считается.
+
 ## 5. Гейты
 
 Гейт закрывается командой:
@@ -130,6 +132,7 @@ factory gate approve --run-id <id> --gate gate_s1 \
 - человеческий гейт принимает только `human:<id>`;
 - роль-гейт принимает только объявленного владельца (`02-independent-verifier` или `19-devops-engineer`);
 - перед закрытием выполняется `factory verify` без требования закрытого гейта; ошибки блокируют решение;
+- отчёт стадии должен быть **сдан** верификатором (`factory submit --role 02-independent-verifier --artifact artifacts/verification/<stage>/verification.md`) и сдан после последней сдачи продюсером: `factory next` предлагает гейт только для текущего отчёта, и гейт требует того же;
 - `gate_s1` выставляет `human_spec_approved: true`;
 - `gate_s_in` выставляет `restore_drill_passed: true`;
 - отказ увеличивает `attempts`; после `max_attempts` стадия становится `escalated`.

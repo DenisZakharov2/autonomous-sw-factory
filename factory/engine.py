@@ -19,6 +19,7 @@ from .artifacts import (
     plan_rows,
     policy_allows,
     resolve_recorded_path,
+    sha256_dir,
     substitute_path,
     validate_artifact,
     validate_markdown,
@@ -35,8 +36,14 @@ from .config import (
     resolve_model,
     validate_against_schema,
 )
-from .errors import JournalError, RunError, VerificationError
-from .journal import ARTIFACT_RECORDS, read_events, record_event, run_lock, sha256_file
+from .errors import ConfigError, JournalError, RunError, VerificationError
+from .journal import (
+    ARTIFACT_RECORDS,
+    read_events,
+    record_event,
+    run_lock,
+    sha256_file,
+)
 from .paths import run_dir as safe_run_dir
 from .paths import runs_root, validate_run_id, validate_task_id
 from .pipeline import effective_owner, effective_roles, stage_artifacts
@@ -607,7 +614,9 @@ def _record_verification_locked(
         action=f"VERIFY {verdict} for {'task ' + task_id if task_id else stage_id}",
         verdict_status=verdict,
         verified_by=VERIFIER,
-        artifacts=[_report_entry(run_dir, path)],
+        artifacts=_judged_entries(
+            run_dir, state, registry, stage_id=stage_id, task_id=task_id, report_path=path
+        ),
         evidence=event_evidence,
         model_tier=model["tier"],
         model_id=model["model_id"],
@@ -617,6 +626,47 @@ def _record_verification_locked(
         # VERIFY byte-identical to the one 1.0.2 wrote.
         reason=reason if verdict == "FAIL" else "",
     )
+
+
+def _judged_entries(
+    run_dir: Path,
+    state: dict[str, Any],
+    registry: dict[str, Any],
+    *,
+    stage_id: str,
+    task_id: str | None,
+    report_path: Path,
+) -> list[dict[str, Any]]:
+    """The artifact entries a verdict judges, the report included.
+
+    A verdict is a statement about bytes.  Recording the hashes of the
+    artifacts it judged is what lets a later reader tell whether the verdict
+    still describes what is on disk — the answer comes from the journal, not
+    from file timestamps the executor could forge.
+
+    Paths that are gone are left out: the verdict is about what existed when
+    it was made, and the artifact hashes cover the rest.
+    """
+    pipeline = load_pipeline()
+    stage = find_stage(pipeline, stage_id)
+    if task_id is not None:
+        task = state["tasks"].get(task_id) or {}
+        base = run_dir / "tasks" / str(task_id)
+        paths = [str(item) for item in task.get("artifacts") or []]
+        paths += [str(base / name) for name in ("deliverable.md", "verification/verification.md")]
+        paths = [
+            raw
+            for raw in paths
+            if (Path(raw) if Path(raw).is_absolute() else run_dir / raw).exists()
+        ]
+        entries = collect_artifact_entries(run_dir, paths) if paths else []
+    else:
+        entries = _stage_entries(run_dir, stage, pipeline, registry, state)
+    report = _report_entry(run_dir, report_path)
+    # The report leads: it is the artifact the event is about, and the judged
+    # bytes follow it.
+    judged = [item for item in entries if str(item.get("path")) != report["path"]]
+    return [report, *judged]
 
 
 def _report_entry(run_dir: Path, path: Path) -> dict[str, Any]:
@@ -744,6 +794,87 @@ def _report_is_current(
         else:
             producer_seq = max(producer_seq, seq)
     return report_seq > producer_seq
+
+
+def _latest_judgement(
+    events: list[dict[str, Any]], *, stage_id: str, task_id: str | None
+) -> dict[str, Any] | None:
+    """The newest event that judged this subject: a verdict or a rejection.
+
+    Both carry the artifact hashes that were on disk when the verifier
+    looked, which is what makes "is this verdict still about the current
+    bytes?" answerable from the journal alone.
+    """
+    for event in reversed(events):
+        if event.get("event_type") not in {"VERIFY", "REWORK"}:
+            continue
+        if task_id is not None:
+            if event.get("task_id") == task_id:
+                return event
+        elif event.get("stage") == stage_id and not event.get("task_id"):
+            return event
+    return None
+
+
+def _verdict_is_fresh(
+    run_dir: Path, *, stage_id: str, task_id: str | None, report_path: Path
+) -> bool:
+    """Is the report on disk still a verdict about the bytes on disk?
+
+    A verdict is a statement about specific bytes.  The `VERIFY` event
+    records the hashes of the artifacts it judged, so the question has an
+    answer that does not depend on file timestamps — those belong to the
+    executor and can be forged.
+
+    The verdict is stale when the judged bytes moved after it was recorded
+    *and* the report on disk is the very report that was recorded: then the
+    report still describes the old bytes.  A report the verifier wrote after
+    the change is a new verdict about the new bytes and is accepted.
+
+    Fail-closed: a report that cannot be placed against the journal is not
+    fresh.
+    """
+    if not report_path.is_file():
+        return False
+    if task_id is None and not _report_is_current(
+        run_dir, stage_id=stage_id, task_id=None, report_path=report_path
+    ):
+        # A stage report reaches the gate through the verifier's handover, and
+        # the handover is what says the verifier saw the current artifacts.  A
+        # task report has no handover of its own: the runtime hands the task
+        # over to `task_accept` in the same breath, and `task_reject` records
+        # the bytes it judged.
+        return False
+    events = read_events(run_dir / "blackbox.jsonl")
+    judgement = _latest_judgement(events, stage_id=stage_id, task_id=task_id)
+    if judgement is None:
+        # The first verdict for this subject: there is nothing to be stale
+        # against.  A producer that changed the work without submitting it is
+        # caught by the artifact hashes instead.
+        return True
+    relative = _relative(run_dir, report_path)
+    recorded_report = ""
+    moved = False
+    for item in judgement.get("artifacts") or []:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "")
+        if path == relative:
+            recorded_report = str(item.get("sha256") or "")
+            continue
+        target = resolve_recorded_path(run_dir, path)
+        try:
+            current = sha256_dir(target) if path.endswith("/") else sha256_file(target)
+        except (OSError, ConfigError):
+            moved = True
+            continue
+        if current != str(item.get("sha256") or ""):
+            moved = True
+    if not moved:
+        return True
+    # The bytes moved.  Only a report the verifier wrote after that can
+    # describe them.
+    return bool(recorded_report) and sha256_file(report_path) != recorded_report
 
 
 def _task_deliverable_errors(
@@ -1551,6 +1682,14 @@ def gate_approve(
                 raise VerificationError(
                     f"the verifier's report says {verdict}: {reason or 'no reason given'}"
                 )
+            if not _verdict_is_fresh(
+                run_dir, stage_id=stage["id"], task_id=None, report_path=path
+            ):
+                raise VerificationError(
+                    f"the verifier's report for {stage['id']} predates the last "
+                    "submission: the verifier has to look at the current "
+                    "artifacts again before this gate can close"
+                )
             # The verdict is recorded before the gate decision, so the journal
             # always reads producer → VERIFY → GATE_DECISION.
             verify_event = _record_verification_locked(
@@ -1822,6 +1961,7 @@ def task_reset(
     stage = find_stage(pipeline, "s4_build")
     with run_lock(run_dir):
         state = load_state(run_dir)
+        registry = load_artifacts(state["mode"])
         _require_current(state, pipeline, stage)
         task = state["tasks"].get(task_id)
         if task is None:
@@ -1831,6 +1971,18 @@ def task_reset(
         task["status"] = "pending"
         task["attempts"] = 0
         task["lease"] = None
+        witness: list[dict[str, Any]] = []
+        if verification_policy(state) == "role":
+            report_path, _errors, _verdict, _reason = verification_report(
+                run_dir, registry, stage_id="s4_build", task_id=task_id
+            )
+            if report_path.is_file():
+                # A reset sends the task back to the producer, so the report
+                # that was on disk stops being a verdict about the new work.
+                witness = _judged_entries(
+                    run_dir, state, registry,
+                    stage_id="s4_build", task_id=task_id, report_path=report_path,
+                )
         model = _model_for("00-orchestrator", "tier-3-frontier")
         event = record_event(
             run_dir,
@@ -1845,6 +1997,7 @@ def task_reset(
             verdict_status="BLOCKED",
             verified_by=approver,
             evidence=[reason],
+            artifacts=witness,
             model_tier=model["tier"],
             model_id=model["model_id"],
             reasoning_effort=model["effort"],
@@ -2102,7 +2255,7 @@ def task_accept(run_id: str, task_id: str, *, root: str | Path | None = None) ->
         if task["status"] != "review":
             raise RunError(f"task {task_id} is {task['status']}, cannot accept")
         if verification_policy(state) == "role":
-            _path, report_errors, verdict, reason = verification_report(
+            report_path, report_errors, verdict, reason = verification_report(
                 run_dir, registry, stage_id="s4_build", task_id=task_id
             )
             if report_errors:
@@ -2114,6 +2267,14 @@ def task_accept(run_id: str, task_id: str, *, root: str | Path | None = None) ->
                 raise VerificationError(
                     f"the verifier's report for {task_id} says {verdict}: "
                     f"{reason or 'no reason given'}"
+                )
+            if not _verdict_is_fresh(
+                run_dir, stage_id="s4_build", task_id=task_id, report_path=report_path
+            ):
+                raise VerificationError(
+                    f"the verifier's report for {task_id} predates the last "
+                    "submission: the verifier has to look at the current "
+                    "artifacts again before the task can be accepted"
                 )
             _record_verification_locked(
                 run_dir, state, registry, stage_id="s4_build", task_id=task_id,
@@ -2143,14 +2304,25 @@ def task_reject(run_id: str, task_id: str, reason: str, *, root: str | Path | No
         state = load_state(run_dir)
         registry = load_artifacts(state["mode"])
         _require_current(state, pipeline, find_stage(pipeline, "s4_build"))
+        witness: list[dict[str, Any]] = []
         if verification_policy(state) == "role":
-            _path, report_errors, verdict, _report_reason = verification_report(
+            report_path, report_errors, verdict, _report_reason = verification_report(
                 run_dir, registry, stage_id="s4_build", task_id=task_id
             )
             if not report_errors and verdict == "FAIL":
                 _record_verification_locked(
                     run_dir, state, registry, stage_id="s4_build", task_id=task_id,
                     evidence=[f"task {task_id} rejected: {reason}"],
+                )
+            if report_path.is_file():
+                # A rejection is a judgement too.  Recording the bytes it
+                # looked at is what lets `task_accept` tell a fresh report
+                # from one that was already judged before the producer
+                # changed the work: the producer can only take the task back
+                # through a rejection or a human reset, and both are recorded.
+                witness = _judged_entries(
+                    run_dir, state, registry,
+                    stage_id="s4_build", task_id=task_id, report_path=report_path,
                 )
         reject_task(state, task_id, reason)
         model = _model_for(VERIFIER, "tier-3-frontier")
@@ -2159,6 +2331,7 @@ def task_reject(run_id: str, task_id: str, reason: str, *, root: str | Path | No
             event_type="REWORK", why="Independent verification failed", for_what=f"Rework {task_id}",
             action=f"Rejected {task_id}: {reason}", verdict_status="FAIL",
             verified_by=VERIFIER, evidence=[reason], reason_code="TASK_REJECTED",
+            artifacts=witness,
             model_tier=model["tier"], model_id=model["model_id"], reasoning_effort=model["effort"],
         )
         save_state(run_dir, state)

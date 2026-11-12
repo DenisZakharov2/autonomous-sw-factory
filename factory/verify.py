@@ -457,6 +457,25 @@ def verification_policy_errors(
                 )
                 continue
             errors.extend(_binding_errors(f"stage {stage}", found[1], event))
+        if event_type == "RISK_ACCEPTANCE" and not task:
+            if approvers.get(stage, "human") == "human":
+                continue
+            # A human may close an escalated stage under an accepted risk, but
+            # the journal has to say which verdict was overridden.  A risk
+            # acceptance with nothing to stand against closes a role-gated
+            # stage without the verifier ever looking at it.
+            found = verdicts.get((stage, None))
+            if found is None:
+                errors.append(
+                    f"stage {stage}: the risk acceptance closes the stage without a "
+                    "recorded verdict to override"
+                )
+                continue
+            if str(event.get("parent_event_id") or "") != str(found[1].get("event_id") or ""):
+                errors.append(
+                    f"stage {stage}: the risk acceptance does not name the verdict it "
+                    f"overrides (last verdict: {found[1].get('event_id')})"
+                )
         if event_type == "TASK_DONE" and task:
             found = verdicts.get((stage, str(task)))
             if found is None or found[0] != "PASS":

@@ -1844,12 +1844,22 @@ def accept_risk(
         registry = load_artifacts(state["mode"])
         _require_current(state, pipeline, stage)
         status = state["stage_status"].get(stage["id"])
-        if status not in {"escalated", "blocked", "review"}:
+        if status not in {"escalated", "blocked"}:
+            # A stage in `review` is waiting for its verdict, not carrying a
+            # risk: accepting one there would close the stage behind the
+            # verifier's back.
             raise RunError(f"stage {stage['id']} is {status}; there is no risk to accept")
+        events = read_events(run_dir / "blackbox.jsonl")
+        overridden = _latest_judgement(events, stage_id=stage["id"], task_id=None)
         entries = _stage_entries(run_dir, stage, pipeline, registry, state)
         evidence = [f"risk: {risk}", f"mitigation: {mitigation}"]
         if expires:
             evidence.append(f"expires: {expires}")
+        if overridden is not None:
+            evidence.append(
+                f"overrides {overridden.get('event_id')} "
+                f"({(overridden.get('verdict') or {}).get('status', 'unknown')})"
+            )
         gate_record(state, stage, status="approved", decided_by=approver, evidence=evidence)
         if stage["id"] == "s_in":
             state["restore_drill_passed"] = True
@@ -1871,6 +1881,11 @@ def accept_risk(
             verified_by=approver,
             evidence=evidence,
             artifacts=entries,
+            # The verdict this decision stands against, if there was one.  A
+            # risk acceptance that overrides nothing is not an override.
+            parent_event_id=(
+                str(overridden.get("event_id")) if overridden is not None else None
+            ),
             model_tier=model["tier"],
             model_id=model["model_id"],
             reasoning_effort=model["effort"],

@@ -27,7 +27,9 @@ from conftest import write_stage_verification, write_task_verification
 
 from factory.config import load_pipeline
 from factory.engine import (
+    accept_risk,
     gate_approve,
+    gate_reject,
     import_plan,
     init_run,
     submit_work,
@@ -36,7 +38,7 @@ from factory.engine import (
     task_reject,
     task_submit,
 )
-from factory.errors import VerificationError
+from factory.errors import RunError, VerificationError
 from factory.journal import GENESIS_PREV_HASH, compute_event_hash, read_events
 from factory.state import load_state, save_state
 from factory.verify import verification_policy_errors, verify_run
@@ -301,3 +303,73 @@ def test_verify_reports_a_journal_whose_verdict_was_about_older_bytes(build_run:
 
     errors = verify_run(run, "s4_build")
     assert any("about older bytes" in error for error in errors), errors
+
+
+def test_accept_risk_refuses_a_stage_that_waits_for_its_verdict(architecture_run: Path):
+    """`review` means the verdict is pending, not that a risk was accepted."""
+    run = architecture_run
+    _submit_architecture(run)
+    submit_work(
+        "run-01", stage_id="s2_architecture", role=VERIFIER,
+        artifacts=["artifacts/verification/s2_architecture/verification.md"], root=run.parent,
+    )
+    assert load_state(run)["stage_status"]["s2_architecture"] == "review"
+
+    with pytest.raises(RunError):
+        accept_risk(
+            "run-01", gate_id="gate_s2", approver="human:denis",
+            risk="skip the review", mitigation="manual check later", root=run.parent,
+        )
+
+
+def test_accept_risk_names_the_verdict_it_overrides(architecture_run: Path):
+    """A human may close an escalated stage, but the journal must say what was overridden."""
+    run = architecture_run
+    # The verifier turns the stage down: the risk acceptance has to stand
+    # against a recorded verdict.
+    write_stage_verification(run, "s2_architecture", verdict="FAIL", reason="the contract is thin")
+    _submit_architecture(run)
+    submit_work(
+        "run-01", stage_id="s2_architecture", role=VERIFIER,
+        artifacts=["artifacts/verification/s2_architecture/verification.md"], root=run.parent,
+    )
+    for _ in range(3):
+        gate_reject(
+            "run-01", gate_id="gate_s2", approver=VERIFIER,
+            evidence=["not good enough"], root=run.parent,
+        )
+    assert load_state(run)["stage_status"]["s2_architecture"] == "escalated"
+
+    event = accept_risk(
+        "run-01", gate_id="gate_s2", approver="human:denis",
+        risk="the architecture is good enough", mitigation="review in the next sprint",
+        root=run.parent,
+    )
+    assert event["event_type"] == "RISK_ACCEPTANCE"
+    verdicts = [
+        item for item in read_events(run / "blackbox.jsonl") if item["event_type"] == "VERIFY"
+    ]
+    assert event["parent_event_id"] == verdicts[-1]["event_id"]
+    assert not [
+        error for error in verification_policy_errors(
+            load_state(run), read_events(run / "blackbox.jsonl")
+        )
+    ]
+
+
+def test_the_verifier_sees_a_risk_acceptance_without_a_verdict():
+    """A risk acceptance that overrides nothing closes the stage on nothing."""
+    errors = verification_policy_errors(
+        {"verification_policy": "role"},
+        [
+            {
+                "event_type": "RISK_ACCEPTANCE",
+                "stage": "s4_build",
+                "task_id": None,
+                "verdict": {"status": "ACCEPTED_RISK"},
+                "parent_event_id": None,
+                "artifacts": [],
+            }
+        ],
+    )
+    assert any("without a recorded verdict to override" in error for error in errors), errors

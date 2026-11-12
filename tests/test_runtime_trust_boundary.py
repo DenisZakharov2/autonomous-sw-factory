@@ -193,7 +193,10 @@ def test_evidence_does_not_follow_a_planted_symlink(run):
     evidence_dir.mkdir(parents=True, exist_ok=True)
     store = EvidenceStore(run)
     planted = evidence_dir / f"step-{store._sequence():04d}-s4_build-01.json"
-    planted.symlink_to(outside)
+    try:
+        planted.symlink_to(outside)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are not available on this platform")
 
     store.write_step(1, {"stage": "s4_build"}, {"status": "ok"})
 
@@ -202,8 +205,10 @@ def test_evidence_does_not_follow_a_planted_symlink(run):
 
 
 ACL = pytest.mark.skipif(
-    shutil.which("getfacl") is None or shutil.which("setfacl") is None,
-    reason="the acl package is not installed",
+    os.name != "posix"
+    or shutil.which("getfacl") is None
+    or shutil.which("setfacl") is None,
+    reason="POSIX ACLs are not available on this platform",
 )
 
 

@@ -46,7 +46,7 @@ from .journal import (
     sha256_file,
 )
 from .paths import run_dir as safe_run_dir
-from .paths import runs_root, validate_run_id, validate_task_id
+from .paths import runs_root, safe_write_text, validate_run_id, validate_task_id
 from .pipeline import effective_owner, effective_roles, stage_artifacts
 from .state import (
     accept_task,
@@ -448,14 +448,14 @@ def _write_verification(run_dir: Path, task: dict[str, Any]) -> Path:
     path = run_dir / "tasks" / task_id / "verification.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     artifacts = "\n".join(f"- `{item}`" for item in task.get("artifacts", [])) or "- none"
-    path.write_text(
+    safe_write_text(
+        path,
         f"# Проверка {task_id}\n\n"
         "## 1. Артефакты\n\n"
         f"{artifacts}\n\n"
         "## 2. Вердикт\n\n"
         "PASS: `02-independent-verifier` принял задачу; факт и хеши зафиксированы "
         "событием `TASK_DONE` в `blackbox.jsonl`.\n",
-        encoding="utf-8",
     )
     return path
 
@@ -917,7 +917,7 @@ def init_run(
     for sub in [
         "backups", "artifacts", "artifacts/adr", "artifacts/screens", "artifacts/patches",
         "artifacts/verification", "tasks", "product/src", "product/docs", "product/tests",
-        "product/migrations",
+        "product/migrations", "runtime", "runtime/agent", "runtime/evidence",
     ]:
         (target / sub).mkdir(parents=True, exist_ok=True)
     if idea:

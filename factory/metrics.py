@@ -10,6 +10,7 @@ from typing import Any
 from .config import load_json, load_pipeline, validate_instance
 from .errors import FactoryError
 from .journal import read_events
+from .paths import safe_write_text
 from .state import load_state
 from .trace import build_matrix
 
@@ -127,5 +128,5 @@ def compute_metrics(run_dir: Path) -> dict[str, Any]:
 def write_metrics(run_dir: Path) -> dict[str, Any]:
     metrics = compute_metrics(run_dir)
     path = run_dir / "artifacts" / "metrics.json"
-    path.write_text(json.dumps(metrics, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    safe_write_text(path, json.dumps(metrics, indent=2, ensure_ascii=False) + "\n")
     return metrics

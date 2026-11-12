@@ -44,6 +44,20 @@ which would have given passwordless root back, and it left the helper
 uninstallable. The findings were confirmed, the patch was rewritten, and the
 divergences are listed in `fix-plan-1.0.12.md`.
 
+## `fix-plan-1.0.13.md`
+
+The plan for the next cycle, written from an independent review of release
+1.0.12 (`92b5a41`). The review itself is static analysis of the published
+sources; this plan was checked against the working tree, and the findings it
+turns on were reproduced: a gate accepted a PASS verdict that predated the
+bytes it judged, a failing `AUDIT_TRAIL.md` render left the journal and
+`state.json` inconsistent, and a control-plane file recreated by the engine's
+own atomic write inherited the executor's ACL. The plan lists what the review
+confirmed, what it mis-prioritised (the sandbox findings need the operator to
+disable the sandbox; the verdict-freshness gap does not), and what it already
+implemented (the wheel/version contract in CI). It is a plan, not a record of
+work done.
+
 ## `fix-plan-1.0.12.md`
 
 The plan the 1.0.12 fixes were made from: what the audit confirmed, what the

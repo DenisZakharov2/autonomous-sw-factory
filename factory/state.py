@@ -86,7 +86,19 @@ def save_state(run_dir: Path, state: dict[str, Any]) -> None:
     path = state_path(run_dir)
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    # The journal fsyncs its line; the anchor has to be as durable as the
+    # line it points at, or a power cut leaves the two disagreeing.
+    descriptor = os.open(tmp, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
     os.replace(tmp, path)
+    directory = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
 
 
 def stage_list(pipeline: dict[str, Any]) -> list[dict[str, Any]]:

@@ -13,8 +13,10 @@ from factory.journal import (
     append_event,
     canonical_json,
     compute_event_hash,
+    read_events,
     verify_chain,
 )
+from factory.state import load_state
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -192,7 +194,7 @@ def test_genesis_hash_is_zeroes():
 
 def test_event_types_and_schema_enum_move_together():
     """A new event type must be in both places or the journal rejects it."""
-    from factory.config import load_json, SCHEMA_DIR
+    from factory.config import SCHEMA_DIR, load_json
 
     schema = load_json(SCHEMA_DIR / "event.schema.json")
     assert set(schema["properties"]["event_type"]["enum"]) == EVENT_TYPES
@@ -339,3 +341,71 @@ def test_journal_append_does_not_follow_a_symlink(tmp_path):
             verified_by="00-orchestrator",
         )
     assert outside.read_text(encoding="utf-8") == "safe\n"
+
+
+def test_a_short_write_is_finished(monkeypatch, nano_run):
+    """`write(2)` may write less than it was given; the line must still be whole."""
+    from factory import journal
+
+    run_dir, _, _ = nano_run
+    real_write = os.write
+    calls: list[int] = []
+
+    def short_write(fd, data):
+        chunk = bytes(data)[:7]
+        calls.append(len(chunk))
+        return real_write(fd, chunk)
+
+    monkeypatch.setattr(journal.os, "write", short_write)
+    _event(run_dir, action="short write")
+    monkeypatch.undo()
+
+    assert calls, "the write was not intercepted"
+    assert len(calls) > 1, "the line was written in one piece"
+    events = read_events(run_dir / "blackbox.jsonl")
+    assert events[-1]["action"] == "short write"
+    assert verify_chain(run_dir / "blackbox.jsonl", run_dir / "state.json") == []
+
+
+def test_a_failing_mirror_does_not_undo_the_event(monkeypatch, nano_run):
+    """The mirror is a view: its failure must not break the committed event."""
+    from factory import journal
+
+    run_dir, state, _ = nano_run
+
+    def broken(run_dir, event):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(journal, "append_audit_row", broken)
+    event = journal.record_event(
+        run_dir,
+        state,
+        stage="s1_spec",
+        task_id=None,
+        role="01-smart-interviewer",
+        event_type="ARTIFACT_SUBMIT",
+        why="test",
+        for_what="test",
+        action="mirror is broken",
+        verdict_status="DRAFT",
+        verified_by="01-smart-interviewer",
+    )
+    journal._save_state_file(run_dir, state)
+    monkeypatch.undo()
+
+    assert event["action"] == "mirror is broken"
+    assert read_events(run_dir / "blackbox.jsonl")[-1]["action"] == "mirror is broken"
+    assert verify_chain(run_dir / "blackbox.jsonl", run_dir / "state.json") == []
+    assert "mirror_error" in load_state(run_dir)
+
+
+def test_the_mirror_is_appended_not_rebuilt(nano_run):
+    """Appending a row keeps the mirror linear in the length of the run."""
+    run_dir, _, _ = nano_run
+    _event(run_dir, action="first")
+    trail = run_dir / "AUDIT_TRAIL.md"
+    before = trail.read_text(encoding="utf-8")
+    _event(run_dir, action="second")
+    after = trail.read_text(encoding="utf-8")
+    assert after.startswith(before)
+    assert after.count("\n") == before.count("\n") + 1

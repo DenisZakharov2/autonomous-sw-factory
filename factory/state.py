@@ -113,12 +113,24 @@ def find_stage(pipeline: dict[str, Any], stage_id: str) -> dict[str, Any]:
 
 
 def current_stage(state: dict[str, Any], pipeline: dict[str, Any]) -> dict[str, Any] | None:
+    """The first stage that is not accepted yet.
+
+    The function answers and does not write.  A reader that compares
+    `state["current_stage"]` with the pipeline must not have the answer
+    written over the evidence first — otherwise the check can never fire.
+    `set_current_stage` is the one that moves the field.
+    """
     for stage in stage_list(pipeline):
         if state["stage_status"].get(stage["id"]) != "accepted":
-            state["current_stage"] = stage["id"]
             return stage
-    state["current_stage"] = None
     return None
+
+
+def set_current_stage(state: dict[str, Any], pipeline: dict[str, Any]) -> dict[str, Any] | None:
+    """Move `current_stage` to the first stage that is not accepted yet."""
+    stage = current_stage(state, pipeline)
+    state["current_stage"] = stage["id"] if stage else None
+    return stage
 
 
 def stage_gate(state: dict[str, Any], stage: dict[str, Any]) -> dict[str, Any]:

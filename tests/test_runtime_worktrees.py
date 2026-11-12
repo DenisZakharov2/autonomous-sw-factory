@@ -16,7 +16,14 @@ from factory.runtime.worktree import (
     paths_overlap,
     run_parallel_tasks,
 )
-from factory.state import add_task, find_stage, load_state, save_state, stage_gate
+from factory.state import (
+    add_task,
+    find_stage,
+    load_state,
+    save_state,
+    set_current_stage,
+    stage_gate,
+)
 from factory.verify import verify_run
 
 OWNER = "12-fullstack-developer"
@@ -55,6 +62,7 @@ def build_env(tmp_path, monkeypatch):
     state["stage_status"]["s4_build"] = "in_progress"
     add_task(state, _task("TASK-A", ["product/src/a.py"]))
     add_task(state, _task("TASK-B", ["product/src/b.py"]))
+    set_current_stage(state, pipeline)
     save_state(run_dir, state)
     return runs, run_dir, find_stage(pipeline, "s4_build")
 

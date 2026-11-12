@@ -23,11 +23,17 @@ class EvidenceStore:
         self.directory = run_dir / "runtime" / "evidence"
 
     def _sequence(self) -> int:
-        """Use the journal position so evidence files never overwrite each other."""
+        """Use the journal position so evidence files never overwrite each other.
+
+        The state is the fast answer; the journal is the fallback when the
+        state is unreadable.  Returning a constant would collapse every
+        evidence file onto one name, and the audit trail would lose its own
+        entries quietly.
+        """
         try:
             return int(load_state(self.run_dir)["event_count"])
-        except Exception:  # noqa: BLE001 - evidence must not fail on a damaged state
-            return 0
+        except Exception:  # noqa: BLE001 - the state may be damaged mid-run
+            return len(read_events(self.run_dir / "blackbox.jsonl"))
 
     def _write(self, name: str, payload: dict[str, Any]) -> Path:
         self.directory.mkdir(parents=True, exist_ok=True)
@@ -68,7 +74,7 @@ class EvidenceStore:
             events = []
         if events:
             evidence.append(
-                f"journal: {len(events)} events, head {str(events[-1].get('event_hash'))[:16]}"
+                f"journal: {len(events)} events, head {str(events[-1].get('hash'))[:16]}"
             )
         for event in events:
             if event.get("event_type") != "ARTIFACT_SUBMIT":

@@ -289,6 +289,16 @@ def test_doctor_reports_the_legacy_polkit_rule(tmp_path, monkeypatch):
     assert not any("root без пароля" in error for error in doctor_report()["errors"])
 
 
+def test_doctor_says_when_the_sandbox_cannot_run(monkeypatch):
+    """Песочница — основная граница; без неё её надо назвать."""
+    from factory import verify
+    from factory.runtime import sandbox
+
+    monkeypatch.setattr(sandbox, "sandbox_available", lambda *a, **k: False)
+    warnings = verify._sandbox_boundary_warnings()
+    assert any("bubblewrap не установлен" in warning for warning in warnings), warnings
+
+
 def test_doctor_probes_when_the_rules_directory_is_unreadable(tmp_path, monkeypatch):
     """Каталог правил polkit закрыт (`0750 root:polkitd`) — наличие файла не проверить.
 

@@ -165,14 +165,25 @@ def _build_executor(args: argparse.Namespace):
     # A real CLI is untrusted code: the sandbox is the trust boundary and is on
     # unless the operator explicitly turns it off.
     sandbox = True if args.sandbox is None else bool(args.sandbox)
+    executor_user = getattr(args, "executor_user", None)
     if not sandbox:
+        if executor_user and not getattr(args, "allow_unsafe_no_sandbox", False):
+            # Without the sandbox the separate user is the only boundary left,
+            # and it is not a boundary for the control plane: the executor can
+            # write the report, the journal and the state.  A warning in
+            # stderr is easy to miss in a log; a refusal is not.
+            raise FactoryError(
+                "--no-sandbox together with --executor-user leaves the control "
+                "plane without a boundary: the executor can write the journal "
+                "and close its own gates. Run with the sandbox, or pass "
+                "--allow-unsafe-no-sandbox if you know what you are doing."
+            )
         print(
             "WARNING: --no-sandbox disables the trust boundary; the executor can "
             "write state.json and close its own gates (tripwire detects it, but "
             "after the fact).",
             file=sys.stderr,
         )
-    executor_user = getattr(args, "executor_user", None)
     if args.executor == "opencode":
         from .runtime.opencode import OpenCodeExecutor
 
@@ -772,6 +783,12 @@ def add_executor_arguments(parser: argparse.ArgumentParser) -> None:
         help="run the executor without the trust boundary (debugging only)",
     )
     parser.add_argument("--sandbox-rw", action="append", help="extra path the sandboxed executor may write (repeatable)")
+    parser.add_argument(
+        "--allow-unsafe-no-sandbox",
+        action="store_true",
+        help="allow --no-sandbox together with --executor-user (the control "
+        "plane is left without a boundary; debugging only)",
+    )
     parser.add_argument(
         "--executor-user",
         nargs="?",

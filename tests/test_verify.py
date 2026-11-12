@@ -299,6 +299,15 @@ def test_doctor_says_when_the_sandbox_cannot_run(monkeypatch):
     assert any("bubblewrap не установлен" in warning for warning in warnings), warnings
 
 
+def _polkit_warnings(warnings: list[str]) -> list[str]:
+    """The warnings about passwordless root, and nothing else."""
+    return [
+        warning
+        for warning in warnings
+        if "транзиентные systemd-юниты" in warning or "root без пароля" in warning
+    ]
+
+
 def test_doctor_probes_when_the_rules_directory_is_unreadable(tmp_path, monkeypatch):
     """Каталог правил polkit закрыт (`0750 root:polkitd`) — наличие файла не проверить.
 
@@ -315,11 +324,13 @@ def test_doctor_probes_when_the_rules_directory_is_unreadable(tmp_path, monkeypa
     assert any("транзиентные systemd-юниты" in warning for warning in warnings), warnings
 
     # Root, выданный администратором машины через sudo, — не наша находка.
+    # Проверяем именно polkit-предупреждение: остальные границы (песочница,
+    # ACL корня прогона) предупреждают о своём и не молчат.
     monkeypatch.setattr(verify, "_has_passwordless_sudo", lambda: True)
-    assert not verify.doctor_report()["warnings"]
+    assert not _polkit_warnings(verify.doctor_report()["warnings"])
 
     monkeypatch.setattr(verify, "_transient_units_allowed", lambda: False)
-    assert not verify.doctor_report()["warnings"]
+    assert not _polkit_warnings(verify.doctor_report()["warnings"])
 
 
 def test_an_unreadable_rules_directory_is_not_a_crash(tmp_path, monkeypatch):

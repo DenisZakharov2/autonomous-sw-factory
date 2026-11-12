@@ -109,6 +109,13 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y bubblewrap acl policykit-1
+      - name: Let bubblewrap create a user namespace
+        run: |
+          # Ubuntu 24.04 restricts unprivileged user namespaces through
+          # AppArmor, and bubblewrap cannot start without one.  Without this the
+          # sandbox checks would skip — and a skipped boundary is an unproven
+          # boundary.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
       - name: Install the root helper
         run: |
           python -c "from pathlib import Path; from factory.runtime.root_helper import render_helper_script; Path('/tmp/factory-root-helper').write_text(render_helper_script())"

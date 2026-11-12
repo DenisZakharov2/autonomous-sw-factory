@@ -39,6 +39,7 @@ from .config import (
 from .errors import ConfigError, JournalError, RunError, VerificationError
 from .journal import (
     ARTIFACT_RECORDS,
+    in_verdict_scope,
     read_events,
     record_event,
     run_lock,
@@ -808,10 +809,7 @@ def _latest_judgement(
     for event in reversed(events):
         if event.get("event_type") not in {"VERIFY", "REWORK"}:
             continue
-        if task_id is not None:
-            if event.get("task_id") == task_id:
-                return event
-        elif event.get("stage") == stage_id and not event.get("task_id"):
+        if in_verdict_scope(event, stage_id=stage_id, task_id=task_id):
             return event
     return None
 

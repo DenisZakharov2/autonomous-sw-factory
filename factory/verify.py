@@ -391,6 +391,33 @@ def rerecord_summary(run_dir: Path) -> list[dict[str, Any]]:
     return list(grouped.values())
 
 
+def _binding_errors(
+    label: str, verdict_event: dict[str, Any], decision_event: dict[str, Any]
+) -> list[str]:
+    """A decision must rest on a verdict about the same bytes.
+
+    The `VERIFY` event records the hashes the verifier looked at, and the
+    decision records the hashes that were accepted.  If the two disagree for
+    a path, the decision was taken on bytes the verdict never saw.
+    """
+    decided = {
+        str(item.get("path")): str(item.get("sha256"))
+        for item in decision_event.get("artifacts") or []
+        if isinstance(item, dict)
+    }
+    errors: list[str] = []
+    for item in verdict_event.get("artifacts") or []:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "")
+        if path in decided and decided[path] != str(item.get("sha256") or ""):
+            errors.append(
+                f"{label}: the verdict is about older bytes; {path} changed "
+                "between the verification and the decision"
+            )
+    return errors
+
+
 def verification_policy_errors(
     state: dict[str, Any], events: list[dict[str, Any]]
 ) -> list[str]:
@@ -398,38 +425,47 @@ def verification_policy_errors(
 
     The check is journal-order, not "some VERIFY exists": a FAIL that a later
     PASS replaced is fine, but a gate approved *before* any verdict is not.
-    Historical runs have no policy and are left exactly as they were written.
+
+    The verdict also has to be *about* the work that was accepted: a decision
+    whose bytes differ from the ones the verdict judged rests on a verdict
+    about older artifacts.  Historical runs have no policy and are left exactly
+    as they were written.
     """
     if str(state.get("verification_policy") or "") != "role":
         return []
     pipeline = load_pipeline()
     approvers = {stage["id"]: str(stage["gate"]["approver"]) for stage in pipeline["stages"]}
     errors: list[str] = []
-    last_stage: dict[str, str] = {}
-    last_task: dict[str, str] = {}
+    # The newest verdict per subject.
+    verdicts: dict[tuple[str, str | None], tuple[str, dict[str, Any]]] = {}
     for event in events:
         event_type = str(event.get("event_type") or "")
         verdict = str((event.get("verdict") or {}).get("status") or "")
         stage = str(event.get("stage") or "")
         task = event.get("task_id")
         if event_type == "VERIFY":
-            if task:
-                last_task[str(task)] = verdict
-            else:
-                last_stage[stage] = verdict
+            verdicts[(stage, str(task) if task else None)] = (verdict, event)
             continue
         if event_type == "GATE_DECISION" and verdict == "PASS" and not task:
-            if approvers.get(stage, "human") != "human" and last_stage.get(stage) != "PASS":
+            if approvers.get(stage, "human") == "human":
+                continue
+            found = verdicts.get((stage, None))
+            if found is None or found[0] != "PASS":
                 errors.append(
                     f"stage {stage}: role gate approved without a preceding VERIFY PASS "
-                    f"(last verdict: {last_stage.get(stage, 'none')})"
+                    f"(last verdict: {found[0] if found else 'none'})"
                 )
+                continue
+            errors.extend(_binding_errors(f"stage {stage}", found[1], event))
         if event_type == "TASK_DONE" and task:
-            if last_task.get(str(task)) != "PASS":
+            found = verdicts.get((stage, str(task)))
+            if found is None or found[0] != "PASS":
                 errors.append(
                     f"task {task}: TASK_DONE without a preceding VERIFY PASS "
-                    f"(last verdict: {last_task.get(str(task), 'none')})"
+                    f"(last verdict: {found[0] if found else 'none'})"
                 )
+                continue
+            errors.extend(_binding_errors(f"task {task}", found[1], event))
     return errors
 
 

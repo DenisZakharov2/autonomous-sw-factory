@@ -136,6 +136,20 @@ def read_events(log_path: Path) -> list[dict[str, Any]]:
     return events
 
 
+def in_verdict_scope(
+    event: dict[str, Any], *, stage_id: str, task_id: str | None
+) -> bool:
+    """Is this event the verdict of this subject?
+
+    A stage verdict is the stage's own — a task's verdict is about that task
+    alone.  The engine and the verifier must read the scope the same way, or
+    one of them will call a verdict fresh while the other calls it stale.
+    """
+    if task_id is None:
+        return str(event.get("stage") or "") == stage_id and not event.get("task_id")
+    return str(event.get("task_id") or "") == task_id
+
+
 def _normalise_artifacts(run_dir: Path, artifacts: Iterable[str | dict[str, Any]]) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for item in artifacts:

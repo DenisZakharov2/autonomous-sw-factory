@@ -19,6 +19,7 @@ is a new verdict about the new bytes.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -36,7 +37,9 @@ from factory.engine import (
     task_submit,
 )
 from factory.errors import VerificationError
+from factory.journal import GENESIS_PREV_HASH, compute_event_hash, read_events
 from factory.state import load_state, save_state
+from factory.verify import verification_policy_errors, verify_run
 
 VERIFIER = "02-independent-verifier"
 ROLE = "12-fullstack-developer"
@@ -207,3 +210,94 @@ def test_gate_needs_the_report_to_be_handed_in(architecture_run: Path):
             "run-01", gate_id="gate_s2", approver=VERIFIER,
             evidence=["arch ok"], root=run.parent,
         )
+
+
+def test_the_verifier_sees_a_decision_that_rests_on_older_bytes():
+    """`factory verify` reads the journal, not the gate's own word."""
+    verdict_event = {
+        "event_type": "VERIFY",
+        "stage": "s4_build",
+        "task_id": None,
+        "verdict": {"status": "PASS"},
+        "artifacts": [
+            {"path": "product/src/todo.py", "sha256": "a" * 64, "bytes": 1},
+            {"path": "artifacts/verification/s4_build/verification.md", "sha256": "b" * 64, "bytes": 1},
+        ],
+    }
+    decision_event = {
+        "event_type": "GATE_DECISION",
+        "stage": "s4_build",
+        "task_id": None,
+        "verdict": {"status": "PASS"},
+        "artifacts": [
+            {"path": "product/src/todo.py", "sha256": "c" * 64, "bytes": 1},
+            {"path": "artifacts/verification/s4_build/verification.md", "sha256": "b" * 64, "bytes": 1},
+        ],
+    }
+    errors = verification_policy_errors(
+        {"verification_policy": "role"}, [verdict_event, decision_event]
+    )
+    assert any("about older bytes" in error for error in errors), errors
+
+
+def test_the_verifier_accepts_a_decision_that_agrees_with_the_verdict():
+    """The same bytes on both sides is what a clean run looks like."""
+    verdict_event = {
+        "event_type": "VERIFY",
+        "stage": "s4_build",
+        "task_id": None,
+        "verdict": {"status": "PASS"},
+        "artifacts": [{"path": "product/src/todo.py", "sha256": "a" * 64, "bytes": 1}],
+    }
+    decision_event = {
+        "event_type": "GATE_DECISION",
+        "stage": "s4_build",
+        "task_id": None,
+        "verdict": {"status": "PASS"},
+        "artifacts": [{"path": "product/src/todo.py", "sha256": "a" * 64, "bytes": 1}],
+    }
+    assert verification_policy_errors(
+        {"verification_policy": "role"}, [verdict_event, decision_event]
+    ) == []
+
+
+def _rechain(run: Path, events: list[dict]) -> None:
+    """Rewrite the journal as a valid chain, so only the content is wrong."""
+    previous = GENESIS_PREV_HASH
+    lines = []
+    for event in events:
+        payload = {key: value for key, value in event.items() if key != "hash"}
+        payload["prev_hash"] = previous
+        event["prev_hash"] = previous
+        event["hash"] = compute_event_hash(previous, payload)
+        previous = event["hash"]
+        lines.append(json.dumps(event, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    (run / "blackbox.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    state = load_state(run)
+    state["last_event_hash"] = previous
+    state["event_count"] = len(events)
+    save_state(run, state)
+
+
+def test_verify_reports_a_journal_whose_verdict_was_about_older_bytes(build_run: Path):
+    """A run made by a vulnerable factory is still auditable."""
+    run = build_run
+    _submit_task(run, "TASKS = []\n")
+    write_task_verification(run, "TASK-001", verdict="PASS")
+    task_accept("run-01", "TASK-001", root=run.parent)
+    write_stage_verification(run, "s4_build", verdict="PASS")
+    assert verify_run(run, "s4_build") == []
+
+    # The verdict is rewritten to describe the bytes from before the change,
+    # and the chain is rebuilt so the journal is internally consistent.
+    events = read_events(run / "blackbox.jsonl")
+    for event in events:
+        if event["event_type"] != "VERIFY":
+            continue
+        for item in event.get("artifacts") or []:
+            if item.get("path") == "product/src/todo.py":
+                item["sha256"] = "0" * 64
+    _rechain(run, events)
+
+    errors = verify_run(run, "s4_build")
+    assert any("about older bytes" in error for error in errors), errors

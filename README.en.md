@@ -26,7 +26,7 @@ If you've ever started a project and got lost — what to do next, how not to mi
 2. **Get the first work order** — the Factory says: "Now it's the interview stage, fill out these two templates"
 3. **Fill the templates** — answer questions in plain language, no jargon
 4. **Submit for review** — an independent verifier checks completeness and gives PASS or FAIL
-5. **Close the gate** — a human (you or the customer) confirms: "Yes, accepted, let's continue"
+5. **Make the decision** — a human (you or the customer) confirms: "Yes, accepted, let's continue"
 6. **Repeat for all stages** — through release and documentation
 
 At any point you can stop, check status, see where you're stuck, and continue tomorrow or next week — nothing gets lost.
@@ -47,10 +47,10 @@ At any point you can stop, check status, see where you're stuck, and continue to
 
 ## What the Factory does NOT do (important to know upfront)
 
-- **Does not write code fully autonomously** — it prepares documents, checks, and options, but you make the decision at every gate. The result won't need double-checking, but it won't appear without you either.
+- **Does not write code fully autonomously** — it does not write the code for you. At every stage it prepares the documents, the checks and the options, and you make the decision. The checks are already part of the process, so you do not have to re-check every document by hand; but the work does not happen without your decisions.
 - **Does not replace Jira, Linear, or task trackers** — that's a different tool level.
-- **Does not guarantee the model won't make mistakes** — the verifier catches obvious gaps, but doesn't vouch for the model's intelligence.
-- **Does not auto-merge to main without a human** — release is always behind a human gate.
+- **Does not guarantee the model won't make mistakes** — the verifier finds obvious gaps and contradictions, but it cannot judge whether the decision is right in substance: it is a model too. A mistake both of them miss goes unnoticed.
+- **Does not auto-merge to main without a human** — a release requires your explicit decision: `factory gate approve --approver human:your-name`.
 - **Does not work with non-git folders in brownfield mode** — for those cases use `standard` and back up manually.
 
 ---
@@ -71,9 +71,9 @@ Start with `nano` — it's the simplest way to see how it all works on a live ex
 ## What's inside (brief)
 
 - **22 role cards** — each knows its purpose, inputs, procedure, outputs, DoD, vetoes, escalation
-- **13 stages** — from intake (`s_in` / `s00_intake`) to lessons (`s9_learn`) with explicit gates
+- **13 stages** — from intake (`s_in` / `s00_intake`) to lessons (`s9_learn`); each one needs your decision
 - **Python engine** — `init`, `next`, `submit`, `gate`, `verify`, `task`, `quarantine`, `trace`, `metrics`, `usage`, `doctor`
-- **`factory run` runtime** — loop: order → executor → verify → submit → gate. Executors: `fake` (for tests), `hermes`, `opencode`. Real CLIs run in `bwrap` sandbox
+- **`factory run` runtime** — loop: order → executor → verify → submit → your decision. Executors: `fake` (for tests), `hermes`, `opencode`. Real CLIs run in `bwrap` sandbox
 - **Signed checkpoints** — `factory sign` places HMAC checkpoint outside run folder; history tampering is detected
 - **Eval set & comparison** — `factory eval` runs 6 reference cases, checks against baseline; `factory compare` shows delta of two runs
 - **Hash-chained journal** — SHA-256, protects against accidental edits and naive tampering
@@ -81,9 +81,9 @@ Start with `nano` — it's the simplest way to see how it all works on a live ex
 - **Skill quarantine** — SkillSpector with fail-closed and hash lock before installing third-party skills
 - **Run dashboard** — `factory ui`: local read-only console, 9 panels, free grid, CSV/`.xlsx` export, run comparison
 - **39 templates and 13 JSON schemas** — templates never pre-fill PASS
-- **Reference run** — `examples/nano-todo/`: 49 events, 2 tasks, 3 requirements with tests, all gates passed, product runs
+- **Reference run** — `examples/nano-todo/`: 49 events, 2 tasks, 3 requirements with tests, every stage accepted, product runs
 
-Numbers: 4 modes (all 4 exercised on real runs), 6 reference cases, 398 tests, CI on Ubuntu, macOS, Windows (Python 3.10–3.13).
+Numbers: 4 modes (all 4 exercised on real runs), 6 reference cases, 464 tests, CI on Ubuntu, macOS, Windows (Python 3.10–3.13).
 
 ![Run screen with stages and gates](docs/screenshots/run-screen.png)
 ![Compare runs — time-series panel](docs/screenshots/compare-timeseries.png)
@@ -126,7 +126,7 @@ factory submit --run-id demo-01 --stage s00_intake \
   --artifact artifacts/GLOSSARY.md
 factory verify --run-id demo-01 --stage s00_intake
 
-# 4. Close the human gate
+# 4. Make the decision for the stage
 factory gate approve --run-id demo-01 --gate gate_s00 \
   --approver human:your-name --evidence "brief accepted"
 
@@ -134,7 +134,7 @@ factory gate approve --run-id demo-01 --gate gate_s00 \
 factory run --run-id demo-01 --executor fake --max-steps 60
 ```
 
-`factory next` prints the work order: stage, role, which documents to submit, who reviews them, and which command closes the stage. A human or executor fills templates, submits them, the verifier returns a verdict. `factory run` does the same in a loop and stops at a human gate with exit code `2`, printing the exact command for the human.
+`factory next` prints the work order: stage, role, which documents to submit, who reviews them, and which command closes the stage. A human or executor fills templates, submits them, the verifier returns a verdict. `factory run` does the same in a loop and stops where a human has to decide (exit code `2`), printing the exact command.
 
 Check the reference run without a model:
 
@@ -160,7 +160,7 @@ Expected: `VERIFY OK`. The reference run has 49 events, 2 tasks, 3 requirements 
 | `factory submit --run-id ID --stage S --role R --artifact P` | Submit producer artifacts |
 | `factory verify --run-id ID [--stage S] [--require-gate]` | Deterministic verification |
 | `factory sign --run-id ID --key-file KEY` | Sign journal head with HMAC checkpoint outside `runs/` |
-| `factory gate approve\|reject\|accept-risk --gate G --approver human:ID` | Gate decision; `accept-risk` closes escalation with recorded risk |
+| `factory gate approve\|reject\|accept-risk --gate G --approver human:ID` | Decision for the stage: accept, reject, or accept a recorded risk |
 | `factory trace --run-id ID` | `REQ → task → test → acceptance` matrix |
 | `factory metrics --run-id ID [--write]` | Eight run health metrics |
 | `factory eval --cases eval/cases [--executor fake] [--json]` | Run eval cases, check invariants and baseline |
@@ -216,7 +216,7 @@ Lock stores directory hash, pack, commit, license, scanner version, verdict. `fa
 - `Brownfield` supports git repositories only. For a folder without git, use `standard` and back up manually.
 - `s4_build` imports tasks from `plan.md` Markdown table; arbitrary plan formats are not parsed.
 - `examples/nano-todo` is a deterministic reference run, not proof of model autonomy.
-- `factory run` executes one step per executor call and stops at a human gate.
+- `factory run` executes one step per executor call and stops where a human has to decide.
 - The hash chain is not signed; signing is a separate `factory sign` command, no auto-signing in `factory run`.
 - Token/time/money budgets are **guardrails**, not measured cost. `enterprise` is a calculated budget, never measured on real Hermes.
 - `factory metrics` returns `cost_per_artifact_usd: null` until the runtime writes tokens and price. Don't quote an estimate as fact.
@@ -232,7 +232,7 @@ factory doctor
 python examples/build_nano_todo.py
 ```
 
-CI: Python 3.10–3.13, `doctor`, `pytest`, example check, package build.
+CI: Python 3.10–3.13, `doctor`, `pytest`, example check, package build. A separate job checks the executor boundary on a real machine: real `bwrap`, POSIX ACL and a separate uid.
 
 ---
 

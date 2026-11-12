@@ -60,6 +60,7 @@ from .state import (
     new_state,
     reject_task,
     save_state,
+    set_current_stage,
     stage_gate,
     submit_task,
 )
@@ -454,8 +455,9 @@ def _write_verification(run_dir: Path, task: dict[str, Any]) -> Path:
         "## 1. Артефакты\n\n"
         f"{artifacts}\n\n"
         "## 2. Вердикт\n\n"
-        "PASS: `02-independent-verifier` принял задачу; факт и хеши зафиксированы "
-        "событием `TASK_DONE` в `blackbox.jsonl`.\n",
+        "PASS: принято без независимого верификатора — прогон без "
+        "`verification_policy`. Это не проверка верификатора, и событие "
+        "`TASK_DONE` в `blackbox.jsonl` говорит ровно это.\n",
     )
     return path
 
@@ -584,7 +586,12 @@ def _record_verification_locked(
         raise VerificationError(
             "verification report is not valid:\n- " + "\n- ".join(errors[:6])
         )
-    assert verdict is not None
+    if verdict is None:
+        # `python -O` drops asserts, and the verdict would reach the journal
+        # as `None`: a fail-open by accident instead of by design.
+        raise VerificationError(
+            "the verification report states no verdict; it cannot be recorded"
+        )
     relative = _relative(run_dir, path)
     digest = sha256_file(path)
     events = read_events(run_dir / "blackbox.jsonl")
@@ -1704,7 +1711,7 @@ def gate_approve(
             state["human_spec_approved"] = True
         if stage["id"] == "s_in":
             state["restore_drill_passed"] = True
-        current_stage(state, pipeline)
+        set_current_stage(state, pipeline)
         model = _model_for("00-orchestrator" if approver.startswith("human:") else approver, "tier-3-frontier")
         role = "00-orchestrator" if approver.startswith("human:") else approver
         event = record_event(
@@ -1793,7 +1800,7 @@ def gate_reject(
                 # `in_progress` (gate_record); its tasks go back to `pending`.
                 _reopen_stage_tasks(state, stage["id"])
             summary = f"Gate {gate_id} rejected by {approver}; rework returned to {stage['rework_to']}"
-        current_stage(state, pipeline)
+        set_current_stage(state, pipeline)
         model = _model_for("00-orchestrator" if approver.startswith("human:") else approver)
         role = "00-orchestrator" if approver.startswith("human:") else approver
         event = record_event(
@@ -1867,7 +1874,7 @@ def accept_risk(
             state["restore_drill_passed"] = True
         if stage["id"] == "s1_spec":
             state["human_spec_approved"] = True
-        current_stage(state, pipeline)
+        set_current_stage(state, pipeline)
         model = _model_for("00-orchestrator", "tier-3-frontier")
         event = record_event(
             run_dir,
@@ -1935,7 +1942,7 @@ def stage_reset(
                 task["status"] = "pending"
                 task["attempts"] = 0
                 task["lease"] = None
-        current_stage(state, pipeline)
+        set_current_stage(state, pipeline)
         model = _model_for("00-orchestrator", "tier-3-frontier")
         event = record_event(
             run_dir,
@@ -2064,7 +2071,7 @@ def veto(
             gate = stage_gate(state, stage)
             gate["status"] = "pending"
             action = f"Veto {code} by {role}: stage reopened for rework"
-        current_stage(state, pipeline)
+        set_current_stage(state, pipeline)
         model = _model_for(role)
         event = record_event(
             run_dir,
@@ -2214,8 +2221,11 @@ def import_plan(run_id: str, *, root: str | Path | None = None) -> list[dict[str
         state = load_state(run_dir)
         prepared = _prepare_plan(run_dir, state)
         created = _import_plan_state(run_dir, state, prepared)
-        if created:
-            save_state(run_dir, state)
+        # The state is saved even when no task was added: the plan may have
+        # changed the owner, the requirements or the allowed files of a task
+        # that already existed.  Losing those changes would leave the
+        # producer working against a plan nobody agreed to.
+        save_state(run_dir, state)
         return created
 
 
@@ -2324,6 +2334,15 @@ def task_reject(run_id: str, task_id: str, reason: str, *, root: str | Path | No
         state = load_state(run_dir)
         registry = load_artifacts(state["mode"])
         _require_current(state, pipeline, find_stage(pipeline, "s4_build"))
+        task = get_task(state, task_id)
+        # A task that was never submitted, or already accepted, is not
+        # something to reject: the transition would be a state the machine
+        # never meant to allow.
+        if task["status"] not in {"review", "in_progress"}:
+            raise RunError(
+                f"task {task_id} is {task['status']}; only a task in review or "
+                "in progress can be rejected"
+            )
         witness: list[dict[str, Any]] = []
         if verification_policy(state) == "role":
             report_path, report_errors, verdict, _report_reason = verification_report(

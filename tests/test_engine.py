@@ -178,6 +178,55 @@ def test_task_reject_records_reason(nano_run):
     json.dumps(task)  # the state schema accepts the recorded reason list
 
 
+def test_an_accepted_task_cannot_be_rejected(nano_run):
+    """The transition was never meant to exist: accepted is a final state."""
+    run, _, _ = nano_run
+    _plan_run(run)
+    _advance_to(run, "s4_build")
+    _file(run, "product/src/todo.py")
+    task_claim("run-01", "TASK-001", "12-fullstack-developer", root=run.parent)
+    task_submit("run-01", "TASK-001", "12-fullstack-developer", ["product/src/todo.py"],
+                root=run.parent)
+    state = load_state(run)
+    state["tasks"]["TASK-001"]["status"] = "accepted"
+    save_state(run, state)
+    with pytest.raises(RunError, match="only a task in review"):
+        task_reject("run-01", "TASK-001", "too late", root=run.parent)
+
+
+def test_the_plan_update_of_an_existing_task_is_kept(nano_run):
+    """Re-importing a changed plan must not be silently dropped."""
+    run, _, _ = nano_run
+    _plan_run(run)
+    _advance_to(run, "s4_build")
+    changed = PLAN.replace("REQ-001", "REQ-001, REQ-002")
+    (run / "artifacts" / "plan.md").write_text(changed, encoding="utf-8")
+    import_plan(run.name, root=run.parent)
+    task = get_task(load_state(run), "TASK-001")
+    assert "REQ-002" in task["reqs"]
+
+
+def test_the_verifier_notices_a_stale_current_stage(nano_run):
+    """`state.current_stage` must match the pipeline; the check has to be able to fire."""
+    from factory.verify import verify_run
+
+    run, _, _ = nano_run
+    state = load_state(run)
+    state["current_stage"] = "s9_learn"
+    save_state(run, state)
+    errors = verify_run(run)
+    assert any("current_stage" in error for error in errors), errors
+
+
+def test_the_evidence_names_the_journal_head(nano_run):
+    """The gate approver reads this line to cross-check the bundle against the journal."""
+    from factory.runtime.evidence import EvidenceStore
+
+    run, _, _ = nano_run
+    evidence = EvidenceStore(run).gate_evidence({"stage": "s00_intake"})
+    assert any("head None" not in line for line in evidence), evidence
+
+
 def test_gate_reject_returns_to_rework_stage(nano_run):
     run, _, _ = nano_run
     state = load_state(run)

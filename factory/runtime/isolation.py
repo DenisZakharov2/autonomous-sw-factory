@@ -20,9 +20,11 @@ polkit-правило на себя, записать один env-файл в `
 1. **DAC (uid).**  Процесс исполнителя работает под чужим uid: файлы
    пользователя с правами 0600/0700 (`~/.ssh`, `~/.gnupg`, приватные конфиги)
    для него закрыты ядром.  Доступ открывается точечно через POSIX ACL:
-   traverse (`--x`) на цепочке каталогов и `rwX` + default-ACL на дерево
-   прогона и на `~/.hermes/{cache,logs,installs}` — единственные каталоги
-   домашней директории, которые CLI реально нужны на запись.
+   traverse (`--x`) на цепочке каталогов и `rwX` + default-ACL на рабочие
+   каталоги прогона и на `~/.hermes/{cache,logs,installs}` — единственные
+   каталоги, которые CLI реально нужны на запись.  Корень прогона в грант
+   не входит: права на каталог — это права удалить и заменить его
+   содержимое, а в корне лежит control plane.
 2. **bwrap (прочитанное пространство).**  В режиме отдельного пользователя
    профиль песочницы уже не монтирует `/` read-only, а собирает пространство
    из явных привязок: системные каталоги ro, каталог прогона rw, control
@@ -65,6 +67,10 @@ HELPER_PATH = Path("/usr/local/libexec/factory-root-helper")
 POLKIT_RULE = POLKIT_RULE_TEMPLATE
 
 _HOME_GRANTS = ("cache", "logs", "installs")
+# Каталоги прогона, в которые исполнитель пишет.  Корень прогона сюда не
+# входит намеренно: в корне лежит control plane, а права на каталог — это
+# права удалить и заменить его содержимое.
+EXECUTOR_WRITE_DIRS = ("artifacts", "tasks", "product", "runtime/agent")
 _UNIT_SAFE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 USER_NAME_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 
@@ -193,29 +199,44 @@ def ensure_traverse(user: str, path: Path) -> None:
 
 
 def grant_run_tree(user: str, run_dir: Path) -> None:
-    """Рекурсивный rwX-грант на дерево прогона + default-ACL для новых файлов.
+    """Грант исполнителю на рабочие каталоги прогона.
 
-    Файлы, уже принадлежащие исполнителю (повторный прогон), пропускаются:
-    доступ у него к ним есть по владению.  Control plane (`state.json`,
-    журнал) из гранта исключён: исполнитель не должен в него писать даже
-    без `bwrap`.  Тонкая граница `ro`-биндов внутри песочницы остаётся
-    основной (см. docs/runtime.md §6).
+    Ключевое отличие от прежней схемы: **корень прогона исполнителю не
+    отдаётся**. Права на каталог — это права на удаление и замену его
+    содержимого, а в корне лежит control plane (`state.json`, журнал,
+    `checkpoint.json`). Отзыв доступа по самим файлам тут не помогает:
+    `unlink` и `rename` смотрят на права каталога, а не файла.
+
+    Грант идёт по рабочим каталогам, и default-ACL ставится на них, а не на
+    корень. Иначе атомарная запись движка (новый inode `state.json` или
+    журнала) наследует права исполнителя, и отзыв перестаёт работать ровно
+    тогда, когда он нужен.
+
+    Тонкая граница `ro`-биндов внутри песочницы остаётся основной
+    (см. docs/runtime.md §6).
     """
     ensure_traverse(user, run_dir)
-    completed = _run(
-        ["setfacl", "-R", "-m", f"u:{user}:rwX", "-m", "m::rwX", str(run_dir)]
-    )
-    if completed.returncode != 0:
-        lines = [
-            line
-            for line in (completed.stderr or "").splitlines()
-            if "Operation not permitted" not in line
-        ]
-        if lines:
-            raise ExecutorUserError(
-                f"не удалось выдать грант на {run_dir}: {'; '.join(lines[:3])}"
-            )
-    _setfacl(["-d", "-m", f"u:{user}:rwX", "-d", "-m", "m::rwX", str(run_dir)])
+    for relative in EXECUTOR_WRITE_DIRS:
+        target = run_dir / relative
+        if not target.is_dir():
+            continue
+        completed = _run(
+            ["setfacl", "-R", "-m", f"u:{user}:rwX", "-m", "m::rwX", str(target)]
+        )
+        if completed.returncode != 0:
+            lines = [
+                line
+                for line in (completed.stderr or "").splitlines()
+                if "Operation not permitted" not in line
+            ]
+            if lines:
+                raise ExecutorUserError(
+                    f"не удалось выдать грант на {target}: {'; '.join(lines[:3])}"
+                )
+        # Каталоги, которые движок создаст позже (каталог отчёта стадии,
+        # каталог задачи), должны оставаться доступными исполнителю: без
+        # default-ACL новый каталог будет его, и запись в него не пройдёт.
+        _setfacl(["-d", "-m", f"u:{user}:rwX", "-d", "-m", "m::rwX", str(target)])
     _revoke_control_plane(user, run_dir)
 
 

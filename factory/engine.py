@@ -916,7 +916,8 @@ def init_run(
     target.mkdir(parents=True, exist_ok=True)
     for sub in [
         "backups", "artifacts", "artifacts/adr", "artifacts/screens", "artifacts/patches",
-        "tasks", "product/src", "product/docs", "product/tests", "product/migrations",
+        "artifacts/verification", "tasks", "product/src", "product/docs", "product/tests",
+        "product/migrations",
     ]:
         (target / sub).mkdir(parents=True, exist_ok=True)
     if idea:
@@ -1124,12 +1125,13 @@ def _stage_work_order(
             )
             next_command = f"factory verify --run-id {run_id} --stage {stage['id']}"
             pending = _pending_artifacts(run_dir, state, stage, pipeline, registry)
-            if not any(item["id"] in VERIFICATION_IDS for item in pending):
-                # The offender is a producer artifact; the witness stays out of
-                # the repair's write scope.
-                artifacts = [
-                    spec for spec in artifacts if spec.get("id") not in VERIFICATION_IDS
-                ]
+            # The offender is a producer artifact; the witness stays out of
+            # the repair's write scope — always, and not only when the report
+            # happens to be valid.  A producer that may write the report may
+            # write the verdict.
+            artifacts = [
+                spec for spec in artifacts if spec.get("id") not in VERIFICATION_IDS
+            ]
         elif declares_witness and (
             report_errors
             or not _report_is_current(
@@ -2172,6 +2174,11 @@ def _import_plan_state(
     created: list[dict[str, Any]] = []
     for task in parsed:
         existing = state["tasks"].get(task["task_id"])
+        # The report directory exists from the start: a directory the
+        # sandbox cannot protect is a directory the producer may fill.
+        (run_dir / "tasks" / str(task["task_id"]) / "verification").mkdir(
+            parents=True, exist_ok=True
+        )
         if existing is None:
             add_task(state, task)
             created.append(task)

@@ -115,6 +115,39 @@ def test_declared_artifact_directory_is_writable(run):
 
 
 @SANDBOX
+def test_executor_cannot_write_the_verifiers_report(run):
+    """A witness the producer wrote is not a witness."""
+    (run / "artifacts" / "verification" / "s4_build").mkdir(parents=True, exist_ok=True)
+    (run / "tasks" / "TASK-001" / "verification").mkdir(parents=True, exist_ok=True)
+    writable = _writable(run)
+    targets = (
+        "artifacts/verification/s4_build/verification.md",
+        "tasks/TASK-001/verification/verification.md",
+    )
+    for target in targets:
+        proc = _sandboxed(
+            run, writable,
+            ["sh", "-c", f"printf 'PASS: forged\\n' > {run / target}"],
+        )
+        assert proc.returncode != 0, f"{target} was writable inside the sandbox"
+        assert not (run / target).exists()
+
+
+@SANDBOX
+def test_the_verifier_can_write_its_report(run):
+    """The protection must not reach the role that has to write the report."""
+    report_dir = run / "artifacts" / "verification" / "s4_build"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    proc = _sandboxed(
+        run,
+        [str(report_dir)],
+        ["sh", "-c", f"printf 'PASS: written\\n' > {report_dir / 'verification.md'}"],
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert (report_dir / "verification.md").read_text() == "PASS: written\n"
+
+
+@SANDBOX
 def test_run_root_is_writable_but_the_control_plane_is_not(run):
     """The root artifacts (skills-lock.json) need directory write to be replaced atomically."""
     writable = _writable(run)

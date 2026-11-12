@@ -50,6 +50,10 @@ CONTROL_PLANE_FILES = (
     "runtime/usage.jsonl",
 )
 CONTROL_PLANE_DIRS = ("runtime/evidence", "checks")
+# The directories that hold the verifier's reports.  A producer may write next
+# to them, never into them: the report is the witness, and a witness the
+# producer wrote is not a witness.
+VERIFICATION_DIRS = ("artifacts/verification",)
 # The `factory/` package itself; binding its repository root would let an
 # executor rewrite the code that judges it.
 PACKAGE_DIR = Path(__file__).resolve().parents[1]
@@ -94,6 +98,27 @@ def _forbidden(run: Path, path: Path) -> bool:
         if resolved_path == protected or protected in resolved_path.parents or resolved_path in protected.parents:
             return True
     return False
+
+
+def verification_dirs(run: Path) -> list[Path]:
+    """The report directories of this run: the stage reports and the task ones.
+
+    They are protected by mounting them read-only on top of the writable run
+    root — but only for an executor that was not given a path inside them.
+    The verifier is given exactly that path, and must be able to write.
+    """
+    found: list[Path] = []
+    for relative in VERIFICATION_DIRS:
+        candidate = run / relative
+        if candidate.is_dir():
+            found.append(candidate.resolve())
+    tasks = run / "tasks"
+    if tasks.is_dir():
+        for task in sorted(tasks.iterdir()):
+            candidate = task / "verification"
+            if candidate.is_dir():
+                found.append(candidate.resolve())
+    return found
 
 
 def sandbox_command(
@@ -173,6 +198,7 @@ def sandbox_command(
             args.extend(["--ro-bind", str(protected_dir), str(protected_dir)])
     args.extend(["--chdir", str(run)])
     seen: set[str] = set()
+    bound: list[Path] = []
     bound_dirs: list[Path] = [run]
     for item in read_write:
         path = Path(item).expanduser()
@@ -192,9 +218,17 @@ def sandbox_command(
             # writable, so the file needs no separate bind.
             continue
         seen.add(str(path))
+        bound.append(path)
         args.extend(["--bind", str(path), str(path)])
         if path.is_dir():
             bound_dirs.append(path)
+    # The verifier's reports are mounted read-only on top of the writable run
+    # root: later mounts win.  An executor that was given a path inside one of
+    # them is the verifier itself and keeps its write access.
+    for protected in verification_dirs(run):
+        if any(protected == path or protected in path.parents for path in bound):
+            continue
+        args.extend(["--ro-bind", str(protected), str(protected)])
     args.append("--")
     args.extend(command)
     if executor_user:

@@ -2,13 +2,13 @@
 
 [![CI](https://github.com/DenisZakharov2/autonomous-sw-factory/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/DenisZakharov2/autonomous-sw-factory/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.12-blue.svg)](https://github.com/DenisZakharov2/autonomous-sw-factory/releases/tag/v1.0.12)
+[![Version](https://img.shields.io/badge/version-1.0.13-blue.svg)](https://github.com/DenisZakharov2/autonomous-sw-factory/releases/tag/v1.0.13)
 
 [English README](README.en.md) · [Лицензия](LICENSE) · [Пример прогона](examples/nano-todo/) · [Техническая документация](TECHNICAL.md) · [Быстрый старт](docs/quickstart.md)
 
 ---
 
-**Версия 1.0.12.**
+**Версия 1.0.13.**
 
 ## Что это такое простыми словами
 

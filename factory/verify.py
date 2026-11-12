@@ -663,6 +663,51 @@ def _executor_boundary_warnings() -> list[str]:
     ]
 
 
+def _sandbox_boundary_warnings() -> list[str]:
+    """Песочница — основная граница исполнителя; без неё её нет.
+
+    Отдельный uid — вторая граница, а не первая: он закрывает файлы
+    оператора с правами `0600`, но не закрывает control plane.  Если
+    `bwrap` не установлен или не может создать user namespace, агент
+    выполняется с правами оператора, и граница исполнителя держится на
+    одном tripwire.
+    """
+    from .runtime.sandbox import sandbox_available
+
+    if not sandbox_available():
+        return [
+            (
+                "bubblewrap не установлен: песочница — основная граница исполнителя, "
+                "и без неё агент выполняется с правами оператора. Установите пакет "
+                "bubblewrap."
+            )
+        ]
+    try:
+        completed = subprocess.run(
+            ["bwrap", "--ro-bind", "/", "/", "--", "true"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return [
+            (
+                "bubblewrap установлен, но не запускается: песочница не работает, "
+                "и агент выполняется с правами оператора."
+            )
+        ]
+    if completed.returncode != 0:
+        return [
+            (
+                "bubblewrap не может создать user namespace: песочница не работает, "
+                "и агент выполняется с правами оператора. Проверьте "
+                "unprivileged_userns_clone и user.max_user_namespaces."
+            )
+        ]
+    return []
+
+
 def _run_root_acl_warnings() -> list[str]:
     """Корень прогона: там лежит control plane, и права на каталог — это
     права удалить его содержимое.
@@ -732,6 +777,7 @@ def doctor_report() -> dict[str, Any]:
         errors.extend(validate_cases(cases_dir))
     errors.extend(_executor_boundary_errors())
     warnings = list(_executor_boundary_warnings())
+    warnings.extend(_sandbox_boundary_warnings())
     warnings.extend(_run_root_acl_warnings())
     return {
         "roles": len(roles),

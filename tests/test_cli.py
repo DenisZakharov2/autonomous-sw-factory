@@ -298,6 +298,26 @@ def test_run_refuses_to_create_a_missing_run_with_no_init(tmp_path):
     assert not (runs / "ghost").exists()
 
 
+def test_no_sandbox_with_an_executor_user_needs_an_explicit_flag(tmp_path):
+    """Without the sandbox the separate user is not a boundary for the control plane."""
+    runs = tmp_path / "runs"
+    result = cli(
+        "run", "--run-id", "live", "--executor", "hermes",
+        "--no-sandbox", "--executor-user", "factory-executor",
+        runs_root=runs,
+    )
+    assert result.returncode == 1
+    assert "--allow-unsafe-no-sandbox" in result.stderr
+
+    allowed = cli(
+        "run", "--run-id", "live", "--executor", "hermes",
+        "--no-sandbox", "--executor-user", "factory-executor",
+        "--allow-unsafe-no-sandbox",
+        runs_root=runs,
+    )
+    assert "allow-unsafe-no-sandbox" not in allowed.stderr
+
+
 def test_run_json_reports_the_stop_reason(tmp_path):
     runs = tmp_path / "runs"
     result = cli(

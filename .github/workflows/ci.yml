@@ -14,6 +14,11 @@ jobs:
     # the reference run stay on Linux: they use bwrap and POSIX process
     # semantics, and this job is about installability, not the sandbox.
     runs-on: ${{ matrix.os }}
+    # The macOS runners are the slowest and the least reliable: a job that
+    # hangs there is cancelled by GitHub, and a cancelled job uploads no logs.
+    # The per-test timeout inside pytest is what actually pinpoints a hang;
+    # this is only the outer net.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -35,7 +40,10 @@ jobs:
       - name: Doctor
         run: factory doctor
       - name: Tests
-        run: pytest -q
+        # A test that hangs must fail with its own traceback instead of taking
+        # the job down: a job cancelled by GitHub uploads no logs, and the
+        # run that hangs on a loaded machine tells nobody where it hung.
+        run: pytest -q --timeout=180
 
   eval:
     runs-on: ubuntu-latest
@@ -135,7 +143,7 @@ jobs:
       - name: The boundary, on the real machine
         run: |
           set -o pipefail
-          pytest -q tests/test_runtime_trust_boundary.py -rs | tee /tmp/boundary.txt
+          pytest -q --timeout=180 tests/test_runtime_trust_boundary.py -rs | tee /tmp/boundary.txt
       - name: What did not run
         run: |
           {
@@ -144,7 +152,7 @@ jobs:
             grep -E "^SKIPPED" /tmp/boundary.txt || echo "- every boundary check ran"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: The whole suite
-        run: pytest -q
+        run: pytest -q --timeout=180
 
   build:
     runs-on: ubuntu-latest

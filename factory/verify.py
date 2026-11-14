@@ -582,7 +582,7 @@ def _transient_units_allowed() -> bool:
             ],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=10,
             check=False,
         )
     except (OSError, subprocess.SubprocessError):

@@ -1,6 +1,7 @@
 """Configuration loading and validation."""
 from __future__ import annotations
 
+import copy
 import json
 import os
 from collections import OrderedDict
@@ -49,25 +50,60 @@ def project_root() -> Path:
     return candidate
 
 
+def _file_key(path: Path) -> tuple[str, int, int]:
+    """The identity of a file's content: its path, mtime and size."""
+    try:
+        stat = path.stat()
+    except OSError as exc:
+        raise ConfigError(f"cannot read config file {path}: {exc}") from exc
+    return (str(path), stat.st_mtime_ns, stat.st_size)
+
+
+# The router asks for the pipeline and the artifact registry on every order,
+# and each call used to re-parse the YAML and re-validate it against the
+# schema.  On a full run that was hundreds of parses — most of the suite's
+# runtime, and the reason a loaded CI runner could cross the job timeout.
+# The cache is keyed by the file's identity, so a changed file is read again;
+# only successful loads are cached.
+_YAML_CACHE: "OrderedDict[tuple[str, int, int], dict[str, Any]]" = OrderedDict()
+_JSON_CACHE: "OrderedDict[tuple[str, int, int], Any]" = OrderedDict()
+_CONFIG_CACHE_LIMIT = 32
+
+
 def _read_yaml(path: Path) -> dict[str, Any]:
     if not path.exists():
         raise ConfigError(f"missing config file: {path}")
+    key = _file_key(path)
+    cached = _YAML_CACHE.get(key)
+    if cached is not None:
+        return copy.deepcopy(cached)
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:
         raise ConfigError(f"invalid YAML in {path}: {exc}") from exc
     if not isinstance(data, dict):
         raise ConfigError(f"{path} must contain a mapping")
+    _YAML_CACHE[key] = copy.deepcopy(data)
+    while len(_YAML_CACHE) > _CONFIG_CACHE_LIMIT:
+        _YAML_CACHE.popitem(last=False)
     return data
 
 
 def load_json(path: Path) -> Any:
+    key = _file_key(path)
+    cached = _JSON_CACHE.get(key)
+    if cached is not None:
+        return copy.deepcopy(cached)
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise ConfigError(f"missing file: {path}") from exc
     except json.JSONDecodeError as exc:
         raise ConfigError(f"invalid JSON in {path}: {exc}") from exc
+    _JSON_CACHE[key] = copy.deepcopy(data)
+    while len(_JSON_CACHE) > _CONFIG_CACHE_LIMIT:
+        _JSON_CACHE.popitem(last=False)
+    return data
 
 
 def validate_instance(instance: Any, schema: dict[str, Any], label: str) -> None:
@@ -85,14 +121,35 @@ def validate_against_schema(instance: Any, schema_name: str, label: str) -> None
     validate_instance(instance, schema, label)
 
 
+# The validated pipeline and the validated artifact registry, keyed by the
+# file's identity and the mode.
+_PIPELINE_CACHE: "OrderedDict[tuple[str, int, int], dict[str, Any]]" = OrderedDict()
+_ARTIFACTS_CACHE: "OrderedDict[tuple[tuple[str, int, int], str | None], dict[str, Any]]" = (
+    OrderedDict()
+)
+
+
 def load_pipeline() -> dict[str, Any]:
-    data = _read_yaml(PACKAGE_ROOT / "pipeline.yaml")
+    path = PACKAGE_ROOT / "pipeline.yaml"
+    key = _file_key(path)
+    cached = _PIPELINE_CACHE.get(key)
+    if cached is not None:
+        return copy.deepcopy(cached)
+    data = _read_yaml(path)
     validate_against_schema(data, "pipeline.schema.json", "factory/pipeline.yaml")
+    _PIPELINE_CACHE[key] = copy.deepcopy(data)
+    while len(_PIPELINE_CACHE) > _CONFIG_CACHE_LIMIT:
+        _PIPELINE_CACHE.popitem(last=False)
     return data
 
 
 def load_artifacts(mode: str | None = None) -> dict[str, Any]:
-    data = _read_yaml(PACKAGE_ROOT / "artifacts.yaml")
+    path = PACKAGE_ROOT / "artifacts.yaml"
+    key = (_file_key(path), mode)
+    cached = _ARTIFACTS_CACHE.get(key)
+    if cached is not None:
+        return copy.deepcopy(cached)
+    data = _read_yaml(path)
     artifacts = data.get("artifacts")
     if not isinstance(artifacts, dict) or not artifacts:
         raise ConfigError("factory/artifacts.yaml must define a non-empty artifacts map")
@@ -133,6 +190,9 @@ def load_artifacts(mode: str | None = None) -> dict[str, Any]:
                 raise ConfigError(f"artifact {artifact_id}: missing schema {schema}")
         if not spec.get("directory") and not spec.get("schema") and not spec.get("required_sections"):
             raise ConfigError(f"artifact {artifact_id}: needs schema, required_sections or directory=true")
+    _ARTIFACTS_CACHE[key] = copy.deepcopy(data)
+    while len(_ARTIFACTS_CACHE) > _CONFIG_CACHE_LIMIT:
+        _ARTIFACTS_CACHE.popitem(last=False)
     return data
 
 

@@ -116,7 +116,10 @@ jobs:
       - name: Install the boundary
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y bubblewrap acl policykit-1
+          sudo apt-get install -y bubblewrap acl
+          # The polkit package was renamed: `policykit-1` is a transitional
+          # package with no candidate on the current runner image.
+          sudo apt-get install -y polkitd || sudo apt-get install -y policykit-1
       - name: Let bubblewrap create a user namespace
         run: |
           # Ubuntu 24.04 restricts unprivileged user namespaces through

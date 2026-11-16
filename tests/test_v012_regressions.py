@@ -525,7 +525,7 @@ def test_gate_reject_self_rework_returns_produce_with_feedback(nano_run):
 
 
 def test_prompt_is_not_clipped_at_runtime_limit(nano_run):
-    """Промпт возвращается целиком: никакого silenzного обрезания рантаймом."""
+    """Промпт возвращается целиком: никакого тихого обрезания рантаймом."""
     run, _, _ = nano_run
     root = run.parent
     order = next_action("run-01", root=root)

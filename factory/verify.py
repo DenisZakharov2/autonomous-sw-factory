@@ -756,6 +756,34 @@ def _run_root_acl_warnings() -> list[str]:
     return warnings
 
 
+ROLE_CARD_LIMIT = 4500
+TEMPLATE_LIMIT = 2200
+
+
+def _check_resource_limits() -> list[str]:
+    """Check role cards and templates size limits."""
+    errors = []
+    for path in sorted((PACKAGE_ROOT / "roles").glob("*.md")):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if len(text) > ROLE_CARD_LIMIT:
+            errors.append(
+                f"role card {path.name} exceeds {ROLE_CARD_LIMIT} chars ({len(text)})"
+            )
+    for path in sorted((PACKAGE_ROOT / "templates").glob("*.tmpl")):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if len(text) > TEMPLATE_LIMIT:
+            errors.append(
+                f"template {path.name} exceeds {TEMPLATE_LIMIT} chars ({len(text)})"
+            )
+    return errors
+
+
 def doctor_report() -> dict[str, Any]:
     pipeline = load_pipeline()
     registry = load_artifacts()
@@ -765,6 +793,7 @@ def doctor_report() -> dict[str, Any]:
     errors.extend(validate_roles())
     errors.extend(validate_schemas())
     errors.extend(validate_templates())
+    errors.extend(_check_resource_limits())
     for mode in sorted(pipeline["modes"]):
         try:
             load_artifacts(mode)

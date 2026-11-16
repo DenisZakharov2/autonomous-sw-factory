@@ -193,15 +193,12 @@ def prepare(argv: list[str]) -> tuple[str, list[str]]:
             raise HelperError("ensure-env-root USER")
         return command, [_validate_user(rest[0])]
     if command == "install-env":
-        if len(rest) != 3:
-            raise HelperError("install-env USER DEST SRC")
-        user, dest, src = rest
+        if len(rest) != 2:
+            raise HelperError("install-env USER DEST")
+        user, dest = rest
         _validate_user(user)
         _env_path(dest, ENV_NAME_RE)
-        source = Path(src)
-        if not source.is_absolute():
-            raise HelperError("env source must be an absolute path")
-        return command, [user, dest, src]
+        return command, [user, dest]
     if command == "remove-env":
         if len(rest) != 1:
             raise HelperError("remove-env DEST")
@@ -349,19 +346,15 @@ def _ensure_env_root(user: str) -> None:
     os.chmod(ENV_ROOT, 0o750)
 
 
-def _install_env(user: str, dest: str, src: str) -> None:
+def _install_env(user: str, dest: str) -> None:
     _uid, gid = _user_ids(user)
     target = _env_path(dest, ENV_NAME_RE)
-    source = Path(src)
-    if source.is_symlink() or not source.is_file():
-        raise HelperError(f"env source is not a regular file: {source}")
     caller = _caller_uid()
-    if caller is not None and source.stat().st_uid != caller:
-        raise HelperError("env source is not owned by the user who invoked pkexec")
-    _ensure_env_root(user)
-    data = source.read_bytes()
+    # Read env content from stdin (avoids TOCTOU with staging file)
+    data = sys.stdin.buffer.read()
     if len(data) > MAX_ENV_BYTES:
         raise HelperError(f"env file is larger than {MAX_ENV_BYTES} bytes")
+    _ensure_env_root(user)
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
     fd = _open_nofollow(target, flags, 0o640)
     try:
@@ -485,7 +478,7 @@ def execute(command: str, args: list[str]) -> None:
         _ensure_env_root(args[0])
         return
     if command == "install-env":
-        _install_env(args[0], args[1], args[2])
+        _install_env(args[0], args[1])
         return
     if command == "remove-env":
         _remove_env(args[0])

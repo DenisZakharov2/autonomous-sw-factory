@@ -109,6 +109,17 @@ class OpenCodeExecutor:
         run_id: str = "run",
         seq: int | str = 0,
     ) -> list[str]:
+        # Protect against E2BIG: Linux limits argv to ~128 KiB (MAX_ARG_STRLEN).
+        # If prompt exceeds safe limit, truncate with a warning marker.
+        max_prompt_bytes = 100_000  # leave headroom for other args
+        prompt_bytes = prompt.encode("utf-8")
+        if len(prompt_bytes) > max_prompt_bytes:
+            truncated = prompt_bytes[:max_prompt_bytes].decode("utf-8", errors="ignore")
+            prompt = (
+                truncated
+                + "\n\n… (промпт обрезан: превышен лимит аргументов командной строки, "
+                f"полный промпт сохранён в runtime/ev-XXXX.prompt.md)"
+            )
         if self.mode == "prompt":
             cmd = [self.binary, "--prompt", prompt, "--auto", "--standalone"]
             cmd.extend(self.extra_args)

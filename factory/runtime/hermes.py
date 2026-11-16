@@ -91,6 +91,18 @@ class HermesExecutor:
         run_id: str = "run",
         seq: int | str = 0,
     ) -> list[str]:
+        # Protect against E2BIG: Linux limits argv to ~128 KiB (MAX_ARG_STRLEN).
+        # If prompt exceeds safe limit, truncate with a warning marker.
+        # The full prompt is already saved to runtime/ev-XXXX.prompt.md by the caller.
+        max_prompt_bytes = 100_000  # leave headroom for other args
+        prompt_bytes = prompt.encode("utf-8")
+        if len(prompt_bytes) > max_prompt_bytes:
+            truncated = prompt_bytes[:max_prompt_bytes].decode("utf-8", errors="ignore")
+            prompt = (
+                truncated
+                + "\n\n… (промпт обрезан: превышен лимит аргументов командной строки, "
+                f"полный промпт сохранён в runtime/ev-XXXX.prompt.md)"
+            )
         cmd = [self.binary, "-z", prompt, "--in", str(run_dir), "--usage-file", str(usage_file)]
         if self.model:
             cmd.extend(["-m", self.model])

@@ -36,7 +36,7 @@ def test_helper_rejects_unknown_commands_and_root():
 
 def test_helper_rejects_paths_outside_the_env_root():
     with pytest.raises(HelperError, match="outside"):
-        prepare(["install-env", "factory-executor", "/tmp/evil.env", "/tmp/src"])
+        prepare(["install-env", "factory-executor", "/tmp/evil.env"])
     with pytest.raises(HelperError, match="outside"):
         prepare(["remove-env", "/run/factory-executor/../shadow"])
 
@@ -120,8 +120,8 @@ def test_helper_refuses_malformed_arguments():
     with pytest.raises(HelperError, match="run-as"):
         prepare(["run-as", "factory-executor", "--pid-file", "/run/factory-executor/a.pid",
                  "--env-file", "/run/factory-executor/a.env", "--", "/bin/true"])
-    with pytest.raises(HelperError, match="absolute path"):
-        prepare(["install-env", "factory-executor", "/run/factory-executor/a.env", "relative/path"])
+    with pytest.raises(HelperError, match="install-env"):
+        prepare(["install-env", "factory-executor"])  # missing DEST
     with pytest.raises(HelperError, match="username"):
         prepare(["ensure-user", "root"])
     with pytest.raises(HelperError, match="ensure-user"):

@@ -79,17 +79,17 @@ class ExecutorUserError(RuntimeFailure):
     """Отдельный пользователь недоступен или настройка не завершена."""
 
 
-def _run(argv: list[str], *, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
+def _run(argv: list[str], *, input: bytes | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         argv,
         capture_output=True,
         text=True,
-        input=input_text,
+        input=input.decode("utf-8") if input else None,
         check=False,
     )
 
 
-def privileged(args: list[str]) -> None:
+def privileged(args: list[str], input: bytes | None = None) -> None:
     """Запустить root-helper через pkexec. Произвольный argv в root не уходит."""
     try:
         prepare(args)
@@ -100,7 +100,7 @@ def privileged(args: list[str]) -> None:
             f"root-helper не установлен: {HELPER_PATH}. "
             "Выполните `factory setup-executor`."
         )
-    completed = _run(["pkexec", "--disable-internal-agent", str(HELPER_PATH), *args])
+    completed = _run(["pkexec", "--disable-internal-agent", str(HELPER_PATH), *args], input=input)
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout or "").strip()
         raise ExecutorUserError(
@@ -286,14 +286,8 @@ def install_env_file(user: str, run_id: str, env: dict[str, str], workdir: Path)
     _validate_unix_user(user)
     ensure_env_root(user)
     target = env_file_path(run_id)
-    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False, prefix="factory-env-") as tmp:
-        tmp.write(_render_env_file(env))
-        staging = Path(tmp.name)
-    try:
-        staging.chmod(0o600)
-        privileged(["install-env", user, str(target), str(staging.resolve())])
-    finally:
-        staging.unlink(missing_ok=True)
+    env_content = _render_env_file(env).encode("utf-8")
+    privileged(["install-env", user, str(target)], input=env_content)
     return target
 
 

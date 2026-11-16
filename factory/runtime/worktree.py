@@ -26,9 +26,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..config import load_artifacts, load_pipeline
-from ..engine import _task_work_order, submit_work, task_claim
+from ..engine import _model_for, _task_work_order, submit_work, task_claim
 from ..state import load_state
 from .base import ExecutionResult, Executor, RunContext, RuntimeFailure, safe_write_text
+from .loop import _context_limit_tokens, _estimate_prompt_tokens
 from .prompt import build_prompt
 
 # Trees that must never enter a seed repository: the control plane, previous
@@ -450,6 +451,25 @@ def run_parallel_tasks(
                 role=str(task["owner"]),
                 workspace=worktree,
             )
+            # Check context limit before sending to executor (same as loop.py)
+            prompt_tokens = _estimate_prompt_tokens(prompt)
+            context_limit = _context_limit_tokens(str(task["owner"]))
+            if prompt_tokens > context_limit:
+                error = (
+                    f"контекст слишком велик для окна модели "
+                    f"({prompt_tokens} токенов > {context_limit}); "
+                    "разбей задачу на подзадачи, а не подавай с обрезанным промптом"
+                )
+                safe_write_text(
+                    run_dir / "runtime" / f"parallel-{task_id}.prompt.md", prompt
+                )
+                return TaskOutcome(
+                    task_id=task_id,
+                    ok=False,
+                    error=error,
+                    prompt_chars=len(prompt),
+                    role=str(task.get("owner") or ""),
+                )
             writable, placeholders = _writable_paths(scoped, worktree, task, run_dir)
             context = RunContext(
                 run_id=run_id,

@@ -58,6 +58,14 @@ disable the sandbox; the verdict-freshness gap does not), and what it already
 implemented (the wheel/version contract in CI). It is a plan, not a record of
 work done.
 
+## `handoff-1.0.13.md`
+
+The state after release 1.0.13 and the next session's starting point: what
+the cycle closed, what is still open, the release convention, and the traps
+that cost three days. It replaces the root `NEXT_SESSION_PROMPT.md`, which was
+a working note for a session that never happened — a note in the working
+directory is lost with the working directory.
+
 ## `fix-plan-1.0.14.md`
 
 The leftovers of the audit that has never been closed: the context limit in

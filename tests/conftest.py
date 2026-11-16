@@ -1,4 +1,5 @@
 import sys
+import os
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,20 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from factory.engine import init_run
+
+
+@pytest.fixture(autouse=True)
+def _clean_factory_env():
+    """Ensure tests don't inherit FACTORY_ROOT/FACTORY_RUNS_ROOT from operator env."""
+    old_root = os.environ.pop("FACTORY_ROOT", None)
+    old_runs = os.environ.pop("FACTORY_RUNS_ROOT", None)
+    try:
+        yield
+    finally:
+        if old_root is not None:
+            os.environ["FACTORY_ROOT"] = old_root
+        if old_runs is not None:
+            os.environ["FACTORY_RUNS_ROOT"] = old_runs
 
 
 @pytest.fixture()

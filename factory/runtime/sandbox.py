@@ -244,6 +244,12 @@ def sandbox_command(
             keyring = runtime_dir / "keyring"
             if keyring.is_dir():
                 args.extend(["--tmpfs", str(keyring)])
+        # Mask system D-Bus and systemd sockets — they are not covered by
+        # XDG_RUNTIME_DIR and can leak session information.
+        for system_socket in ("/run/dbus/system_bus_socket", "/run/systemd/private", "/run/systemd/journal/socket"):
+            sock_path = Path(system_socket)
+            if sock_path.is_socket():
+                args.extend(["--ro-bind", "/dev/null", str(sock_path)])
     args.extend(
         [
             "--dev",

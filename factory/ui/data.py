@@ -16,6 +16,7 @@ import json
 import os
 import re
 import threading
+from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -52,7 +53,35 @@ TIMESERIES_METRICS = ("tokens", "seconds", "usd", "api_calls")
 TIMESERIES_BUCKETS = ("stage", "event", "minute")
 
 _cache_lock = threading.Lock()
-_cache: dict[str, tuple[Any, Any]] = {}
+_cache: "OrderedDict[str, tuple[Any, Any]]" = OrderedDict()
+_CACHE_MAX_SIZE = 128
+
+
+def clear_cache() -> None:
+    """Drop every memoised value (tests; the payload is otherwise mtime-driven)."""
+    with _cache_lock:
+        _cache.clear()
+
+
+def _cached(key: str, signature: Any, produce: Callable[[], Any]) -> Any:
+    with _cache_lock:
+        hit = _cache.get(key)
+        if hit is not None and hit[0] == signature:
+            # Move to end (most recently used)
+            _cache.move_to_end(key)
+            return hit[1]
+    value = produce()
+    with _cache_lock:
+        _cache[key] = (signature, value)
+        _cache.move_to_end(key)
+        # Evict oldest if over limit
+        while len(_cache) > _CACHE_MAX_SIZE:
+            _cache.popitem(last=False)
+    return value
+
+
+
+
 
 
 class RunNotFound(RunError):
@@ -66,24 +95,7 @@ class FilterError(FactoryError):
         self.field = field
         self.value = value
         self.allowed = allowed
-        super().__init__(f"unknown {field}: {value!r} (allowed: {', '.join(allowed)})")
-
-
-def clear_cache() -> None:
-    """Drop every memoised value (tests; the payload is otherwise mtime-driven)."""
-    with _cache_lock:
-        _cache.clear()
-
-
-def _cached(key: str, signature: Any, produce: Callable[[], Any]) -> Any:
-    with _cache_lock:
-        hit = _cache.get(key)
-        if hit is not None and hit[0] == signature:
-            return hit[1]
-    value = produce()
-    with _cache_lock:
-        _cache[key] = (signature, value)
-    return value
+        super().__init__(f"unknown {field}: {value!r} (allowed: {", ".join(allowed)})")
 
 
 def _stamp(path: Path) -> tuple[int, int] | None:

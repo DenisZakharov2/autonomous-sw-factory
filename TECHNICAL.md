@@ -16,9 +16,21 @@ factory/                 # Engine and configs
   artifacts.py           # Registry, Markdown/JSON checks
   pipeline.py            # Stages, modes, owners
   quarantine.py          # SkillSpector adapter
+  config.py              # Pipeline/artifact/models/budget loading, caching
+  paths.py               # Safe path resolution, run directory helpers
+  state.py               # State JSON load/save, current_stage
+  checkpoint.py          # Checkpoint save/load, diverged/stale detection
+  verify.py              # Verification policy, doctor, schemas
+  retrieval.py           # RAG fragment retrieval
+  trace.py               # Traceability matrix, AST symbol resolution
+  metrics.py             # Metrics computation (tokens, seconds, USD)
+  usage_report.py        # Usage aggregation across runs
+  compare.py             # Run-to-run comparison for eval
+  eval.py                # Evaluation cases, validation
   ui/                    # Read-only run dashboard
     data.py              # Panel payload from core read functions, cached by mtime
     server.py            # ThreadingHTTPServer: GET only, static page, 304
+    export.py            # Run export to JSON/Markdown
     static/index.html    # 12-column grid, panels, drag/resize, presets
   runtime/               # Executable loop
     base.py              # Executor protocol
@@ -32,6 +44,8 @@ factory/                 # Engine and configs
     opencode.py          # OpenCode adapter
     hermes.py            # Hermes adapter
     sandbox.py           # bwrap: read-only root and control plane
+    isolation.py         # Separate executor user, env files, ACL grants
+    worktree.py          # Parallel s4_build tasks in git worktrees
     fixtures/nano/       # Reference artifacts for fake
   roles/                 # 22 role cards
   schemas/               # 13 JSON schemas

@@ -24,7 +24,7 @@
       "status": "approved",
       "approver": "system",
       "decided_by": "system:greenfield",
-      "decided_at": "2026-10-31T21:57:58Z",
+      "decided_at": "2026-11-16T08:49:28Z",
       "evidence": [
         "greenfield mode: s_in not applicable"
       ],
@@ -34,7 +34,7 @@
       "status": "approved",
       "approver": "human",
       "decided_by": "human:example",
-      "decided_at": "2026-10-31T21:58:00Z",
+      "decided_at": "2026-11-16T08:49:29Z",
       "evidence": [
         "interview accepted"
       ],
@@ -44,7 +44,7 @@
       "status": "approved",
       "approver": "human",
       "decided_by": "human:example",
-      "decided_at": "2026-10-31T21:58:01Z",
+      "decided_at": "2026-11-16T08:49:30Z",
       "evidence": [
         "vision accepted"
       ],
@@ -54,7 +54,7 @@
       "status": "approved",
       "approver": "human",
       "decided_by": "human:example",
-      "decided_at": "2026-10-31T21:58:02Z",
+      "decided_at": "2026-11-16T08:49:30Z",
       "evidence": [
         "spec-human approved"
       ],
@@ -64,7 +64,7 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-31T21:58:03Z",
+      "decided_at": "2026-11-16T08:49:30Z",
       "evidence": [
         "no external skills",
         "VERIFY EVT-000010"
@@ -75,7 +75,7 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-31T21:58:05Z",
+      "decided_at": "2026-11-16T08:49:30Z",
       "evidence": [
         "architecture frozen",
         "VERIFY EVT-000014"
@@ -86,7 +86,7 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-31T21:58:07Z",
+      "decided_at": "2026-11-16T08:49:31Z",
       "evidence": [
         "plan imported",
         "VERIFY EVT-000018"
@@ -97,7 +97,7 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-31T21:58:10Z",
+      "decided_at": "2026-11-16T08:49:31Z",
       "evidence": [
         "all tasks accepted",
         "VERIFY EVT-000032"
@@ -108,7 +108,7 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-31T21:58:12Z",
+      "decided_at": "2026-11-16T08:49:32Z",
       "evidence": [
         "100% PASS",
         "VERIFY EVT-000036"
@@ -119,7 +119,7 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-31T21:58:13Z",
+      "decided_at": "2026-11-16T08:49:32Z",
       "evidence": [
         "no Critical/High",
         "VERIFY EVT-000040"
@@ -130,7 +130,7 @@
       "status": "approved",
       "approver": "human",
       "decided_by": "human:example",
-      "decided_at": "2026-10-31T21:58:15Z",
+      "decided_at": "2026-11-16T08:49:33Z",
       "evidence": [
         "rollback drill passed"
       ],
@@ -140,7 +140,7 @@
       "status": "approved",
       "approver": "02-independent-verifier",
       "decided_by": "02-independent-verifier",
-      "decided_at": "2026-10-31T21:58:16Z",
+      "decided_at": "2026-11-16T08:49:33Z",
       "evidence": [
         "commands verified",
         "VERIFY EVT-000046"
@@ -151,7 +151,7 @@
       "status": "approved",
       "approver": "human",
       "decided_by": "human:example",
-      "decided_at": "2026-10-31T21:58:18Z",
+      "decided_at": "2026-11-16T08:49:34Z",
       "evidence": [
         "patch queued for human review"
       ],
@@ -206,8 +206,8 @@
   "veto_counters": {},
   "human_spec_approved": true,
   "restore_drill_passed": true,
-  "last_event_hash": "b14254f77d7841b7d64f9afaeed8d57179eb27b90703539af7d649b10e43ae05",
+  "last_event_hash": "5d323538172448b2e4897930a36a76ca01f01b8c95a96406c7970ef40bdeee5b",
   "event_count": 49,
-  "created_at": "2026-10-31T21:57:58Z",
-  "updated_at": "2026-10-31T21:58:18Z"
+  "created_at": "2026-11-16T08:49:28Z",
+  "updated_at": "2026-11-16T08:49:34Z"
 }

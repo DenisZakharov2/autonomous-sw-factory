@@ -8,6 +8,7 @@ named test was a fiction (see `docs/audit/handoff-1.0.9.md`, the `nano-product-m
 """
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
@@ -19,15 +20,32 @@ from .config import load_artifacts, load_json, validate_instance
 from .errors import RunError
 from .state import load_state
 
-PY_DEF_RE = re.compile(r"^[ \t]*(?:async[ \t]+)?def[ \t]+([A-Za-z_]\w*)[ \t]*\(", re.MULTILINE)
-PY_CLASS_RE = re.compile(r"^[ \t]*class[ \t]+([A-Za-z_]\w*)\b", re.MULTILINE)
 RS_FN_RE = re.compile(
     r"^[ \t]*(?:pub(?:\([^)]*\))?[ \t]+)?(?:async[ \t]+)?fn[ \t]+([A-Za-z_]\w*)[ \t]*[<(]",
     re.MULTILINE,
 )
 RS_TEST_ATTR_RE = re.compile(r"^#\[[ \t]*(?:tokio::)?test(?:[ \t]*\(|[ \t]*\])")
 RS_ATTR_RE = re.compile(r"^#\[.*\]$")
-RS_COMMENT_RE = re.compile(r"^(?://|/\*|\*|\*/)")
+RS_COMMENT_RE = re.compile(r"^(?://|/\*|\*|/\*)")
+
+
+def _python_symbols(text: str) -> set[str]:
+    """Extract function and class names from Python source using AST."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        # Fall back to regex if parsing fails
+        return set(PY_DEF_RE.findall(text)) | set(PY_CLASS_RE.findall(text))
+    symbols: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            symbols.add(node.name)
+    return symbols
+
+
+# Regex fallbacks (kept for SyntaxError fallback and non-Python)
+PY_DEF_RE = re.compile(r"^[ \t]*(?:async[ \t]+)?def[ \t]+([A-Za-z_]\w*)[ \t]*\(", re.MULTILINE)
+PY_CLASS_RE = re.compile(r"^[ \t]*class[ \t]+([A-Za-z_]\w*)\b", re.MULTILINE)
 
 
 def load_traceability(run_dir: Path) -> dict[str, Any]:
@@ -113,7 +131,7 @@ def _rust_test_attribute(text: str, offset: int) -> bool:
 
 def _symbol_declared(text: str, symbol: str, suffix: str) -> bool:
     if suffix in {".py", ".pyi"}:
-        return symbol in PY_DEF_RE.findall(text) or symbol in PY_CLASS_RE.findall(text)
+        return symbol in _python_symbols(text)
     if suffix == ".rs":
         for match in RS_FN_RE.finditer(text):
             if match.group(1) == symbol and _rust_test_attribute(text, match.start()):

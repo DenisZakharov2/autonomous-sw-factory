@@ -13,6 +13,7 @@ from .config import (
     load_artifacts,
     load_budget,
     load_pipeline,
+    project_root,
     resolve_model,
 )
 from .engine import (
@@ -68,21 +69,24 @@ def _runs_root(args: argparse.Namespace) -> Path | None:
 def cmd_doctor(args: argparse.Namespace) -> int:
     report = doctor_report()
     errors = list(report["errors"])
-    repo_root = PACKAGE_ROOT.parent
-    if (repo_root / "pyproject.toml").exists():
-        version_file = repo_root / "VERSION"
+    project = project_root()
+    # Only check VERSION/pyproject.toml/LICENSE if FACTORY_ROOT points to
+    # the package's own repository, not a different project.
+    pkg_repo = PACKAGE_ROOT.parent
+    if project == pkg_repo and (project / "pyproject.toml").exists():
+        version_file = project / "VERSION"
         if version_file.exists() and version_file.read_text(encoding="utf-8").strip() != __version__:
             errors.append("VERSION does not match factory.__version__")
         # When using dynamic version from VERSION file, pyproject.toml has a placeholder
         # Read the actual version from VERSION file for comparison
         if version_file.exists():
             actual_version = version_file.read_text(encoding="utf-8").strip()
-            pyproject_text = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
+            pyproject_text = (project / "pyproject.toml").read_text(encoding="utf-8")
             m_ver = re.search(r'(?m)^version\s*=\s*"([^"]+)"', pyproject_text)
             # If pyproject.toml uses dynamic version (placeholder), skip the check
             if m_ver and m_ver.group(1) != "0.0.0" and m_ver.group(1) != actual_version:
                 errors.append(f"pyproject.toml version ({m_ver.group(1)}) does not match VERSION file ({actual_version})")
-        license_file = repo_root / "LICENSE"
+        license_file = project / "LICENSE"
         if license_file.exists() and "Permission is hereby granted" not in license_file.read_text(encoding="utf-8"):
             errors.append("LICENSE is missing the MIT grant text")
     report["errors"] = errors

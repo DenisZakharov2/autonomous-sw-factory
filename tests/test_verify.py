@@ -299,6 +299,45 @@ def test_doctor_says_when_the_sandbox_cannot_run(monkeypatch):
     assert any("bubblewrap не установлен" in warning for warning in warnings), warnings
 
 
+def test_doctor_reports_role_cards_and_templates_over_the_limits(tmp_path, monkeypatch):
+    """Карточка роли или шаблон не должны перерастать окно незаметно.
+
+    Лимиты — часть контракта (4500 и 2200 символов): промпт, собранный из
+    карточек и шаблонов, должен оставаться читаемым. `doctor_report` теперь
+    называет файл и его размер, а не молчит до первого отказа модели.
+    """
+    from factory import verify
+
+    package = tmp_path / "factory"
+    (package / "roles").mkdir(parents=True)
+    (package / "templates").mkdir(parents=True)
+    (package / "roles" / "big.md").write_text(
+        "x" * (verify.ROLE_CARD_LIMIT + 1), encoding="utf-8"
+    )
+    (package / "templates" / "big.tmpl").write_text(
+        "x" * (verify.TEMPLATE_LIMIT + 1), encoding="utf-8"
+    )
+    monkeypatch.setattr(verify, "PACKAGE_ROOT", package)
+
+    errors = verify._check_resource_limits()
+
+    assert any("big.md" in error and str(verify.ROLE_CARD_LIMIT) in error for error in errors)
+    assert any("big.tmpl" in error and str(verify.TEMPLATE_LIMIT) in error for error in errors)
+
+
+def test_doctor_accepts_resources_at_the_limit(tmp_path, monkeypatch):
+    from factory import verify
+
+    package = tmp_path / "factory"
+    (package / "roles").mkdir(parents=True)
+    (package / "templates").mkdir(parents=True)
+    (package / "roles" / "ok.md").write_text("x" * verify.ROLE_CARD_LIMIT, encoding="utf-8")
+    (package / "templates" / "ok.tmpl").write_text("x" * verify.TEMPLATE_LIMIT, encoding="utf-8")
+    monkeypatch.setattr(verify, "PACKAGE_ROOT", package)
+
+    assert verify._check_resource_limits() == []
+
+
 def _polkit_warnings(warnings: list[str]) -> list[str]:
     """The warnings about passwordless root, and nothing else."""
     return [

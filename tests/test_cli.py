@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 import subprocess
@@ -36,6 +37,59 @@ def test_doctor_json(tmp_path):
     data = json.loads(result.stdout)
     assert data["roles"] == 22
     assert data["errors"] == []
+
+
+def _doctor_report(errors=None):
+    return {
+        "errors": list(errors or []),
+        "warnings": [],
+        "roles": 22,
+        "templates": 39,
+        "schemas": 13,
+        "stages": 13,
+        "artifacts": 44,
+        "modes": ["nano"],
+    }
+
+
+def test_doctor_does_not_compare_a_foreign_project_with_the_package(tmp_path, monkeypatch, capsys):
+    """`FACTORY_ROOT` may point at another project; its VERSION is not our contract.
+
+    The check used to read `PACKAGE_ROOT.parent` unconditionally, so an
+    installed package asked about a foreign project compared the wrong files
+    and could report a mismatch that says nothing about either of them.
+    """
+    from factory import cli as cli_module
+
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    (foreign / "VERSION").write_text("9.9.9", encoding="utf-8")
+    (foreign / "pyproject.toml").write_text('[project]\nversion = "9.9.9"\n', encoding="utf-8")
+    (foreign / "LICENSE").write_text("All rights reserved.\n", encoding="utf-8")
+    monkeypatch.setattr(cli_module, "project_root", lambda: foreign)
+    monkeypatch.setattr(cli_module, "doctor_report", lambda: _doctor_report())
+
+    assert cli_module.cmd_doctor(argparse.Namespace(json=True)) == 0
+    assert json.loads(capsys.readouterr().out)["errors"] == []
+
+
+def test_doctor_checks_the_package_repository_against_its_version(tmp_path, monkeypatch, capsys):
+    from factory import cli as cli_module
+
+    package = tmp_path / "repo" / "factory"
+    package.mkdir(parents=True)
+    repo = package.parent
+    (repo / "VERSION").write_text("0.0.1", encoding="utf-8")
+    (repo / "pyproject.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
+    (repo / "LICENSE").write_text("All rights reserved.\n", encoding="utf-8")
+    monkeypatch.setattr(cli_module, "PACKAGE_ROOT", package)
+    monkeypatch.setattr(cli_module, "project_root", lambda: repo)
+    monkeypatch.setattr(cli_module, "doctor_report", lambda: _doctor_report())
+
+    assert cli_module.cmd_doctor(argparse.Namespace(json=True)) == 1
+    errors = json.loads(capsys.readouterr().out)["errors"]
+    assert "VERSION does not match factory.__version__" in errors
+    assert any("LICENSE" in error for error in errors)
 
 
 def test_approval_token_mints_a_bound_token(tmp_path):

@@ -14,7 +14,6 @@ file copied by the batch is restored and the task is not submitted.
 from __future__ import annotations
 
 import copy
-import hashlib
 import os
 import shutil
 import stat
@@ -26,7 +25,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..config import load_artifacts, load_pipeline
-from ..engine import _model_for, _task_work_order, submit_work, task_claim
+from ..engine import _task_work_order, submit_work, task_claim
 from ..state import load_state
 from .base import ExecutionResult, Executor, RunContext, RuntimeFailure, safe_write_text
 from .loop import _context_limit_tokens, _estimate_prompt_tokens
@@ -386,7 +385,7 @@ class WorktreeWorkspace:
 def _writable_paths(
     order: dict[str, Any], worktree: Path, task: dict[str, Any], control_dir: Path
 ) -> tuple[list[str], list[Path]]:
-    from .loop import _cleanup_placeholders, _collect_writable_paths, _prepare_writable_paths
+    from .loop import _collect_writable_paths, _prepare_writable_paths
 
     entries = _collect_writable_paths(order, worktree, task)
     # The loop's helper adds `<workspace>/runtime/agent`; a worktree has no

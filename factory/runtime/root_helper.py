@@ -230,14 +230,6 @@ def prepare(argv: list[str]) -> tuple[str, list[str]]:
     raise HelperError(f"unknown helper command {command!r}")
 
 
-def _caller_uid() -> int | None:
-    for key in ("PKEXEC_UID", "SUDO_UID"):
-        raw = os.environ.get(key, "")
-        if raw.isdigit():
-            return int(raw)
-    return None
-
-
 def _open_nofollow(path: Path, flags: int, mode: int = 0o644) -> int:
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
@@ -349,9 +341,13 @@ def _ensure_env_root(user: str) -> None:
 def _install_env(user: str, dest: str) -> None:
     _uid, gid = _user_ids(user)
     target = _env_path(dest, ENV_NAME_RE)
-    caller = _caller_uid()
-    # Read env content from stdin (avoids TOCTOU with staging file)
-    data = sys.stdin.buffer.read()
+    # The payload comes from stdin: a staging path left a window between the
+    # ownership check and the read, and the content cannot be swapped after
+    # the helper has started. Read one byte past the limit to detect overflow
+    # without buffering an unbounded stream.
+    if sys.stdin is None:
+        raise HelperError("install-env needs the environment file on stdin")
+    data = sys.stdin.buffer.read(MAX_ENV_BYTES + 1)
     if len(data) > MAX_ENV_BYTES:
         raise HelperError(f"env file is larger than {MAX_ENV_BYTES} bytes")
     _ensure_env_root(user)

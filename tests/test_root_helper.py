@@ -162,6 +162,35 @@ def test_rendered_helper_is_self_contained():
     assert script.rstrip().endswith("raise SystemExit(main())")
 
 
+def test_install_env_takes_the_payload_from_stdin_not_a_path():
+    """Путь к временному файлу — это окно между проверкой и чтением.
+
+    Helper больше не принимает SRC: содержимое приходит в stdin, и после
+    старта helper'а подменить его нечем. Лишний аргумент — ошибка, а не
+    молча проигнорированный путь.
+    """
+    with pytest.raises(HelperError, match="install-env"):
+        prepare(["install-env", "factory-executor", "/run/factory-executor/a.env", "/tmp/staging"])
+
+
+def test_install_env_file_sends_the_rendered_payload_on_stdin(monkeypatch):
+    from factory.runtime import isolation
+
+    calls: list[tuple[list[str], bytes | None]] = []
+    monkeypatch.setattr(isolation, "ensure_env_root", lambda user: None)
+    monkeypatch.setattr(
+        isolation,
+        "privileged",
+        lambda args, input=None: calls.append((list(args), input)),
+    )
+    target = isolation.install_env_file(
+        "factory-executor", "run-01", {"B": "two words", "A": "one"}, Path("/tmp")
+    )
+    assert calls == [
+        (["install-env", "factory-executor", str(target)], b'A=one\nB="two words"\n')
+    ]
+
+
 def test_rendered_helper_runs_without_the_factory_package(tmp_path):
     """Скрипт, установленный в /usr/local/libexec, не должен зависеть от пакета."""
     try:

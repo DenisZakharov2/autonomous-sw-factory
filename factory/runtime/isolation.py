@@ -79,18 +79,23 @@ class ExecutorUserError(RuntimeFailure):
     """Отдельный пользователь недоступен или настройка не завершена."""
 
 
-def _run(argv: list[str], *, input: bytes | None = None) -> subprocess.CompletedProcess[str]:
+def _run(argv: list[str], *, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         argv,
         capture_output=True,
         text=True,
-        input=input.decode("utf-8") if input else None,
+        input=input_text,
         check=False,
     )
 
 
 def privileged(args: list[str], input: bytes | None = None) -> None:
-    """Запустить root-helper через pkexec. Произвольный argv в root не уходит."""
+    """Запустить root-helper через pkexec. Произвольный argv в root не уходит.
+
+    `input` уходит helper'у в stdin. Env-файл передаётся именно так: путь к
+    временному файлу оставлял окно между проверкой владельца и чтением, а
+    содержимое, прочитанное из stdin уже после сброса uid, подменить нельзя.
+    """
     try:
         prepare(args)
     except HelperError as exc:
@@ -100,9 +105,14 @@ def privileged(args: list[str], input: bytes | None = None) -> None:
             f"root-helper не установлен: {HELPER_PATH}. "
             "Выполните `factory setup-executor`."
         )
-    completed = _run(["pkexec", "--disable-internal-agent", str(HELPER_PATH), *args], input=input)
+    completed = subprocess.run(
+        ["pkexec", "--disable-internal-agent", str(HELPER_PATH), *args],
+        capture_output=True,
+        input=input,
+        check=False,
+    )
     if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout or "").strip()
+        detail = (completed.stderr or completed.stdout or b"").decode("utf-8", "replace").strip()
         raise ExecutorUserError(
             f"root-helper {' '.join(args)} не удался: "
             f"{detail or 'код ' + str(completed.returncode)}"

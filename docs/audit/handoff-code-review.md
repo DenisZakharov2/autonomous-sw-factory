@@ -21,15 +21,16 @@
 | Показатель | Значение |
 |------------|----------|
 | Версия | 1.0.14 (релиз выпущен, тег v1.0.14) |
-| Тесты | 479 passed (pytest -q --timeout=180) |
+| Тесты | 481 passed (pytest -q --timeout=180) |
 | CI | 16 job'ов: Ubuntu/macOS/Windows × 3.10–3.13, lint, eval, integration, build |
 | Покрытие | ~77% общие, но security-модули 24–38% |
-| engine.py | 2405 строк (цикломатическая сложность D/E) |
+| engine | пакет: `__init__.py` 1926 строк, `verification.py` 501, `common.py` 32 |
 | verify.py | 820 строк |
 
-**Прогресс после ревью:** пункты 2 (mypy в CI) и 4 (ruff в CI) закрыты.
-Следующий по порядку аудитора — пункт 1, разбиение `engine.py` и
-`verify.py`. Подробности — в разделе «Что уже сделано после ревью».
+**Прогресс после ревью:** пункты 2 (mypy в CI) и 4 (ruff в CI) закрыты;
+пункт 1 (разбиение) начат — кластер проверки вынесен из `engine.py` в
+`factory/engine/verification.py`. Следующий срез — `gates.py` или
+`verify/doctor.py`. Подробности — в разделе «Что уже сделано после ревью».
 
 ---
 
@@ -109,8 +110,9 @@
 |-------------|-------------|
 | 2. mypy в CI | `mypy>=1.10` в `[project.optional-dependencies.dev]`; `[tool.mypy]` со `strict = true` и `files` из четырёх чистых модулей (`paths.py`, `errors.py`, `state.py`, `config.py`); `follow_imports = "silent"`. Джоб `lint` в CI. Строгий режим нашёл переиспользование имени `key` в `config.py` и возвраты `Any` в `state.py` — оба исправлены. |
 | 4. ruff в CI | `ruff>=0.6` в dev-зависимостях; `[tool.ruff]` с `E4/E7/E9/F`. Убраны пять мёртвых импортов (`INDEX_DIR`, `jsonschema`, `policy_allows`, `sandbox_env`, `FilterError`), четыре мёртвые переменные, три строки с `;` в fixture-продукте. `lint` гейтит `build`. |
+| 1. разбиение engine | `factory/engine.py` → `factory/engine/`; кластер проверки (`verification_report`, `verification_is_stale`, `record_verification`, `_latest_judgement`, `_verdict_is_fresh` и ещё 12 функций) вынесен в `verification.py`, общие константы и `_model_for` — в `common.py`. Публичный API пакета сохранён реэкспортом; `tests/test_engine_layout.py` это фиксирует. |
 
-Проверки после этих правок: `pytest` — 479 passed, `ruff check factory/ tests/` — чисто,
+Проверки после этих правок: `pytest` — 481 passed, `ruff check factory/ tests/` — чисто,
 `mypy` — чисто. CI-ран 16 job'ов зелёный.
 
 ---
@@ -141,8 +143,9 @@
    - Публичный API `factory.engine` / `factory.verify` сохранить
      реэкспортом в `__init__.py`: тесты и рантайм импортируют оттуда.
    - Начать с кластера проверки (`verification_report` … `_task_deliverable_errors`):
-     он почти замкнут, внешних зависимостей пять, и они перечислены в
-     анализе сессии.
+     он уже вынесен в `factory/engine/verification.py`. Следующие срезы —
+     `gates.py` (approval tokens, `gate_approve/reject`, `accept_risk`, `veto`)
+     и `verify/doctor.py` (границы машины и `doctor_report`).
    - Добавить radon проверку в CI
 
 3. **Структурированное логирование** — нужен для production-диагностики

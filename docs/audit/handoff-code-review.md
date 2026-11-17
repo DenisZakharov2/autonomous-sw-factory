@@ -119,57 +119,197 @@
 
 ## Промпт для следующей сессии
 
-```
+Скопировать целиком в новую сессию:
+
+````text
 Продолжаем работу над фабрикой программного обеспечения:
 /home/anony/Documents/Личное/Проект фабрика программного обеспечения/autonomous-sw-factory
 
-Сначала прочитай:
-  AGENTS.md                          — правила проекта (девять законов, границы ролей)
-  docs/audit/handoff-code-review.md  — этот файл: состояние код-ревью и план работ
-  docs/audit/fix-plan-1.0.14.md      — архив: закрытый план аудита рантайма (11 пунктов)
-  docs/threat-model.md               — модель угроз: что какая граница закрывает
+Сначала прочитай в этом порядке:
+  1. AGENTS.md — девять железных законов, границы ролей, запреты.
+  2. docs/audit/handoff-code-review.md — этот файл: 9 категорий ревью,
+     что уже сделано, что осталось, грабли.
+  3. docs/audit/fix-plan-1.0.14.md — архив закрытого плана рантайма:
+     его пункты 1.1–1.11 уже закрыты, переделывать нечего.
+  4. docs/threat-model.md — что какая граница закрывает и что нет.
+  5. pyproject.toml — [tool.ruff], [tool.mypy], dev-зависимости.
+  6. .github/workflows/ci.yml — джоб lint и матрица тестов.
 
-Задача: начать закрывать результаты независимого код-ревью (9 категорий).
+СОСТОЯНИЕ НА 17 НОЯБРЯ 2026 (проверено):
+  - Версия 1.0.14, тег v1.0.14, релиз опубликован 16 ноября.
+  - main = origin/main, рабочее дерево чистое, HEAD 425364b.
+  - 481 тест проходит (pytest --timeout=180), ~5 минут.
+  - CI: 16 job'ов зелёные — Ubuntu/macOS/Windows × 3.10–3.13, lint,
+    eval, integration (живой bwrap + ACL + root-helper), build.
+  - ruff и mypy уже в CI. Mypy strict на четырёх модулях: paths.py,
+    errors.py, state.py, config.py (follow_imports = "silent").
+  - engine.py стал пакетом factory/engine/: __init__.py 1926 строк,
+    verification.py 501, common.py 32.
 
-Порядок работ (по приоритету аудитора):
-1. ~~**mypy + ruff в CI**~~ — **закрыто.** Джоб `lint` (ruff `E4/E7/E9/F`,
-   mypy strict на четырёх чистых модулях) гейтит `build`. Следующий шаг
-   для mypy — расширять `files` на `checkpoint.py`, `journal.py`,
-   `pipeline.py`, затем `engine`/`verify`.
-2. **Разбить engine.py / verify.py** — главная боль поддерживаемости,
-   следующая работа
-   - engine.py (2405 строк) → factory/engine/ пакет
-   - verify.py (820 строк) → factory/verify/ пакет
-   - Публичный API `factory.engine` / `factory.verify` сохранить
-     реэкспортом в `__init__.py`: тесты и рантайм импортируют оттуда.
-   - Начать с кластера проверки (`verification_report` … `_task_deliverable_errors`):
-     он уже вынесен в `factory/engine/verification.py`. Следующие срезы —
-     `gates.py` (approval tokens, `gate_approve/reject`, `accept_risk`, `veto`)
-     и `verify/doctor.py` (границы машины и `doctor_report`).
-   - Добавить radon проверку в CI
+ЧТО УЖЕ СДЕЛАНО (не переделывать):
+  - Пункт 2 ревью (mypy) и пункт 4 (ruff) закрыты; джоб lint гейтит build.
+  - Пункт 1 начат: кластер проверки вынесен в engine/verification.py,
+    общие константы и _model_for — в engine/common.py. Публичный API
+    сохранён реэкспортом, tests/test_engine_layout.py это фиксирует.
+  - 15 тестов к fix-plan-1.0.14 добавлены (пункты 1.1–1.9).
+  - Исправлен импорт дашборда на Python 3.10/3.11 (f-string PEP 701).
+  - Подробности — в таблицах «Что уже сделано» этого файла.
 
-3. **Структурированное логирование** — нужен для production-диагностики
-   - Единый логгер, JSON формат, контекст run_id/stage/role/task_id
+ЗАДАЧА ЭТОЙ СЕССИИ — продолжить пункт 1 (разбиение) и закрыть следующие
+по приоритету аудитора. Один пункт = один атомарный коммит с тестом.
 
-4. **Поднять покрытие security-модулей** — integration тесты уже есть
-   - isolation.py, sandbox.py, root_helper.py, retrieval.py → ≥70%
+1. ВЫНЕСТИ GATES ИЗ factory/engine/__init__.py В
+   factory/engine/gates.py.
+   Inventory (сверить с текущим файлом, имена могли сдвинуться):
+     approval_key_bytes, make_approval_token, _check_human_approval,
+     _check_gate_approver, _check_stage_artifact_owners, gate_approve,
+     gate_reject, accept_risk, stage_reset, task_reset, veto.
+   - Из .common брать VERIFIER, _model_for, verification_policy; из
+     .verification — verification_report, _record_verification_locked,
+     _verdict_is_fresh, stage_declares_verification, _latest_judgement,
+     _judged_entries, _write_verification.
+   - Функции, которые остаются в __init__.py, но нужны gates
+     (_require_current, _require_stage_status, _root_paths, _stage_entries,
+     _reopen_stage_tasks, _reset_rework_chain, _blocked_reason — проверить
+     анализатором), импортировать лениво внутри функции. Образец:
+     _judged_entries в verification.py импортирует _stage_entries из
+     пакета внутри себя — иначе пакет и модуль импортируют друг друга.
+   - В __init__.py оставить реэкспорт каждого имени, которое импортируют
+     factory/cli.py, factory/eval.py, factory/runtime/loop.py,
+     factory/runtime/worktree.py и тесты. Источник истины:
+       grep -rn "from ..engine import" factory/
+       grep -rn "from factory.engine import" tests/
+     Приватные имена, которые импортируются снаружи (_task_deliverable_errors),
+     тоже реэкспортировать. Для ruff F401 пометить реэкспорт как
+     "from .gates import name as name" или вести __all__.
+   - tests/test_engine_layout.py расширить: gates-кластер — отдельный
+     модуль, публичные имена на месте.
+   - Проверка: полный pytest, ruff, mypy, python3.11 -m py_compile.
 
-5. **Bandit baseline + nosec** — убрать шум из CI
+2. ВЫНЕСТИ DOCTOR ИЗ factory/verify.py В ПАКЕТ factory/verify/.
+   Начать с самого замкнутого кластера — doctor.py:
+     _transient_units_allowed, _has_passwordless_sudo,
+     _legacy_rule_installed, _executor_boundary_errors,
+     _executor_boundary_warnings, _sandbox_boundary_warnings,
+     _run_root_acl_warnings, ROLE_CARD_LIMIT, TEMPLATE_LIMIT,
+     _check_resource_limits, doctor_report.
+   - factory/verify/__init__.py реэкспортирует verify_run, parse_role,
+     validate_roles, doctor_report и остальные имена, которые уже
+     импортируются снаружи. Тесты и factory/cli.py не должны меняться.
+   - ГРАБЛИ: tests/test_verify.py monkeypatch-ит factory.verify.PACKAGE_ROOT,
+     а _check_resource_limits читает его. Если функция переедет в
+     verify/doctor.py, патч перестанет влиять и тест станет ложно-зелёным.
+     Реши явно и напиши в коммите: либо оставь _check_resource_limits в
+     __init__.py, либо обнови тесты на factory.verify.doctor.PACKAGE_ROOT
+     и проверь, что тест падает без патча.
+   - Дальше остальные кластеры verify.py (820 строк): roles.py,
+     schemas.py, integrity.py, policy.py, run.py. Каждый срез — отдельный
+     коммит; публичный API не ломать.
+   - Тест на структуру, аналогичный tests/test_engine_layout.py.
 
-Работай атомарными коммитами, по одному на пункт, с тестом.
-Перед коммитом — `pytest -q --timeout=180`.
-mypy и ruff в CI уже зелёные — рефакторинг engine.py можно начинать.
-```
+3. ПУНКТ 3 РЕВЬЮ — СТРУКТУРИРОВАННОЕ ЛОГИРОВАНИЕ.
+   - Один логгер; уровни через FACTORY_LOG_LEVEL, формат через
+     FACTORY_LOG_FORMAT=json (по умолчанию человекочитаемый).
+   - Контекст: run_id, stage, role, task_id — в каждой записи.
+   - Логировать: записи журнала (seq, event_type), решения гейтов,
+     старт/стоп песочницы, решения карантина, превышение контекста/бюджета.
+   - Тест: JSON-строка парсится, поля на месте, уровень фильтруется,
+     секреты (env, токены) в лог не попадают.
+
+4. ПУНКТ 6 РЕВЬЮ — ПОКРЫТИЕ SECURITY-МОДУЛЕЙ ДО ≥70%.
+   isolation.py, sandbox.py, root_helper.py, retrieval.py.
+   - Unit-тесты с моками только для логики; живые проверки остаются в
+     джобе integration, где есть bwrap, ACL и отдельный uid.
+   - Мерить: python3 -m pytest --cov=factory.runtime.isolation
+     --cov=factory.runtime.sandbox --cov=factory.runtime.root_helper
+     --cov=factory.retrieval --cov-report=term-missing.
+   - Не «поднимать покрытие» пустыми assert: каждый тест должен падать,
+     если убрать проверяемую ветку.
+
+5. ПУНКТ 5 РЕВЬЮ — BANDIT BASELINE + NOSEC.
+   - bandit -r factory/ -ll, baseline в репозитории; known findings с
+     обоснованным # nosec BXXX; джоб в CI.
+   - SHA1 в ui/data.py заменить на usedforsecurity=False или sha256.
+
+6. ПУНКТ 7 РЕВЬЮ — СУЗИТЬ except Exception.
+   - engine/__init__.py, runtime/loop.py, runtime/evidence.py,
+     runtime/worktree.py и другие места из отчёта.
+   - Где broad except осознанный — # noqa: BLE001 и комментарий, что
+     именно ловится и почему; тест на это поведение.
+
+ПРАВИЛА РАБОТЫ:
+  - Перед каждым коммитом: python3 -m pytest --timeout=180 (полный прогон,
+    ~5 минут); python3 -m ruff check factory/ tests/; python3 -m mypy.
+  - Python 3.10 — минимальная поддерживаемая версия: без PEP 701
+    f-strings и синтаксиса 3.11+. Быстрая проверка:
+    python3.11 -m py_compile <изменённые файлы>.
+  - После пуша: gh run list --limit 2, затем
+    gh run watch <run-id> --exit-status. Красный CI чинить до новой работы.
+  - Журнал — только через factory CLI; state.json вручную не править;
+    PASS пишет только 02-independent-verifier (AGENTS.md).
+  - Не трогать исторические audit-записи; обновлять только
+    docs/audit/handoff-code-review.md (этот файл — активный handoff).
+  - pytest addopts уже содержит -q: второй -q съедает строку summary.
+
+КОМАНДЫ ПРОВЕРКИ:
+  python3 -m pytest --timeout=180 -rs | tail -3
+  python3 -m ruff check factory/ tests/
+  python3 -m mypy
+  factory doctor
+  gh run list --limit 2 && gh run watch <run-id> --exit-status
+
+РЕЛИЗ 1.0.15 — только когда разбиение (аудит-пункт 1) и пункты 3, 5, 6, 7
+закрыты или сознательно отложены с записью в handoff.
+Конвенция (handoff-1.0.13.md, раздел 3.1):
+  1. Обновить VERSION, factory/__init__.py, README.md, README.en.md,
+     DESIGN.md, docs/runtime.md, docs/quickstart.md, tests/test_docs.py —
+     все места, где стоит версия.
+  2. Переименовать [Unreleased] в [1.0.15] — <дата>; проверить, что каждая
+     запись описывает «было/стало», а не только «сделано».
+  3. Коммит "Release 1.0.15: ...", пуш, тег v1.0.15,
+     gh release create v1.0.15 --target main --title ... --notes ...
+  4. Без явного решения человека релиз не публиковать.
+
+ГРАБЛИ (проверены на практике):
+  - Циклические импорты: пакет __init__ импортирует подмодули; подмодули
+    импортируют пакет только внутри функций.
+  - monkeypatch путей: tests/test_engine.py:323 патчит
+    factory.engine._next_action. Если _next_action переедет, патч должен
+    указывать на новый модуль — иначе тест пройдёт, ничего не проверив.
+  - verification_is_stale и _task_deliverable_errors импортируются снаружи,
+    record_verification — публичное имя; все три обязаны остаться на
+    factory.engine.
+  - ruff F401 в __init__.py: реэкспорт помечать "as name" или __all__,
+    иначе lint покраснеет.
+  - factory/runtime/fixtures/nano/product/src/todo.py — данные эталонного
+    прогона, не код Фабрики; менять только если сломан сам fixture.
+  - mypy strict нельзя включать на engine/verify целиком: сотни ошибок.
+    Расширять files по одному модулю, начиная с checkpoint.py, journal.py,
+    pipeline.py.
+  - Тесты, которым нужна живая машина, пропускаются через _helper_ready();
+    не превращать skip в pass.
+
+DEFINITION OF DONE:
+  - Полный pytest зелёный; ruff и mypy чисты; CI 16 job'ов зелёный.
+  - Каждый коммит — один пункт, с тестом или с объяснением, почему тест
+    структурный (реэкспорт, разбиение).
+  - handoff-code-review.md обновлён: что закрыто, что осталось, новый HEAD,
+    точное число тестов.
+  - Рабочее дерево чистое, main = origin/main.
+````
 
 ---
 
 ## Грабли (из предыдущих циклов, актуальны и здесь)
 
-1. **mypy на engine/verify выдаст сотни ошибок** — начинай с чистых модулей, включай постепенно
-2. **Разбиение engine.py требует аккуратности с циклическими импортами** — планируй границы пакета заранее
-3. **ruff --fix может сломать форматирование** — проверяй дифф перед коммитом
-4. **Bandit baseline нужно коммитить** — иначе CI будет падать на известных шумовых находках
-5. **Покрытие isolation/sandbox требует живой машины** — unit-тесты с моками только для логики, настоящие проверки в job integration
+1. **mypy на engine/verify выдаст сотни ошибок** — начинай с чистых модулей, включай постепенно: `checkpoint.py`, `journal.py`, `pipeline.py`, затем `engine`/`verify`.
+2. **Разбиение engine.py требует аккуратности с циклическими импортами** — пакет `__init__` импортирует подмодули, подмодули импортируют пакет только внутри функций. Образец — `_judged_entries` в `factory/engine/verification.py`.
+3. **monkeypatch не прощает переездов** — `tests/test_engine.py:323` подменяет `factory.engine._next_action`, `tests/test_verify.py` подменяет `factory.verify.PACKAGE_ROOT`. Если функция или константа переехала, патч должен указывать на новый модуль; иначе тест зелёный, а проверка мертва.
+4. **ruff --fix может сломать форматирование** — проверяй дифф перед коммитом; в `__init__.py` реэкспорт помечай `as name` или `__all__`, иначе F401.
+5. **Bandit baseline нужно коммитить** — иначе CI будет падать на известных шумовых находках.
+6. **Покрытие isolation/sandbox требует живой машины** — unit-тесты с моками только для логики, настоящие проверки в job integration.
+7. **Python 3.10 — минимум** — PEP 701 f-strings (кавычки внутри выражения) и синтаксис 3.11+ ломают шесть матричных job'ов; перед коммитом `python3.11 -m py_compile` изменённых файлов.
+8. **Тест, который «проходит» на сломанном коде, хуже отсутствующего** — после ослабления патча или переезда функции проверь, что тест падает без исправления.
 
 ---
 

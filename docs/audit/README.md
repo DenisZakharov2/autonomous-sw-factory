@@ -44,6 +44,15 @@ which would have given passwordless root back, and it left the helper
 uninstallable. The findings were confirmed, the patch was rewritten, and the
 divergences are listed in `fix-plan-1.0.12.md`.
 
+## `handoff-code-review.md`
+
+The entry point for the cycle that follows the independent code review of
+release 1.0.14: nine categories of structural problems, what the review
+confirmed, what the runtime plan already closed, and the detailed prompt for
+the next session. At the time of writing, the static-analysis items — mypy
+and ruff in CI — are closed, and the first slice of the engine split is done:
+`factory/engine/` with `verification.py` and `common.py`.
+
 ## `fix-plan-1.0.13.md`
 
 The plan for the next cycle, written from an independent review of release

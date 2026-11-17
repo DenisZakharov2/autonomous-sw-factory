@@ -21,11 +21,15 @@
 | Показатель | Значение |
 |------------|----------|
 | Версия | 1.0.14 (релиз выпущен, тег v1.0.14) |
-| Тесты | 464 passed (pytest -q --timeout=180) |
-| CI | 15 job'ов зелёные (Ubuntu/macOS/Windows × 3.10–3.13, eval, integration, build) |
+| Тесты | 479 passed (pytest -q --timeout=180) |
+| CI | 16 job'ов: Ubuntu/macOS/Windows × 3.10–3.13, lint, eval, integration, build |
 | Покрытие | ~77% общие, но security-модули 24–38% |
-| engine.py | 2407 строк (цикломатическая сложность D/E) |
-| verify.py | 791 строка |
+| engine.py | 2405 строк (цикломатическая сложность D/E) |
+| verify.py | 820 строк |
+
+**Прогресс после ревью:** пункты 2 (mypy в CI) и 4 (ruff в CI) закрыты.
+Следующий по порядку аудитора — пункт 1, разбиение `engine.py` и
+`verify.py`. Подробности — в разделе «Что уже сделано после ревью».
 
 ---
 
@@ -99,6 +103,16 @@
 | 1.5 → AST разбор | `ast.parse` вместо регулярок в `factory/trace.py` |
 | 1.7 → Doctor limits | Проверки роли ≤ 4500, шаблоны ≤ 2200 в `factory/verify.py` |
 
+## Что уже сделано после ревью
+
+| Пункт ревью | Что сделано |
+|-------------|-------------|
+| 2. mypy в CI | `mypy>=1.10` в `[project.optional-dependencies.dev]`; `[tool.mypy]` со `strict = true` и `files` из четырёх чистых модулей (`paths.py`, `errors.py`, `state.py`, `config.py`); `follow_imports = "silent"`. Джоб `lint` в CI. Строгий режим нашёл переиспользование имени `key` в `config.py` и возвраты `Any` в `state.py` — оба исправлены. |
+| 4. ruff в CI | `ruff>=0.6` в dev-зависимостях; `[tool.ruff]` с `E4/E7/E9/F`. Убраны пять мёртвых импортов (`INDEX_DIR`, `jsonschema`, `policy_allows`, `sandbox_env`, `FilterError`), четыре мёртвые переменные, три строки с `;` в fixture-продукте. `lint` гейтит `build`. |
+
+Проверки после этих правок: `pytest` — 479 passed, `ruff check factory/ tests/` — чисто,
+`mypy` — чисто. CI-ран 16 job'ов зелёный.
+
 ---
 
 ## Промпт для следующей сессии
@@ -116,14 +130,19 @@
 Задача: начать закрывать результаты независимого код-ревью (9 категорий).
 
 Порядок работ (по приоритету аудитора):
-1. **mypy + ruff в CI** — быстрый выигрыш, ловит класс ошибок типов и стиля
-   - Добавить mypy в pyproject.toml, создать myp.ini, job в CI
-   - Добавить ruff в CI, исправить 3 неиспользуемых импорта
-   - Запустить mypy на paths.py/errors.py/state.py/config.py — оценить объём ошибок
-
-2. **Разбить engine.py / verify.py** — главная боль поддерживаемости
-   - engine.py (2407 строк) → factory/engine/ пакет
-   - verify.py (791 строка) → factory/verify/ пакет
+1. ~~**mypy + ruff в CI**~~ — **закрыто.** Джоб `lint` (ruff `E4/E7/E9/F`,
+   mypy strict на четырёх чистых модулях) гейтит `build`. Следующий шаг
+   для mypy — расширять `files` на `checkpoint.py`, `journal.py`,
+   `pipeline.py`, затем `engine`/`verify`.
+2. **Разбить engine.py / verify.py** — главная боль поддерживаемости,
+   следующая работа
+   - engine.py (2405 строк) → factory/engine/ пакет
+   - verify.py (820 строк) → factory/verify/ пакет
+   - Публичный API `factory.engine` / `factory.verify` сохранить
+     реэкспортом в `__init__.py`: тесты и рантайм импортируют оттуда.
+   - Начать с кластера проверки (`verification_report` … `_task_deliverable_errors`):
+     он почти замкнут, внешних зависимостей пять, и они перечислены в
+     анализе сессии.
    - Добавить radon проверку в CI
 
 3. **Структурированное логирование** — нужен для production-диагностики
@@ -136,7 +155,7 @@
 
 Работай атомарными коммитами, по одному на пункт, с тестом.
 Перед коммитом — `pytest -q --timeout=180`.
-Не начинай с рефакторинга engine.py, не убедившись, что mypy/ruff в CI зелёные.
+mypy и ruff в CI уже зелёные — рефакторинг engine.py можно начинать.
 ```
 
 ---

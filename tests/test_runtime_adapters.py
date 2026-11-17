@@ -111,6 +111,38 @@ def test_missing_binary_is_explicit(context):
     assert "not found" in result.stderr
 
 
+E2BIG_MAX_ARG_BYTES = 131072  # Linux MAX_ARG_STRLEN: the limit of one argv string
+
+
+def test_a_prompt_that_does_not_fit_argv_is_truncated_not_passed_as_is(tmp_path, context):
+    """`execve` refuses one argument over MAX_ARG_STRLEN with E2BIG.
+
+    A 200 KiB prompt used to reach the kernel untouched and the step failed
+    with "argument list too long". The adapter now cuts it before that and
+    says so inside the prompt, so the agent knows it is reading a fragment.
+    """
+    prompt = "x" * 200_000
+    opencode = OpenCodeExecutor(binary="opencode").command(prompt, context.run_dir)
+    assert len(opencode[-1].encode("utf-8")) < E2BIG_MAX_ARG_BYTES
+    assert "промпт обрезан" in opencode[-1]
+
+    hermes = HermesExecutor(binary="hermes").command(
+        prompt, context.run_dir, tmp_path / "usage.json"
+    )
+    assert len(hermes[2].encode("utf-8")) < E2BIG_MAX_ARG_BYTES
+    assert "промпт обрезан" in hermes[2]
+
+
+def test_a_short_prompt_reaches_the_executor_unchanged(tmp_path, context):
+    prompt = "short prompt"
+    opencode = OpenCodeExecutor(binary="opencode").command(prompt, context.run_dir)
+    assert opencode[-1] == prompt
+    hermes = HermesExecutor(binary="hermes").command(
+        prompt, context.run_dir, tmp_path / "usage.json"
+    )
+    assert hermes[2] == prompt
+
+
 @POSIX_SHELL
 def test_hermes_command_reads_usage_file(tmp_path, monkeypatch, context):
     bin_dir = tmp_path / "bin"

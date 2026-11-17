@@ -100,8 +100,8 @@ class HermesExecutor:
             truncated = prompt_bytes[:max_prompt_bytes].decode("utf-8", errors="ignore")
             prompt = (
                 truncated
-                + "\n\n… (промпт обрезан: превышен лимит аргументов командной строки, "
-                f"полный промпт сохранён в runtime/ev-XXXX.prompt.md)"
+                + "\n\n… (промпт обрезан: превышен лимит аргументов командной строки; "
+                "полный промпт сохранён в каталоге runtime прогона)"
             )
         cmd = [self.binary, "-z", prompt, "--in", str(run_dir), "--usage-file", str(usage_file)]
         if self.model:

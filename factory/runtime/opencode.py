@@ -117,8 +117,8 @@ class OpenCodeExecutor:
             truncated = prompt_bytes[:max_prompt_bytes].decode("utf-8", errors="ignore")
             prompt = (
                 truncated
-                + "\n\n… (промпт обрезан: превышен лимит аргументов командной строки, "
-                f"полный промпт сохранён в runtime/ev-XXXX.prompt.md)"
+                + "\n\n… (промпт обрезан: превышен лимит аргументов командной строки; "
+                "полный промпт сохранён в каталоге runtime прогона)"
             )
         if self.mode == "prompt":
             cmd = [self.binary, "--prompt", prompt, "--auto", "--standalone"]

@@ -273,3 +273,29 @@ def test_run_loop_uses_the_parallel_branch_and_records_usage(build_env):
     assert {row["task_id"] for row in rows} == {"TASK-A", "TASK-B"}
     evidence = list((run_dir / "runtime" / "evidence").glob("*.json"))
     assert any("parallel_batch" in path.read_text(encoding="utf-8") for path in evidence)
+
+
+def test_a_parallel_task_that_does_not_fit_the_window_is_not_executed(build_env, monkeypatch):
+    """The parallel branch checks the model window too, before the executor.
+
+    The limit lived only in `loop.py`: a parallel worker received a prompt of
+    any size, and the provider answered with a context error after the call.
+    The task must stop before `executor.execute()`.
+    """
+    from factory.runtime import worktree
+
+    runs, run_dir, stage = build_env
+    tasks = list(_tasks(run_dir).values())
+    executor = RecordingExecutor(sleep=0.01)
+    monkeypatch.setattr(worktree, "_context_limit_tokens", lambda role: 1)
+
+    batch = run_parallel_tasks(
+        "run-01", run_dir, stage, tasks, executor, root=runs, max_workers=2
+    )
+
+    assert not batch.ok
+    assert executor.starts == {}
+    assert all("контекст слишком велик" in (item.error or "") for item in batch.outcomes)
+    assert (run_dir / "runtime" / "parallel-TASK-A.prompt.md").is_file()
+    assert load_state(run_dir)["tasks"]["TASK-A"]["status"] == "pending"
+    assert not (run_dir / "runtime" / "worktrees").exists()

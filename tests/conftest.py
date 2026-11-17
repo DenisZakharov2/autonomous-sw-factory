@@ -1,5 +1,6 @@
-import sys
 import os
+import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -11,9 +12,9 @@ if str(ROOT) not in sys.path:
 from factory.engine import init_run
 
 
-@pytest.fixture(autouse=True)
-def _clean_factory_env():
-    """Ensure tests don't inherit FACTORY_ROOT/FACTORY_RUNS_ROOT from operator env."""
+@contextmanager
+def _hidden_factory_env():
+    """Hide the operator's FACTORY_* roots for the duration of the block."""
     old_root = os.environ.pop("FACTORY_ROOT", None)
     old_runs = os.environ.pop("FACTORY_RUNS_ROOT", None)
     try:
@@ -23,6 +24,13 @@ def _clean_factory_env():
             os.environ["FACTORY_ROOT"] = old_root
         if old_runs is not None:
             os.environ["FACTORY_RUNS_ROOT"] = old_runs
+
+
+@pytest.fixture(autouse=True)
+def _clean_factory_env():
+    """A test must not depend on where the operator pointed `FACTORY_ROOT`."""
+    with _hidden_factory_env():
+        yield
 
 
 @pytest.fixture()

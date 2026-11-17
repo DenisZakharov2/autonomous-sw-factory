@@ -1334,3 +1334,26 @@ def test_journal_is_virtualized_and_fed_by_sse_replay():
     assert 'class="vsp" aria-hidden="true"' in text  # распорки держат высоту скроллбара
     assert "/events/stream?from_seq=0" in text       # полный реплей журнала в клиентское хранилище
     assert "function renderJournalWindow()" in text
+
+
+def test_the_payload_cache_evicts_the_oldest_entry():
+    """Долгоживущий дашборд открывает много прогонов: словарь не должен расти без предела."""
+    data.clear_cache()
+    for index in range(data._CACHE_MAX_SIZE + 3):
+        assert data._cached(f"key:{index}", index, lambda index=index: index) == index
+    assert len(data._cache) == data._CACHE_MAX_SIZE
+    assert "key:0" not in data._cache
+    assert f"key:{data._CACHE_MAX_SIZE + 2}" in data._cache
+
+
+def test_a_cache_hit_moves_the_entry_out_of_the_eviction_order():
+    data.clear_cache()
+    assert data._cached("keep", "sig", lambda: "value") == "value"
+    for index in range(data._CACHE_MAX_SIZE - 1):
+        data._cached(f"filler:{index}", index, lambda index=index: index)
+    # The cache is full and "keep" is the oldest entry; a hit makes it the newest.
+    assert data._cached("keep", "sig", lambda: "produced again") == "value"
+    data._cached("new", "sig", lambda: "new")
+    assert "keep" in data._cache
+    assert "filler:0" not in data._cache
+

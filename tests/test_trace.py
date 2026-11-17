@@ -108,6 +108,31 @@ def test_unittest_method_behind_a_class_segment_is_found(tmp_path):
     assert _row(run_dir)["tests_ok"] is True
 
 
+def test_a_python_symbol_inside_a_string_is_not_a_declaration(tmp_path):
+    """Многострочная строка не объявляет функцию: регулярка считала её за `def`.
+
+    `_symbol_declared` искал `def <name>(` в начале строки, а многострочная
+    строка с примером выглядит ровно так. `ast.parse` видит `Constant`, а не
+    `FunctionDef`, поэтому выдуманный тест больше не закрывает требование.
+    """
+    run_dir = _run(
+        tmp_path,
+        tests=["product/src/todo.py::invented"],
+        files={
+            "product/src/todo.py": (
+                "HELP = '''\n"
+                "def invented():\n"
+                "    return []\n"
+                "'''\n\n"
+                "def real():\n    return []\n"
+            )
+        },
+    )
+    row = _row(run_dir)
+    assert row["tests_ok"] is False
+    assert "does not declare invented" in row["test_problems"][0]
+
+
 def test_rust_test_function_is_found(tmp_path):
     run_dir = _run(
         tmp_path,
@@ -153,6 +178,26 @@ def test_attribute_may_be_separated_by_comments_and_blank_lines(tmp_path):
                 "    // regression: sorting drops duplicates\n"
                 "    #[test]\n\n"
                 "    // keep this attribute chain working\n"
+                "    fn sorted() {}\n"
+                "}\n"
+            )
+        },
+    )
+    assert _row(run_dir)["tests_ok"] is True
+
+
+def test_a_block_comment_between_the_attribute_and_the_fn_still_counts(tmp_path):
+    """`*/` — тоже строка комментария, а не конец поиска атрибута."""
+    run_dir = _run(
+        tmp_path,
+        tests=["product/src/lib.rs::tests::sorted"],
+        files={
+            "product/src/lib.rs": (
+                "#[cfg(test)]\nmod tests {\n"
+                "    #[test]\n"
+                "    /* regression:\n"
+                "     * sorting keeps order\n"
+                "     */\n"
                 "    fn sorted() {}\n"
                 "}\n"
             )

@@ -26,7 +26,7 @@ RS_FN_RE = re.compile(
 )
 RS_TEST_ATTR_RE = re.compile(r"^#\[[ \t]*(?:tokio::)?test(?:[ \t]*\(|[ \t]*\])")
 RS_ATTR_RE = re.compile(r"^#\[.*\]$")
-RS_COMMENT_RE = re.compile(r"^(?://|/\*|\*|/\*)")
+RS_COMMENT_RE = re.compile(r"^(?://|/\*|\*|\*/)")
 
 
 def _python_symbols(text: str) -> set[str]:

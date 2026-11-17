@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from ..errors import FactoryError
 from . import data, export
-from .data import RunNotFound, FilterError, compare_runs, compare_revision, TIMESERIES_METRICS, TIMESERIES_BUCKETS, compare_artifact_revision, compare_artifact_data, ARTIFACT_NAMES
+from .data import RunNotFound, compare_runs, compare_revision, TIMESERIES_METRICS, TIMESERIES_BUCKETS, compare_artifact_revision, compare_artifact_data, ARTIFACT_NAMES
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8420
@@ -465,7 +465,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         # Validate run exists
         try:
-            run_path = data.run_path(run_id, self.runs_dir)
+            data.run_path(run_id, self.runs_dir)
         except data.RunNotFound as exc:
             return self._json(HTTPStatus.NOT_FOUND, {"error": str(exc), "run_id": run_id})
 

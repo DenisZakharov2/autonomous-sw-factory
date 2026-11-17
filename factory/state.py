@@ -75,7 +75,7 @@ def load_state(run_dir: Path) -> dict[str, Any]:
     path = state_path(run_dir)
     if not path.exists():
         raise RunError(f"run state not found: {path}")
-    state = load_json(path)
+    state: dict[str, Any] = load_json(path)
     validate_against_schema(state, "state.schema.json", str(path))
     return state
 
@@ -125,7 +125,8 @@ def stage_list(pipeline: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def find_stage(pipeline: dict[str, Any], stage_id: str) -> dict[str, Any]:
-    for stage in pipeline["stages"]:
+    stages: list[dict[str, Any]] = pipeline["stages"]
+    for stage in stages:
         if stage["id"] == stage_id:
             return stage
     raise RunError(f"unknown stage: {stage_id}")
@@ -153,9 +154,10 @@ def set_current_stage(state: dict[str, Any], pipeline: dict[str, Any]) -> dict[s
 
 
 def stage_gate(state: dict[str, Any], stage: dict[str, Any]) -> dict[str, Any]:
+    gates: dict[str, dict[str, Any]] = state["gate_status"]
     gate_id = stage["gate"]["id"]
-    if gate_id not in state["gate_status"]:
-        state["gate_status"][gate_id] = {
+    if gate_id not in gates:
+        gates[gate_id] = {
             "status": "pending",
             "approver": stage["gate"]["approver"],
             "decided_by": None,
@@ -163,7 +165,7 @@ def stage_gate(state: dict[str, Any], stage: dict[str, Any]) -> dict[str, Any]:
             "evidence": [],
             "attempts": 0,
         }
-    return state["gate_status"][gate_id]
+    return gates[gate_id]
 
 
 def add_task(state: dict[str, Any], task: dict[str, Any]) -> None:
@@ -176,9 +178,10 @@ def add_task(state: dict[str, Any], task: dict[str, Any]) -> None:
 
 
 def get_task(state: dict[str, Any], task_id: str) -> dict[str, Any]:
-    if task_id not in state["tasks"]:
+    tasks: dict[str, dict[str, Any]] = state["tasks"]
+    if task_id not in tasks:
         raise RunError(f"unknown task: {task_id}")
-    return state["tasks"][task_id]
+    return tasks[task_id]
 
 
 def claim_task(state: dict[str, Any], task_id: str, owner: str) -> dict[str, Any]:

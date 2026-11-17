@@ -629,8 +629,9 @@ def compare_runs(run_id_a: str, run_id_b: str, root: str | Path | None = None) -
     Raises ``RunNotFound`` if either run does not exist, or ``ValueError`` if
     ``run_id_a == run_id_b``.
     """
-    path_a = _run_path(run_id_a, root)
-    path_b = _run_path(run_id_b, root)
+    # Resolve first: `_run_path` raises `RunNotFound` before any payload work.
+    _run_path(run_id_a, root)
+    _run_path(run_id_b, root)
     if run_id_a == run_id_b:
         raise ValueError("run ids must differ")
 

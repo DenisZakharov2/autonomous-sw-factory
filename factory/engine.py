@@ -17,7 +17,6 @@ from .artifacts import (
     collect_artifact_entries,
     pattern_paths,
     plan_rows,
-    policy_allows,
     resolve_recorded_path,
     sha256_dir,
     substitute_path,
@@ -2097,7 +2096,6 @@ def veto(
 
 def _validate_plan_graph(tasks: list[dict[str, Any]], mode_roles: list[str]) -> None:
     ids = {task["task_id"] for task in tasks}
-    owners = {task["task_id"]: task.get("owner", "") for task in tasks}
     for task in tasks:
         if task.get("owner") not in mode_roles:
             raise RunError(

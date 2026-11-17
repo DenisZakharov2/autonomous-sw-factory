@@ -33,6 +33,8 @@ dev = [
   "pytest-timeout>=2.3",
   "build>=1.2",
   "openpyxl>=3.1",
+  "mypy>=1.10",
+  "ruff>=0.6",
 ]
 xlsx = [
   "openpyxl>=3.1",
@@ -53,3 +55,20 @@ version = {file = ["VERSION"]}
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+# Strict mode starts on the modules that are already clean and grows outward.
+# `engine.py` and `verify.py` have hundreds of findings; switching them on in
+# one step would only teach everyone to ignore the job.
+files = ["factory/paths.py", "factory/errors.py", "factory/state.py", "factory/config.py"]
+ignore_missing_imports = true
+# Report errors only for the modules above, not for everything they import.
+follow_imports = "silent"
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

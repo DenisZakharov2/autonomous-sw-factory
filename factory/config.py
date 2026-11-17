@@ -8,7 +8,6 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
-import jsonschema
 import yaml
 from jsonschema import exceptions as jsonschema_exceptions
 from jsonschema.validators import validator_for
@@ -145,8 +144,8 @@ def load_pipeline() -> dict[str, Any]:
 
 def load_artifacts(mode: str | None = None) -> dict[str, Any]:
     path = PACKAGE_ROOT / "artifacts.yaml"
-    key = (_file_key(path), mode)
-    cached = _ARTIFACTS_CACHE.get(key)
+    cache_key = (_file_key(path), mode)
+    cached = _ARTIFACTS_CACHE.get(cache_key)
     if cached is not None:
         return copy.deepcopy(cached)
     data = _read_yaml(path)
@@ -175,11 +174,14 @@ def load_artifacts(mode: str | None = None) -> dict[str, Any]:
     for artifact_id, spec in artifacts.items():
         if not isinstance(spec, dict) or "path" not in spec or "owner" not in spec:
             raise ConfigError(f"artifact {artifact_id!r} must define path and owner")
-        path = str(spec["path"])
-        key = path.replace("{task_id}", "*").replace("{num}", "*")
-        if key in seen_paths:
-            raise ConfigError(f"artifact path collision: {artifact_id} and {seen_paths[key]} both use {path}")
-        seen_paths[key] = artifact_id
+        artifact_path = str(spec["path"])
+        normalized = artifact_path.replace("{task_id}", "*").replace("{num}", "*")
+        if normalized in seen_paths:
+            raise ConfigError(
+                f"artifact path collision: {artifact_id} and "
+                f"{seen_paths[normalized]} both use {artifact_path}"
+            )
+        seen_paths[normalized] = artifact_id
         if spec.get("template"):
             template = PACKAGE_ROOT / str(spec["template"])
             if not template.exists():
@@ -190,7 +192,7 @@ def load_artifacts(mode: str | None = None) -> dict[str, Any]:
                 raise ConfigError(f"artifact {artifact_id}: missing schema {schema}")
         if not spec.get("directory") and not spec.get("schema") and not spec.get("required_sections"):
             raise ConfigError(f"artifact {artifact_id}: needs schema, required_sections or directory=true")
-    _ARTIFACTS_CACHE[key] = copy.deepcopy(data)
+    _ARTIFACTS_CACHE[cache_key] = copy.deepcopy(data)
     while len(_ARTIFACTS_CACHE) > _CONFIG_CACHE_LIMIT:
         _ARTIFACTS_CACHE.popitem(last=False)
     return data

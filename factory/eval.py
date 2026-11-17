@@ -37,7 +37,6 @@ from .paths import validate_run_id
 from .runtime.base import Executor
 from .runtime.isolation import executor_user_scope
 from .runtime.loop import run_loop
-from .runtime.sandbox import sandbox_env
 from .runtime.usage import UsageLedger
 from .state import load_state
 from .trace import build_matrix

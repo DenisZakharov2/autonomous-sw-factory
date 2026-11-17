@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from factory.engine import init_run
+from factory.engine import init_run  # noqa: E402 — the repo root goes on sys.path above
 
 
 @contextmanager

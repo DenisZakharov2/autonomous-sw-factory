@@ -54,7 +54,7 @@ from .quarantine import (
 from .state import load_state
 from .trace import build_matrix
 from .verify import doctor_report, rerecord_summary, verify_run
-from .retrieval import build_index, retrieve, INDEX_DIR
+from .retrieval import build_index, retrieve
 
 
 def _print_json(data: object) -> None:

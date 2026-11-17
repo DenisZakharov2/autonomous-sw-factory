@@ -23,6 +23,9 @@ All notable changes are recorded here. From `1.0.0` the project follows Semantic
 ### Документация
 - **`TECHNICAL.md` показывает всё дерево.** В дереве не было `config.py`, `paths.py`, `state.py`, `checkpoint.py`, `verify.py`, `retrieval.py`, `trace.py`, `metrics.py`, `usage_report.py`, `compare.py`, `eval.py`, `ui/export.py`, `runtime/isolation.py` и `runtime/worktree.py` — модули, которые несут основную логику.
 
+### Инструменты
+- **`ruff` и `mypy` проверяют код в CI.** `ruff` с набором `E4/E7/E9/F` нашёл мёртвые импорты и переменные; `mypy` в строгом режиме стартует с четырёх чистых модулей (`paths.py`, `errors.py`, `state.py`, `config.py`) и расширяется по мере расчистки остальных. Джоб `lint` стоит перед сборкой колеса: колесо не собирается из исходников, которые не проходят статические проверки.
+
 ## [1.0.14] — 2026-11-16
 
 Цикл без находки: 1.0.13 закрыл дыру, которую нашёл независимый аудит, и в этом цикле нечего закрывать в том же смысле. Здесь другое — скорость и правда в текстах.

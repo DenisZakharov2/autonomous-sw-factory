@@ -38,6 +38,15 @@ from .base import Executor, RunContext, RuntimeFailure, safe_write_text
 from .evidence import EvidenceStore
 from .guard import Fingerprint
 from .prompt import build_prompt
+from .staging import (
+    WritableEntry,
+    build_plan as build_staging_plan,
+    cleanup as cleanup_staging,
+    prepare as prepare_staging,
+    promote as promote_staging,
+    reject_symlink_chain,
+    staging_root,
+)
 from .submit import work_order_submit_plan
 from .usage import UsageLedger
 
@@ -135,63 +144,107 @@ def _artifact_digest(order: dict[str, Any], run_dir: Path, task: dict[str, Any] 
     return digest.hexdigest()
 
 
-def _collect_writable_paths(
+def _writable_entries(
     order: dict[str, Any], run_dir: Path, task: dict[str, Any] | None
-) -> dict[Path, bool]:
-    """Paths the executor may write, derived from the order, never the run root.
+) -> list[WritableEntry]:
+    """Artifact destinations the executor may change, never the run root.
 
-    A file artifact is exposed through its parent directory (so an editor can
-    write atomically); a directory artifact and a task directory are exposed
-    directly.  Root artifacts are exposed one file at a time: the project root
-    as a whole is never mounted writable, otherwise `s15_quarantine` could
-    rewrite `factory/` itself.
+    A file artifact is writable through its parent directory, because an
+    atomic writer creates `<target>.tmp` next to the target.  A directory
+    artifact is writable as a tree.  A project-root artifact (`skills-lock`)
+    is not mounted at all: it is staged separately and promoted by the host,
+    so the project root never becomes writable.
     """
     run = run_dir.resolve()
     project = project_root().resolve()
-    entries: dict[Path, bool] = {}
+    entries: list[WritableEntry] = []
+    seen: set[tuple[Path, str, str, bool]] = set()
 
-    def add(candidate: Path, is_dir: bool, *, root: bool = False) -> None:
+    def add(candidate: Path, kind: str, *, root: bool = False, pattern: str = "") -> None:
+        base = project if root else run
+        reject_symlink_chain(base, candidate)
         resolved = candidate.resolve()
-        if not root:
+        key = (resolved, kind, pattern, root)
+        if key in seen:
+            return
+        if root:
+            if project not in resolved.parents:
+                raise RuntimeFailure(f"root artifact escapes the project: {resolved}")
+        else:
             if resolved != run and run not in resolved.parents:
                 raise RuntimeFailure(f"writable path escapes the run: {resolved}")
             if resolved == run:
                 raise RuntimeFailure("refusing to expose the run directory writable")
-        else:
-            if project not in resolved.parents:
-                raise RuntimeFailure(f"root artifact escapes the project: {resolved}")
-        entries[resolved] = entries.get(resolved, False) or is_dir
+        seen.add(key)
+        entries.append(WritableEntry(target=resolved, kind=kind, pattern=pattern, root=root))
 
     for spec in order.get("artifacts") or []:
         raw = str(spec.get("resolved_path") or spec.get("path") or "")
-        if not raw or "{" in raw:
+        if not raw:
+            continue
+        if "{" in raw:
+            if spec.get("per_pattern") and "{num}" in raw:
+                candidate = Path(raw)
+                if not candidate.is_absolute():
+                    candidate = (project if spec.get("root") else run) / raw
+                add(
+                    candidate.parent,
+                    "pattern",
+                    root=bool(spec.get("root")),
+                    pattern=candidate.name.replace("{num}", "*"),
+                )
             continue
         is_root = bool(spec.get("root"))
         candidate = Path(raw) if Path(raw).is_absolute() else (project if is_root else run) / raw
         if spec.get("directory"):
-            add(candidate, True, root=is_root)
-        elif candidate.parent == (project if is_root else run):
-            add(candidate, False, root=is_root)
+            add(candidate, "tree", root=is_root)
         else:
-            add(candidate.parent, True, root=is_root)
+            add(candidate, "file", root=is_root)
 
     if task is not None and not _is_verification_order(order):
         # A verifier reads the task's deliverable and allowed files; it must
-        # not get a writable mount for any of them.  Its only write scope is
-        # the report spec already added above.
+        # not get a writable mount for any of them.
         for entry in task.get("allowed_files") or []:
             raw = str(entry)
             candidate = Path(raw) if Path(raw).is_absolute() else run / raw
             if raw.endswith("/"):
-                add(candidate, True)
-            elif candidate.parent == run:
-                add(candidate, False)
+                add(candidate, "tree")
             else:
-                add(candidate.parent, True)
+                add(candidate, "file")
 
+    if order.get("stage") == "s_in":
+        # The drill writes a bundle, a worktree archive and a restore clone
+        # here.  They are not registry artifacts, but the stage's own prompt
+        # tells the executor to produce them.
+        add(run / "backups", "tree")
+
+    return sorted(entries, key=lambda item: str(item.target))
+
+
+def _collect_writable_paths(
+    order: dict[str, Any], run_dir: Path, task: dict[str, Any] | None
+) -> dict[Path, bool]:
+    """Mount points the executor may write, derived from the work order.
+
+    Kept as the public shape the trust-boundary tests import: a mapping from
+    destination to `is_tree`.  Staging maps the same entries to private copies
+    under `runtime/agent/out`; `runtime/agent` is opened directly for the CLI's
+    own usage and transcript files.
+    """
+    run = run_dir.resolve()
+    staging = staging_root(run)
+    entries: dict[Path, bool] = {}
+    for item in _writable_entries(order, run_dir, task):
+        if item.root:
+            mount = staging / "_root"
+        elif item.kind in {"tree", "pattern"}:
+            mount = item.target
+        else:
+            mount = item.target.parent
+        entries[mount] = True
     # The Hermes adapter writes its usage file here; everything else under
     # `runtime/` (ledger, evidence) stays read-only for the executor.
-    add(run / "runtime" / "agent", True)
+    entries[(run / "runtime" / "agent").resolve()] = True
     return entries
 
 
@@ -659,10 +712,14 @@ def run_loop(
         before = Fingerprint.capture(run_dir)
         state = load_state(run_dir)
         task = state["tasks"].get(str(order.get("task_id"))) if order.get("task_id") else None
-        writable_entries = _collect_writable_paths(order, run_dir, task)
-        writable, placeholders = _prepare_writable_paths(writable_entries)
+        writable_entries = _writable_entries(order, run_dir, task)
+        staging = staging_root(run_dir)
         prompt = build_prompt(
-            order, run_dir=run_dir, role=order.get("next_role"), evidence=evidence
+            order,
+            run_dir=run_dir,
+            role=order.get("next_role"),
+            evidence=evidence,
+            staging=staging,
         )
         prompt_chars = _estimate_prompt_tokens(prompt)
         context_limit = _context_limit_tokens(order.get("next_role"))
@@ -692,6 +749,16 @@ def run_loop(
             )
             stop.evidence_path = str(path)
             return stop
+        plan = build_staging_plan(
+            writable_entries,
+            run_dir=run_dir,
+            project=project_root(),
+            staging=staging,
+            allow_project_root=True,
+        )
+        prepared = prepare_staging(plan, run_dir=run_dir)
+        agent_dir = (run_dir / "runtime" / "agent").resolve()
+        writable = [str(agent_dir)]
         context = RunContext(
             run_id=run_id,
             run_dir=run_dir,
@@ -704,23 +771,38 @@ def run_loop(
             runtime_dir=run_dir / "runtime",
             sequence=int(state["event_count"]),
             extra_read_write=tuple(writable),
+            extra_staged=tuple((str(dest), str(src)) for dest, src in prepared.binds),
+            staging_dir=staging,
         )
         safe_write_text(context.path_in_runtime("prompt.md"), prompt)
         started = time.monotonic()
         try:
             result = executor.execute(order, context)
         except Exception as exc:  # noqa: BLE001 - an adapter crash is a stop, not a traceback
-            _cleanup_placeholders(placeholders)
+            try:
+                cleanup_staging(prepared, run_dir=run_dir)
+            except FactoryError:
+                pass
             path = evidence_store.write_step(
                 step, order, {"status": "executor_crash", "error": repr(exc), "prompt": prompt}
             )
             stop = finish("executor_failed", STOP, f"{type(exc).__name__}: {exc}", stage_id)
             stop.evidence_path = str(path)
             return stop
-        _cleanup_placeholders(placeholders)
         elapsed = time.monotonic() - started
-
         after = Fingerprint.capture(run_dir)
+
+        promote_note = ""
+        if result.ok:
+            try:
+                promote_staging(plan, run_dir=run_dir, project=project_root())
+            except FactoryError as exc:
+                promote_note = f"{type(exc).__name__}: {exc}"
+        try:
+            cleanup_staging(prepared, run_dir=run_dir)
+        except FactoryError as exc:
+            promote_note = promote_note or f"staging cleanup failed: {exc}"
+
         drift = before.drift(after)
         usage: dict[str, Any] = dict(result.usage or {})
         ledger_step = ledger.next_step()
@@ -748,6 +830,13 @@ def run_loop(
                 "transcript": result.transcript_path,
             }
         )
+        if promote_note:
+            path = evidence_store.write_step(
+                step, order, {"status": "staging_rejected", "error": promote_note}
+            )
+            stop = finish("staging_rejected", STOP, promote_note, stage_id)
+            stop.evidence_path = str(path)
+            return stop
         if drift:
             path = evidence_store.write_step(
                 step,

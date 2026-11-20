@@ -541,17 +541,21 @@ legacy-заглушку. `examples/nano-todo` и исторические жур
   уликами. Без песочницы (`--no-sandbox`) это единственная защита, и она
   детектирует, а не предотвращает.
 - **Что именно делает `bwrap`.** Read-only корень (`--ro-bind / /`), свои
-  `/proc`, `/dev` и `/tmp`, отдельные PID/IPC/UTS-пространства,
-  `--cap-drop ALL`, `--new-session`, `--die-with-parent`. Внешние каталоги,
-  нужные CLI (кеш, сессии), добавляются через `--sandbox-rw PATH`. Путь,
-  который содержит каталог прогона или пакет `factory/`, отклоняется, чтобы
-  флаг не отменял границу. `--sandbox-rw ~/.hermes` даёт агенту запись в его
-  собственный установленный CLI и в `cron/`, `hooks/`, `skills/` — это удобно,
-  но это же и вектор самоподмены и автозапуска; передавайте минимальный набор
-  (`cache`, `logs`, `state.db*`), а не весь home агента.
+  `/proc`, `/dev` и `/tmp`, отдельные PID/IPC/UTS-пространства, `--cap-drop ALL`,
+  `--new-session`, `--die-with-parent`. Секретные каталоги и файлы оператора
+  (`.ssh`, `.aws`, `.gnupg`, `.kube`, `.docker`, `.config/gh`, `.claude`,
+  `.cursor`, `.codex`, `.openai`, `.anthropic`, `.netrc`, `.npmrc`, `.pypirc`,
+  `.git-credentials`, keyrings) заменяются пустым tmpfs и `/dev/null`.
+  В `~/.hermes` видны только `cache/`, `logs/`, `installs/` на запись и
+  `hermes-agent/`, `tools/` на чтение; `config.yaml`, `auth.json`, `.env`,
+  `sessions/` невидимы. Внешние каталоги, нужные CLI, добавляются через
+  `--sandbox-rw PATH`. Путь, который содержит каталог прогона, пакет
+  `factory/` или закрытый секрет, отклоняется, чтобы флаг не отменял границу.
 - **Остаточная граница.** Агент работает под тем же пользователем. `bwrap` —
   ядровая граница файловой системы, но не отдельный Unix-пользователь:
-  доступные пользователю секреты и сеть остаются доступны. Настоящая
+  остальные доступные пользователю файлы и сеть остаются доступны. Ключи
+  провайдера выбрасываются из окружения; credential proxy — отдельный PR
+  (PR-C2), до него прогон с реальной моделью без ключа не стартует. Настоящая
   изоляция «чужой пользователь или системный сервис» — следующий шаг, не
   `1.0.1`.
 
@@ -615,8 +619,11 @@ factory setup-executor          # helper сам ставит polkit-правил
   `validate_stage` не проходит (REQ-паритет, покрытие плана, acceptance), промпт
   получает список этих ошибок и право перезаписать объявленные артефакты — без
   этого исполнитель видел «всё на месте» и не мог починить стадию.
-- **Секреты** не передаются через промпт; адаптер наследует окружение только
-  потому, что CLI провайдера читает свои ключи сам.
+- **Секреты** не передаются через промпт и не наследуются из окружения:
+  `sandbox_env()` выбрасывает `FACTORY_*`, `PYTHONPATH` и переменные с
+  суффиксами `*_TOKEN`, `*_API_KEY`, `*_ACCESS_KEY`, `*_SECRET_KEY`,
+  облачными префиксами. Модельный ключ выдаёт credential proxy (PR-C2), а не
+  копия в env исполнителя.
 
 ## 7. Тесты
 
@@ -669,8 +676,14 @@ factory setup-executor          # helper сам ставит polkit-правил
   `blackbox.lock` и не меняет `state.json`;
 - root-артефакт открывается одним файлом, а не всем корнем проекта;
 - `--sandbox-rw <project_root>` и путь, содержащий `factory/`, отклоняются;
+- секретные каталоги и файлы оператора (`.ssh`, `.claude`, `.netrc` и остальные)
+  невидимы: пустой tmpfs или `/dev/null`;
+- `~/.hermes` — tmpfs: `config.yaml`, `auth.json`, `.env` и `sessions/` не
+  читаются, `cache/`, `logs/`, `installs/` доступны на запись, код CLI
+  (`hermes-agent/`, `tools/`) — read-only;
 - реальные исполнители по умолчанию идут в песочницу, `--no-sandbox` — только
-  явно; окружение потомка не содержит `FACTORY_*` и `PYTHONPATH`.
+  явно; окружение потомка не содержит `FACTORY_*`, `PYTHONPATH` и переменных с
+  суффиксами `*_TOKEN`, `*_API_KEY`, `*_ACCESS_KEY`, `*_SECRET_KEY`.
 
 ## 8. Как запускать
 
@@ -680,7 +693,7 @@ factory run --run-id demo --executor fake --max-steps 60
 
 # реальный исполнитель Hermes: песочница включена по умолчанию
 factory run --run-id live --executor hermes --yolo --max-steps 60 --timeout 900 \
-  --sandbox-rw ~/.hermes --sandbox-rw ~/.local/state --sandbox-rw ~/.cache
+  --sandbox-rw ~/.local/state --sandbox-rw ~/.cache
 
 # стоимость: `auto` = file на документации, file+terminal на s4_build
 factory run --run-id live --executor hermes --yolo --max-steps 1 \

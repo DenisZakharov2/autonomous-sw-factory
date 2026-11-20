@@ -37,6 +37,20 @@ def test_doctor_json(tmp_path):
     data = json.loads(result.stdout)
     assert data["roles"] == 22
     assert data["errors"] == []
+    masks = data["executor_masks"]
+    assert ".hermes" in masks["secret_home_paths"]
+    assert ".netrc" in masks["secret_home_paths"]
+    assert "_API_KEY" in masks["env_denied_suffixes"]
+    assert masks["hermes_passthrough"] == ["cache", "logs", "installs"]
+
+
+def test_doctor_prints_the_executor_masks(tmp_path):
+    result = cli("doctor", runs_root=tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "secret home paths:" in result.stdout
+    assert ".hermes" in result.stdout
+    assert "*_API_KEY" in result.stdout
+    assert "~/.hermes pass-through: cache, logs, installs" in result.stdout
 
 
 def _doctor_report(errors=None):

@@ -227,15 +227,14 @@ def test_sandbox_wraps_with_a_narrow_view(tmp_path):
         for index, item in enumerate(cmd)
         if item == "--bind"
     ]
-    # The run root is writable (atomic writers need the directory), while the
-    # control plane is re-mounted read-only on top of it.
-    assert (run, run) in binds
+    # The run root is read-only; a declared path is replaced by a staging copy.
+    assert (run, run) not in binds
     ro_targets = [
         cmd[index + 2]
         for index, item in enumerate(cmd)
         if item == "--ro-bind"
     ]
-    assert run not in ro_targets
+    assert run in ro_targets
     (tmp_path / "state.json").write_text("{}", encoding="utf-8")
     cmd = sandbox_command(["true"], tmp_path, enabled=True)
     assert f"{run}/state.json" in [
@@ -260,11 +259,10 @@ def test_sandbox_binds_context_read_write_paths(tmp_path, context):
     )
     assert cmd[0] == "bwrap"
     assert str(extra.resolve()) in cmd
-    binds = [cmd[index + 1] for index, item in enumerate(cmd) if item == "--bind"]
-    # The run root is bound writable for atomic artifact writes; the control
-    # plane inside it stays read-only (asserted in the trust-boundary tests).
-    assert str(context.run_dir.resolve()) in binds
+    binds = [cmd[index + 2] for index, item in enumerate(cmd) if item == "--bind"]
+    # Only extra paths are mounted writable; the run root stays read-only.
     assert str(extra.resolve()) in binds
+    assert str(context.run_dir.resolve()) not in binds
 
 
 def test_fake_uses_the_canonical_fixture_for_a_remapped_directory(tmp_path):

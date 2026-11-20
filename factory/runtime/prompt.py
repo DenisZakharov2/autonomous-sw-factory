@@ -98,10 +98,12 @@ def build_prompt(
     role: str | None = None,
     evidence: list[str] | None = None,
     workspace: Path | None = None,
+    staging: Path | None = None,
 ) -> str:
     from ..config import load_artifacts, load_pipeline as _pipeline
 
     workspace = Path(workspace) if workspace is not None else run_dir
+    staging = Path(staging) if staging is not None else None
 
     pipeline = _pipeline()
     state = load_state(run_dir)
@@ -388,9 +390,40 @@ def build_prompt(
         # clone.  They are not registry artifacts, but they are evidence the
         # case checks and must be inside the run.
         pending_paths.append("backups/")
+    specs_by_path = {
+        str(spec.get("path")): spec for spec in order.get("artifacts") or []
+    }
     for path in dict.fromkeys(pending_paths):
+        writable = path
+        spec = specs_by_path.get(path)
+        if staging is not None and spec is not None and spec.get("root"):
+            try:
+                staging_rel = staging.relative_to(workspace)
+            except ValueError:
+                staging_rel = staging
+            writable = (staging_rel / "_root" / str(path)).as_posix()
+            lines.append(
+                f"- `{writable}` (корневой артефакт проекта; путь `{path}` в прогоне read-only)"
+            )
+            continue
         lines.append(f"- `{path}`")
     lines.append("")
+
+    if staging is not None:
+        try:
+            staging_rel = staging.relative_to(workspace)
+        except ValueError:
+            staging_rel = staging
+        lines.append("# Staging")
+        lines.append(f"Корень прогона не смонтирован целиком на запись. Объявленные артефакты "
+                     f"пишутся через `{staging_rel}`: хост проверит этот каталог и перенесёт "
+                     "изменения в прогон после твоего хода. Пути выше уже указывают на нужное "
+                     "место — не добавляй префикс повторно.")
+        lines.append(
+            "Не пытайся обойти staging: абсолютные пути, `..`, символические и жёсткие ссылки "
+            "за его пределами отклоняются, и вся пачка не переносится."
+        )
+        lines.append("")
 
     lines.append("# Правила")
     lines.append("- Запрещено менять `state.json`, `blackbox.jsonl`, `blackbox.lock`, `.git` и код движка `factory/`.")

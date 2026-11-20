@@ -8,25 +8,32 @@ worse trade.  `bwrap` gives the same guarantees at user level, so it is the
 default backend.
 
 The trust boundary is the point of this module.  The whole filesystem is
-mounted read-only, and the run directory is opened writable only so that an
-atomic writer can do what every editor does: create a temporary file next to
-the target and rename it over.  A single-file bind is not enough for that --
-`rename` needs write permission on the *directory*, which is why the root
-artifact `skills-lock.json` could not be produced by a real executor while
-the run root was read-only.  Everything that decides state is then re-mounted
-read-only on top, because later mounts win: `state.json`, `blackbox.jsonl`,
-`blackbox.lock`, `idea.md`, `AUDIT_TRAIL.md`, `checkpoint.json`, the usage
-ledger, `runtime/` and the eval `checks/` directory.  Only `runtime/agent/`
-is opened again for the CLI's usage file.  Writing a protected file fails with
-`EROFS`; replacing it with a rename fails with `EBUSY` because it is a mount
-point.  Network stays available: a model call needs it, and this sandbox is
-about the control plane, not exfiltration.
+mounted read-only, then the run root is mounted read-only *on top of itself*
+so the boundary does not depend on how `/` was mounted next time.  A declared
+artifact is replaced by its private copy under `runtime/agent/out`, and the
+executor writes the familiar path while the bytes stay in staging.  A path the
+work order did not declare is `EROFS`, and replacing a control-plane file with
+a rename is `EBUSY` because that file is a mount point.
+
+Read-only is not private when the executor runs as the operator.  Secret home
+directories are therefore replaced by an empty tmpfs, credential files by
+`/dev/null`, and `~/.hermes` keeps only the adapter's runtime directories and
+the CLI code on top of that mask.
+
+`runtime/agent` itself stays writable: the CLI writes its usage counter and the
+transcript there.  The staging copies live under it, so they are visible to the
+host after the process exits and go through `factory.runtime.staging` before a
+byte reaches the product.
+
+Network stays available: a model call needs it, and this sandbox is about the
+control plane, not exfiltration.
 """
 from __future__ import annotations
 
 import os
 import shutil
 from pathlib import Path
+from typing import Iterable
 
 from .base import RuntimeFailure
 
@@ -54,9 +61,11 @@ CONTROL_PLANE_DIRS = ("runtime/evidence", "checks")
 # to them, never into them: the report is the witness, and a witness the
 # producer wrote is not a witness.
 VERIFICATION_DIRS = ("artifacts/verification",)
-# What the executor may not keep from the operator's environment.  The
-# provider's own key (`*_API_KEY`) stays: without it the agent cannot call
-# the model, and a model call is the whole point of the executor.
+# What the executor may not keep from the operator's environment.  A
+# credential is a credential whatever the provider calls it, so the provider's
+# own key (`*_API_KEY`) is no longer an exception: the sandboxed model call is
+# meant to go through the credential proxy on 127.0.0.1, and until that exists
+# an inherited key is a hole, not a feature.
 ENV_DENIED = frozenset(
     {
         "NETRC",
@@ -82,10 +91,23 @@ ENV_DENIED_PREFIXES = (
     "TWILIO_",
     "CLOUDFLARE_",
 )
-ENV_DENIED_SUFFIXES = ("_TOKEN", "_PASSWORD", "_SECRET", "_CREDENTIALS")
-# The operator's secret directories.  In the default mode the whole
+ENV_DENIED_SUFFIXES = (
+    "_TOKEN",
+    "_PASSWORD",
+    "_SECRET",
+    "_CREDENTIALS",
+    "_API_KEY",
+    "_ACCESS_KEY",
+    "_SECRET_KEY",
+)
+# The operator's secret home paths.  In the default mode the whole
 # filesystem is mounted read-only, and read-only is not private: the
 # executor runs as the operator and can read everything the operator can.
+# Directories are replaced by an empty tmpfs; credential *files* by
+# `/dev/null`, which also swallows a write.  `~/.hermes` is the adapter's own
+# home, so the three runtime directories it writes are bound back over the
+# mask (see `HERMES_HOME_PASSTHROUGH`); `config.yaml`, `auth.json` and `.env`
+# stay invisible.
 SECRET_HOME_DIRS = (
     ".ssh",
     ".aws",
@@ -93,7 +115,28 @@ SECRET_HOME_DIRS = (
     ".kube",
     ".docker",
     ".config/gh",
+    ".hermes",
+    ".claude",
+    ".cursor",
+    ".codex",
+    ".openai",
+    ".anthropic",
+    ".netrc",
+    ".npmrc",
+    ".pypirc",
+    ".git-credentials",
+    ".local/share/keyrings",
+    ".config/keyrings",
 )
+HERMES_HOME_DIR = ".hermes"
+HERMES_HOME_PASSTHROUGH = ("cache", "logs", "installs")
+# The Hermes CLI is installed into its own home by default: the checkout in
+# `hermes-agent/` and the interpreters it manages in `tools/`.  Masking those
+# with the rest of `~/.hermes` does not protect a secret — it makes
+# `hermes` itself (and every Python the executor runs) unresolvable.  They are
+# bound back read-only: code, not operator credentials.
+HERMES_HOME_READ_ONLY = ("hermes-agent", "tools")
+
 # The `factory/` package itself; binding its repository root would let an
 # executor rewrite the code that judges it.
 PACKAGE_DIR = Path(__file__).resolve().parents[1]
@@ -108,16 +151,18 @@ def sandbox_available(backend: str = BACKEND) -> bool:
 def sandbox_env(base: dict[str, str] | None = None) -> dict[str, str]:
     """Environment for a sandboxed executor.
 
-    The agent inherits provider credentials, because the CLI reads them
-    itself, but it has no business knowing where the factory root or runs root
-    is: those variables only make an accidental `factory ...` call easier.
-    `PYTHONPATH` is dropped for the same reason (module shadowing from the run
-    directory).
+    The executor inherits no control variables and no credentials.  The
+    agent needs none of them: it is a model client, and the model call goes
+    through the credential proxy (PR-C2), not through a key copied into an
+    untrusted process.  Until the proxy exists, a live sandboxed run has no
+    provider key at all — that is a deliberate hole in functionality, not a
+    hole in the boundary.
 
     Everything that belongs to the *operator* rather than to the model call is
-    dropped too: the executor is untrusted code, and a token that leaks into
-    it leaks out.  The provider's own key stays — without it the agent cannot
-    call the model — and so does the plain shell environment it needs to run.
+    dropped: the executor is untrusted code, and a token that leaks into it
+    leaks out.  `FACTORY_*` would also make an accidental `factory ...` call
+    from inside the sandbox point at the factory root, and `PYTHONPATH` would
+    shadow a module.
     """
     env = dict(os.environ if base is None else base)
     for key in list(env):
@@ -130,6 +175,49 @@ def sandbox_env(base: dict[str, str] | None = None) -> dict[str, str]:
         if key.endswith(ENV_DENIED_SUFFIXES):
             env.pop(key, None)
     return env
+
+
+def home_mask_args(home: Path | None = None) -> list[str]:
+    """bwrap options that make the operator's secrets invisible inside.
+
+    A directory is replaced by an empty tmpfs, a credential file by
+    `/dev/null` (reads as empty, writes are discarded).  `~/.hermes` carries
+    both the operator's keys (`config.yaml`, `auth.json`, `.env`) and the
+    adapter's own runtime state, so the mask goes on first and then the three
+    directories the adapter writes are bound back from the host.  A symlink in
+    one of those three is refused: it would carry its target through the mask.
+    """
+    home = Path.home() if home is None else home
+    args: list[str] = []
+    for relative in SECRET_HOME_DIRS:
+        candidate = home / relative
+        if candidate.is_dir():
+            args.extend(["--tmpfs", str(candidate)])
+        elif candidate.is_file():
+            args.extend(["--ro-bind", "/dev/null", str(candidate)])
+
+    hermes = home / HERMES_HOME_DIR
+    if not hermes.is_dir():
+        return args
+    for name in HERMES_HOME_PASSTHROUGH:
+        shared = hermes / name
+        if shared.is_symlink():
+            raise RuntimeFailure(
+                f"refusing to pass a symlinked Hermes adapter directory through: {shared}"
+            )
+        if not shared.is_dir():
+            try:
+                shared.mkdir(mode=0o700, parents=True)
+            except OSError as exc:
+                raise RuntimeFailure(
+                    f"cannot create the Hermes adapter directory {shared}: {exc}"
+                ) from exc
+        args.extend(["--bind", str(shared), str(shared)])
+    for name in HERMES_HOME_READ_ONLY:
+        install = hermes / name
+        if install.is_dir():
+            args.extend(["--ro-bind", str(install.resolve()), str(install)])
+    return args
 
 
 def _forbidden(run: Path, path: Path) -> bool:
@@ -149,6 +237,29 @@ def _forbidden(run: Path, path: Path) -> bool:
         if resolved_path == protected or protected in resolved_path.parents or resolved_path in protected.parents:
             return True
     return False
+
+
+def _secret_home_collision(home: Path, path: Path) -> str | None:
+    """The masked secret path that a writable mount would expose, if any.
+
+    Mounting a secret itself makes it writable again; mounting its ancestor
+    (`$HOME`, `~/.config`) re-exposes it under the mask; mounting its
+    descendant walks into it.  The Hermes adapter directories are the one
+    exception: they are passed back through on purpose, so a path inside them
+    is allowed.
+    """
+    hermes = (home / HERMES_HOME_DIR).resolve()
+    allowed = tuple((hermes / name).resolve() for name in HERMES_HOME_PASSTHROUGH)
+    for relative in SECRET_HOME_DIRS:
+        secret = (home / relative).resolve()
+        inside = path == secret or secret in path.parents
+        above = path in secret.parents
+        if not (inside or above):
+            continue
+        if inside and any(path == item or item in path.parents for item in allowed):
+            continue
+        return str(secret)
+    return None
 
 
 def verification_dirs(run: Path) -> list[Path]:
@@ -177,6 +288,7 @@ def sandbox_command(
     run_dir: Path,
     *,
     read_write: tuple[str, ...] = (),
+    staged: Iterable[tuple[str, str]] = (),
     enabled: bool = True,
     backend: str = BACKEND,
     executor_user: str | None = None,
@@ -208,6 +320,7 @@ def sandbox_command(
         raise RuntimeFailure("sandbox requested but bubblewrap (bwrap) is not installed")
 
     run = run_dir.resolve()
+    home = Path.home()
     args = [
         "bwrap",
         "--die-with-parent",
@@ -225,14 +338,11 @@ def sandbox_command(
     else:
         args.extend(["--ro-bind", "/", "/"])
         # Read-only is not private: the executor runs as the operator.  The
-        # operator's secret directories are mounted over as empty, and the
-        # session sockets (keyring, D-Bus, ssh-agent) are masked — a socket
-        # can be connected to through a read-only mount.
-        home = Path.home()
-        for relative in SECRET_HOME_DIRS:
-            candidate = home / relative
-            if candidate.is_dir():
-                args.extend(["--tmpfs", str(candidate)])
+        # operator's secret paths are masked, and the mask has to come before
+        # `--ro-bind run run` below: with TMPDIR under `~/.hermes/cache`, the
+        # run root itself lies inside a pass-through directory, and mounting
+        # that directory writable later would unmask `state.json`.
+        args.extend(home_mask_args(home))
         runtime_dir = Path(os.environ["XDG_RUNTIME_DIR"]) if os.environ.get(
             "XDG_RUNTIME_DIR"
         ) else None
@@ -258,13 +368,46 @@ def sandbox_command(
             "/proc",
             "--tmpfs",
             "/tmp",
-            # The run root is writable so an editor can create `<target>.tmp` and
-            # rename it into place; the control plane is re-bound read-only below.
-            "--bind",
-            str(run),
-            str(run),
         ]
     )
+    # The run root is a read-only mount.  The previous scheme made the whole
+    # directory writable so an editor could rename a temporary file over its
+    # target; that also opened every sibling path (`.git`, `backups/`,
+    # `constraints.md`) to the executor.  A declared path is now replaced by a
+    # staging copy instead, so a rename stays inside the directory it was
+    # given and the run root keeps its mode.
+    args.extend(["--ro-bind", str(run), str(run)])
+
+    staged_map: dict[Path, Path] = {}
+    for destination, source in staged:
+        dest_raw = Path(destination).expanduser()
+        source_raw = Path(source).expanduser()
+        if dest_raw.is_symlink() or not dest_raw.is_dir():
+            raise RuntimeFailure(f"staged destination is not a real directory: {dest_raw}")
+        if source_raw.is_symlink() or not source_raw.is_dir():
+            raise RuntimeFailure(f"staged source is not a real directory: {source_raw}")
+        dest = dest_raw.resolve()
+        source_resolved = source_raw.resolve()
+        if dest == run or run not in dest.parents:
+            raise RuntimeFailure(f"staged destination escapes the run: {dest}")
+        if _forbidden(run, dest):
+            raise RuntimeFailure(f"refusing to stage the factory control plane: {dest}")
+        if not (source_resolved == run or run in source_resolved.parents):
+            raise RuntimeFailure(f"staged source escapes the run: {source_resolved}")
+        previous = staged_map.get(dest)
+        if previous is not None and previous != source_resolved:
+            raise RuntimeFailure(f"two staging sources for one destination: {dest}")
+        staged_map[dest] = source_resolved
+
+    staged_dirs: list[Path] = []
+    for dest in sorted(staged_map, key=lambda item: len(item.parts)):
+        # An outer staging bind already carries its nested directories; a
+        # second bind over a child would only add a mount with no new bytes.
+        if any(parent == dest or parent in dest.parents for parent in staged_dirs):
+            continue
+        staged_dirs.append(dest)
+        args.extend(["--bind", str(staged_map[dest]), str(dest)])
+
     for name in CONTROL_PLANE_FILES:
         protected_file = run / name
         if protected_file.is_file():
@@ -276,7 +419,7 @@ def sandbox_command(
     args.extend(["--chdir", str(run)])
     seen: set[str] = set()
     bound: list[Path] = []
-    bound_dirs: list[Path] = [run]
+    bound_dirs: list[Path] = []
     for item in read_write:
         path = Path(item).expanduser()
         if path.is_symlink():
@@ -286,6 +429,16 @@ def sandbox_command(
         path = path.resolve()
         if _forbidden(run, path):
             raise RuntimeFailure(f"refusing to mount the factory control plane writable: {path}")
+        exposed = _secret_home_collision(home, path)
+        if exposed is not None:
+            raise RuntimeFailure(
+                f"refusing to mount {path} writable: it would expose the masked secret path {exposed}"
+            )
+        for staged_dest in staged_map:
+            if path == staged_dest or path in staged_dest.parents:
+                raise RuntimeFailure(
+                    f"refusing to mount {path} writable over the staged path {staged_dest}"
+                )
         if str(path) in seen:
             continue
         if path.is_file() and any(parent in bound_dirs for parent in path.parents):
@@ -302,8 +455,9 @@ def sandbox_command(
     # The verifier's reports are mounted read-only on top of the writable run
     # root: later mounts win.  An executor that was given a path inside one of
     # them is the verifier itself and keeps its write access.
+    protected_binds = [*bound, *staged_dirs]
     for protected in verification_dirs(run):
-        if any(protected == path or protected in path.parents for path in bound):
+        if any(protected == path or protected in path.parents for path in protected_binds):
             continue
         args.extend(["--ro-bind", str(protected), str(protected)])
     args.append("--")

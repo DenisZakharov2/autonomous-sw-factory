@@ -56,6 +56,8 @@ class RunContext:
     runtime_dir: Path | None = None
     sequence: int = 0
     extra_read_write: tuple[str, ...] = ()
+    extra_staged: tuple[tuple[str, str], ...] = ()
+    staging_dir: Path | None = None
     control_dir: Path | None = None
     task: dict[str, Any] | None = None
 

@@ -149,16 +149,36 @@ class FakeExecutor:
             return path.read_text(encoding="utf-8")
         return None
 
-    def _write(self, target: Path, text: str, run_dir: Path) -> str:
-        allowed_root = run_dir if _within(target, run_dir) else project_root()
+    def _write(
+        self,
+        target: Path,
+        text: str,
+        run_dir: Path,
+        staging: Path | None = None,
+        *,
+        root: bool = False,
+    ) -> str:
+        project = project_root()
+        allowed_root = project if root or not _within(target, run_dir) else run_dir
         if not _within(target, allowed_root):
             raise RunError(f"fake executor refused to write outside the run: {target}")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text, encoding="utf-8")
+        destination = target
+        if staging is not None:
+            if root:
+                destination = staging / "_root" / target.relative_to(project)
+            else:
+                destination = staging / target.relative_to(run_dir)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(text, encoding="utf-8")
         return target.relative_to(allowed_root).as_posix()
 
     def _write_spec(
-        self, spec: dict[str, Any], order: dict[str, Any], run_dir: Path, state: dict[str, Any]
+        self,
+        spec: dict[str, Any],
+        order: dict[str, Any],
+        run_dir: Path,
+        state: dict[str, Any],
+        staging: Path | None = None,
     ) -> list[str]:
         artifact_id = str(spec.get("id") or "")
         raw = str(spec.get("resolved_path") or spec.get("path") or "")
@@ -184,14 +204,13 @@ class FakeExecutor:
                 # must reject it, leave evidence and repeat the step.
                 self._invalid_subjects.add(subject)
                 text = text.replace("- Вердикт: PASS", "- Вердикт: PASS | FAIL")
-            raw = str(spec.get("resolved_path") or spec.get("path") or "")
-            return [self._write(Path(raw), text, run_dir)]
+            return [self._write(Path(raw), text, run_dir, staging)]
 
         if spec.get("per_task"):
             task_id = str(order.get("task_id") or "")
             task = state["tasks"].get(task_id, {})
             text = self._fixture(f"tasks/{task_id}/deliverable.md") or _deliverable(task)
-            return [self._write(Path(raw), text, run_dir)]
+            return [self._write(Path(raw), text, run_dir, staging)]
 
         if spec.get("per_pattern"):
             base = str(spec.get("path") or "")
@@ -200,11 +219,18 @@ class FakeExecutor:
             for source in sorted((self.fixture_root / directory).glob("*.md")):
                 relative = f"{directory}/{source.name}"
                 written.append(
-                    self._write(run_dir / relative, source.read_text(encoding="utf-8"), run_dir)
+                    self._write(
+                        run_dir / relative,
+                        source.read_text(encoding="utf-8"),
+                        run_dir,
+                        staging,
+                    )
                 )
             if not written:
                 stem = base.replace("{num}", "001")
-                written.append(self._write(run_dir / stem, _template_fill(spec), run_dir))
+                written.append(
+                    self._write(run_dir / stem, _template_fill(spec), run_dir, staging)
+                )
             return written
 
         if spec.get("directory"):
@@ -233,7 +259,12 @@ class FakeExecutor:
                     continue
                 relative = source.relative_to(self.fixture_root).as_posix()
                 written.append(
-                    self._write(run_dir / relative, source.read_text(encoding="utf-8"), run_dir)
+                    self._write(
+                        run_dir / relative,
+                        source.read_text(encoding="utf-8"),
+                        run_dir,
+                        staging,
+                    )
                 )
             return written
 
@@ -241,10 +272,10 @@ class FakeExecutor:
             relative = str(spec.get("path") or raw)
             target = project_root() / relative
             text = self._fixture(relative) or _template_fill(spec)
-            return [self._write(target, text, run_dir)]
+            return [self._write(target, text, run_dir, staging, root=True)]
 
         text = self._fixture(raw) or _template_fill(spec)
-        return [self._write(run_dir / raw, text, run_dir)]
+        return [self._write(run_dir / raw, text, run_dir, staging)]
 
     # -- executor contract --------------------------------------------
     def execute(self, order: dict[str, Any], context: RunContext) -> ExecutionResult:
@@ -271,10 +302,22 @@ class FakeExecutor:
                 if str(spec.get("owner") or "") in {"", "{task.owner}", context.role}
             ]
         for spec in specs:
-            written.extend(self._write_spec(spec, order, context.run_dir, state))
+            written.extend(
+                self._write_spec(
+                    spec,
+                    order,
+                    context.run_dir,
+                    state,
+                    staging=context.staging_dir,
+                )
+            )
 
         if self.scenario == "break-artifact" and written:
-            broken = context.run_dir / written[0]
+            broken = (
+                context.staging_dir / written[0]
+                if context.staging_dir is not None
+                else context.run_dir / written[0]
+            )
             broken.write_text(broken.read_text(encoding="utf-8") + "\n{{TODO}}\n", encoding="utf-8")
 
         if self.scenario == "write-state":

@@ -90,6 +90,7 @@ class HermesExecutor:
         stage: str | None = None,
         run_id: str = "run",
         seq: int | str = 0,
+        staged: tuple[tuple[str, str], ...] = (),
     ) -> list[str]:
         # Protect against E2BIG: Linux limits argv to ~128 KiB (MAX_ARG_STRLEN).
         # If prompt exceeds safe limit, truncate with a warning marker.
@@ -120,6 +121,7 @@ class HermesExecutor:
             cmd,
             run_dir,
             read_write=self.read_write + tuple(extra_read_write),
+            staged=staged,
             enabled=self.sandbox,
             executor_user=self.executor_user,
             run_id=run_id,
@@ -134,6 +136,7 @@ class HermesExecutor:
             context.run_dir,
             usage_path,
             extra_read_write=context.extra_read_write,
+            staged=context.extra_staged,
             stage=context.stage,
             run_id=context.run_id,
             seq=context.sequence or context.step,

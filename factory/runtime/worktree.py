@@ -24,12 +24,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from ..config import load_artifacts, load_pipeline
+from ..config import load_artifacts, load_pipeline, project_root
 from ..engine import _task_work_order, submit_work, task_claim
+from ..errors import FactoryError
 from ..state import load_state
 from .base import ExecutionResult, Executor, RunContext, RuntimeFailure, safe_write_text
 from .loop import _context_limit_tokens, _estimate_prompt_tokens
 from .prompt import build_prompt
+from .staging import (
+    PreparedStaging,
+    cleanup as cleanup_staging,
+    promote as promote_staging,
+    staging_root,
+)
 
 # Trees that must never enter a seed repository: the control plane, previous
 # worktrees, VCS metadata and generated mirrors.
@@ -384,18 +391,25 @@ class WorktreeWorkspace:
 
 def _writable_paths(
     order: dict[str, Any], worktree: Path, task: dict[str, Any], control_dir: Path
-) -> tuple[list[str], list[Path]]:
-    from .loop import _collect_writable_paths, _prepare_writable_paths
+) -> tuple[list[str], PreparedStaging]:
+    from .loop import _writable_entries
+    from .staging import build_plan, prepare
 
-    entries = _collect_writable_paths(order, worktree, task)
-    # The loop's helper adds `<workspace>/runtime/agent`; a worktree has no
-    # control plane.  The Hermes usage file belongs to the run, not the tree.
-    entries.pop((worktree / "runtime" / "agent").resolve(), None)
-    writable, placeholders = _prepare_writable_paths(entries)
+    entries = _writable_entries(order, worktree, task)
+    plan = build_plan(
+        entries,
+        run_dir=worktree,
+        project=project_root(),
+        staging=staging_root(worktree),
+        allow_project_root=False,
+    )
+    prepared = prepare(plan, run_dir=worktree)
     agent = control_dir / "runtime" / "agent"
     agent.mkdir(parents=True, exist_ok=True)
-    writable.append(str(agent))
-    return writable, placeholders
+    # The Hermes usage file belongs to the run, not the tree; the tree is a
+    # copy of the product and has no control plane of its own.
+    writable = [str(agent.resolve())]
+    return writable, prepared
 
 
 def run_parallel_tasks(
@@ -436,19 +450,19 @@ def run_parallel_tasks(
             worktrees[str(task["task_id"])] = workspace.create(str(task["task_id"]))
 
         def worker(task: dict[str, Any], index: int) -> TaskOutcome:
-            from .loop import _cleanup_placeholders
-
             task_id = str(task["task_id"])
             worktree = worktrees[task_id]
             order = _scope_order_to_task(
                 _task_work_order(run_dir, run_id, stage, task, pipeline, registry), task
             )
             scoped = _rebase_order(order, run_dir, worktree)
+            staging = staging_root(worktree)
             prompt = build_prompt(
                 order,
                 run_dir=run_dir,
                 role=str(task["owner"]),
                 workspace=worktree,
+                staging=staging,
             )
             # Check context limit before sending to executor (same as loop.py)
             prompt_tokens = _estimate_prompt_tokens(prompt)
@@ -469,7 +483,7 @@ def run_parallel_tasks(
                     prompt_chars=len(prompt),
                     role=str(task.get("owner") or ""),
                 )
-            writable, placeholders = _writable_paths(scoped, worktree, task, run_dir)
+            writable, prepared = _writable_paths(scoped, worktree, task, run_dir)
             context = RunContext(
                 run_id=run_id,
                 run_dir=worktree,
@@ -482,6 +496,8 @@ def run_parallel_tasks(
                 control_dir=run_dir,
                 sequence=int(state["event_count"]) + index,
                 extra_read_write=tuple(writable),
+                extra_staged=tuple((str(dest), str(src)) for dest, src in prepared.binds),
+                staging_dir=staging,
                 task=task,
             )
             safe_write_text(
@@ -495,8 +511,16 @@ def run_parallel_tasks(
                 result = ExecutionResult(exit_code=1, stderr=repr(exc))
                 error = f"{type(exc).__name__}: {exc}"
             elapsed = time.monotonic() - started
-            _cleanup_placeholders(placeholders)
             changed: list[str] = []
+            if error is None:
+                try:
+                    promote_staging(prepared.plan, run_dir=worktree, project=project_root())
+                except FactoryError as exc:
+                    error = f"{type(exc).__name__}: {exc}"
+            try:
+                cleanup_staging(prepared, run_dir=worktree)
+            except FactoryError as exc:
+                error = error or f"staging cleanup failed: {exc}"
             if error is None:
                 changed = workspace.changes(worktree)
                 if not (worktree / "tasks" / task_id / "deliverable.md").is_file():

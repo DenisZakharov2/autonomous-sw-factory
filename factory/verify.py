@@ -785,6 +785,16 @@ def _check_resource_limits() -> list[str]:
 
 
 def doctor_report() -> dict[str, Any]:
+    from .runtime.sandbox import (
+        ENV_DENIED,
+        ENV_DENIED_PREFIXES,
+        ENV_DENIED_SUFFIXES,
+        HERMES_HOME_DIR,
+        HERMES_HOME_PASSTHROUGH,
+        HERMES_HOME_READ_ONLY,
+        SECRET_HOME_DIRS,
+    )
+
     pipeline = load_pipeline()
     registry = load_artifacts()
     roles = role_ids()
@@ -815,6 +825,15 @@ def doctor_report() -> dict[str, Any]:
         "stages": len(pipeline["stages"]),
         "modes": sorted(pipeline["modes"]),
         "artifacts": len(registry["artifacts"]),
+        "executor_masks": {
+            "secret_home_paths": list(SECRET_HOME_DIRS),
+            "env_denied": sorted(ENV_DENIED),
+            "env_denied_prefixes": list(ENV_DENIED_PREFIXES),
+            "env_denied_suffixes": list(ENV_DENIED_SUFFIXES),
+            "hermes_home": HERMES_HOME_DIR,
+            "hermes_passthrough": list(HERMES_HOME_PASSTHROUGH),
+            "hermes_read_only": list(HERMES_HOME_READ_ONLY),
+        },
         "errors": errors,
         "warnings": warnings,
     }

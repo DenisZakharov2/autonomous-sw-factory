@@ -98,6 +98,33 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             f"roles={report['roles']} templates={report['templates']} schemas={report['schemas']} "
             f"stages={report['stages']} artifacts={report['artifacts']} modes={','.join(report['modes'])}"
         )
+        masks = report.get("executor_masks")
+        if masks:
+            print(
+                "executor masks: "
+                f"secret_home={len(masks['secret_home_paths'])} "
+                f"env_deny={len(masks['env_denied'])} "
+                f"env_prefixes={len(masks['env_denied_prefixes'])} "
+                f"env_suffixes={len(masks['env_denied_suffixes'])}"
+            )
+            print("  secret home paths: " + ", ".join(masks["secret_home_paths"]))
+            print("  env denied: " + ", ".join(masks["env_denied"]))
+            print(
+                "  env denied prefixes: "
+                + ", ".join(f"{prefix}*" for prefix in masks["env_denied_prefixes"])
+            )
+            print(
+                "  env denied suffixes: "
+                + ", ".join(f"*{suffix}" for suffix in masks["env_denied_suffixes"])
+            )
+            print(
+                f"  ~/{masks['hermes_home']} pass-through: "
+                + ", ".join(masks["hermes_passthrough"])
+            )
+            print(
+                f"  ~/{masks['hermes_home']} read-only: "
+                + ", ".join(masks["hermes_read_only"])
+            )
         if errors:
             print("DOCTOR FAILED:")
             for error in errors:

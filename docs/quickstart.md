@@ -62,7 +62,7 @@ factory run --run-id my-first --executor fake --max-steps 60
 
 ```bash
 factory run --run-id live --executor hermes --yolo --timeout 900 \
-  --sandbox-rw ~/.hermes --sandbox-rw ~/.local/state --sandbox-rw ~/.cache
+  --sandbox-rw ~/.local/state --sandbox-rw ~/.cache
 # или
 factory run --run-id live --executor opencode --executor-model provider/model
 ```

@@ -108,6 +108,7 @@ class OpenCodeExecutor:
         extra_read_write: tuple[str, ...] = (),
         run_id: str = "run",
         seq: int | str = 0,
+        staged: tuple[tuple[str, str], ...] = (),
     ) -> list[str]:
         # Protect against E2BIG: Linux limits argv to ~128 KiB (MAX_ARG_STRLEN).
         # If prompt exceeds safe limit, truncate with a warning marker.
@@ -134,6 +135,7 @@ class OpenCodeExecutor:
             cmd,
             run_dir,
             read_write=self.read_write + tuple(extra_read_write),
+            staged=staged,
             enabled=self.sandbox,
             executor_user=self.executor_user,
             run_id=run_id,
@@ -146,6 +148,7 @@ class OpenCodeExecutor:
             context.prompt,
             context.run_dir,
             extra_read_write=context.extra_read_write,
+            staged=context.extra_staged,
             run_id=context.run_id,
             seq=context.sequence or context.step,
         )

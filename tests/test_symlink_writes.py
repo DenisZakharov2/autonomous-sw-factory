@@ -6,6 +6,7 @@ symlinks at any path component. The tests run without bwrap and without root.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,13 @@ from factory.state import save_state
 from factory.checkpoint import _write_atomic
 
 
+POSIX_ONLY = pytest.mark.skipif(
+    not hasattr(os, "O_NOFOLLOW"),
+    reason="write_bytes_nofollow refuses symlinks only where O_NOFOLLOW exists",
+)
+
+
+@POSIX_ONLY
 class TestWriteBytesNofollow:
     """Direct tests of the write_bytes_nofollow primitive."""
 
@@ -84,6 +92,7 @@ class TestWriteBytesNofollow:
         assert leaf.read_text() == "hello world"
 
 
+@POSIX_ONLY
 class TestSaveStateSymlink:
     """Tests for save_state with symlink attacks."""
 
@@ -129,6 +138,7 @@ class TestSaveStateSymlink:
         assert outside.read_text() == "hacked"
 
 
+@POSIX_ONLY
 class TestJournalSymlink:
     """Tests for journal write functions with symlink attacks."""
 
@@ -179,6 +189,7 @@ class TestJournalSymlink:
         assert outside.read_text() == "original"
 
 
+@POSIX_ONLY
 class TestUsageLedgerSymlink:
     """Tests for UsageLedger.append with symlink attacks."""
 
@@ -201,6 +212,7 @@ class TestUsageLedgerSymlink:
         assert outside.read_text() == '{"legit": "data"}\n'
 
 
+@POSIX_ONLY
 class TestCheckpointSymlink:
     """Tests for checkpoint _write_atomic with symlink attacks."""
 
@@ -219,6 +231,7 @@ class TestCheckpointSymlink:
         assert outside.read_text() == "hacked"
 
 
+@POSIX_ONLY
 class TestQuarantineSymlink:
     """Tests for quarantine write_lock with symlink attacks."""
 
@@ -237,6 +250,7 @@ class TestQuarantineSymlink:
         assert outside.read_text() == '{"skills": []}'
 
 
+@POSIX_ONLY
 class TestEvidenceSymlink:
     """Tests for EvidenceStore with symlink attacks."""
 
@@ -259,6 +273,7 @@ class TestEvidenceSymlink:
         assert outside.read_text() == "hacked"
 
 
+@POSIX_ONLY
 class TestSafeWriteTextSymlink:
     """Tests for safe_write_text (now using write_bytes_nofollow)."""
 

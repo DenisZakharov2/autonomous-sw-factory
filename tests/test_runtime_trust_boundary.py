@@ -41,6 +41,10 @@ from factory.runtime.staging import (
 )
 
 SANDBOX = pytest.mark.skipif(not sandbox_available(), reason="bubblewrap is not installed")
+POSIX_ONLY = pytest.mark.skipif(
+    not hasattr(os, "O_NOFOLLOW"),
+    reason="O_NOFOLLOW is POSIX-only; the Windows writer is a best-effort fallback",
+)
 
 
 def _sandbox_works() -> bool:
@@ -74,6 +78,17 @@ def run(tmp_path):
     (run_dir / "runtime" / "evidence").mkdir(parents=True, exist_ok=True)
     (run_dir / "runtime" / "usage.jsonl").write_text('{"tokens": 0}\n', encoding="utf-8")
     return run_dir
+
+
+@pytest.fixture()
+def home_dir():
+    """A fake HOME outside `/tmp`: the sandbox mounts an empty tmpfs on `/tmp`."""
+    home = Path.home() / ".cache" / "factory-trust-tests" / uuid4().hex
+    home.mkdir(parents=True)
+    try:
+        yield home
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
 
 
 def _stage_plan(run_dir: Path):
@@ -283,9 +298,9 @@ def test_sandbox_env_drops_every_credential_suffix():
 
 
 @SANDBOX
-def test_the_operator_secret_directories_are_empty_inside_the_sandbox(run, tmp_path, monkeypatch):
+def test_the_operator_secret_directories_are_empty_inside_the_sandbox(run, home_dir, monkeypatch):
     """Read-only is not private: in the default mode the executor is the operator."""
-    home = tmp_path / "home"
+    home = home_dir
     (home / ".ssh").mkdir(parents=True)
     (home / ".ssh" / "id_rsa").write_text("operator secret\n", encoding="utf-8")
     (home / ".claude").mkdir()
@@ -359,10 +374,9 @@ def test_home_mask_args_pass_the_hermes_install_back_read_only(tmp_path):
 
 
 @SANDBOX
-def test_the_hermes_home_is_a_tmpfs_except_the_adapter_directories(run, tmp_path, monkeypatch):
+def test_the_hermes_home_is_a_tmpfs_except_the_adapter_directories(run, home_dir, monkeypatch):
     """`~/.hermes` carries the operator's keys; only cache/logs/installs come through."""
-    home = tmp_path / "home"
-    hermes = home / ".hermes"
+    hermes = home_dir / ".hermes"
     for name in ("cache", "logs", "installs"):
         (hermes / name).mkdir(parents=True)
     (hermes / "config.yaml").write_text("api_key: operator secret\n", encoding="utf-8")
@@ -370,7 +384,7 @@ def test_the_hermes_home_is_a_tmpfs_except_the_adapter_directories(run, tmp_path
     (hermes / ".env").write_text("OPENAI_API_KEY=operator secret\n", encoding="utf-8")
     (hermes / "sessions").mkdir()
     (hermes / "sessions" / "chat.md").write_text("operator secret\n", encoding="utf-8")
-    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("HOME", str(home_dir))
 
     plan, prepared, writable, staged = _stage_plan(run)
     listing = _sandboxed(run, writable, ["sh", "-c", f"ls -A {hermes}"], staged)
@@ -393,16 +407,15 @@ def test_the_hermes_home_is_a_tmpfs_except_the_adapter_directories(run, tmp_path
 
 
 @SANDBOX
-def test_the_hermes_install_is_visible_read_only_inside_the_sandbox(run, tmp_path, monkeypatch):
+def test_the_hermes_install_is_visible_read_only_inside_the_sandbox(run, home_dir, monkeypatch):
     """Masking `~/.hermes` must not mask the CLI the executor is asked to run."""
-    home = tmp_path / "home"
-    hermes = home / ".hermes"
+    hermes = home_dir / ".hermes"
     (hermes / "cache").mkdir(parents=True)
     (hermes / "hermes-agent").mkdir()
     (hermes / "hermes-agent" / "version.txt").write_text("hermes code\n", encoding="utf-8")
     (hermes / "tools").mkdir()
     (hermes / "config.yaml").write_text("api_key: operator secret\n", encoding="utf-8")
-    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("HOME", str(home_dir))
 
     plan, prepared, writable, staged = _stage_plan(run)
     probe = hermes / "hermes-agent" / "version.txt"
@@ -421,6 +434,7 @@ def test_the_hermes_install_is_visible_read_only_inside_the_sandbox(run, tmp_pat
     cleanup(prepared, run_dir=run)
 
 
+@POSIX_ONLY
 def test_evidence_does_not_follow_a_planted_symlink(run):
     """The evidence directory is in the executor's reach; the write must not be."""
     from factory.runtime.evidence import EvidenceStore
@@ -747,6 +761,7 @@ def test_sandbox_env_drops_factory_control_variables():
     assert "OPENAI_API_KEY" not in env
 
 
+@POSIX_ONLY
 def test_runtime_never_writes_through_a_symlink(tmp_path):
     run_dir = tmp_path / "run"
     (run_dir / "runtime").mkdir(parents=True)

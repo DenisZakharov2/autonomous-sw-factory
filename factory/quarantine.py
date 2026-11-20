@@ -21,6 +21,7 @@ from typing import Any
 from .config import load_json, validate_instance
 from .errors import ConfigError, QuarantineError
 from .journal import utc_now
+from .paths import write_bytes_nofollow
 
 AUTO_ALLOW = "AUTO_ALLOW"
 ESCALATE_HUMAN = "ESCALATE_HUMAN"
@@ -197,9 +198,8 @@ def write_lock(path: Path, data: dict[str, Any]) -> None:
     schema = load_json(Path(__file__).resolve().parent / "schemas" / "skills-lock.schema.json")
     validate_instance(data, schema, str(path))
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    content = (json.dumps(data, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    write_bytes_nofollow(path, content, append=False)
 
 
 def add_lock_entry(path: Path, entry: dict[str, Any]) -> dict[str, Any]:

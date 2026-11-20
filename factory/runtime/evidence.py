@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from ..journal import read_events, sha256_file, utc_now
-from ..paths import safe_write_text
+from ..paths import write_bytes_nofollow
 from ..state import load_state
 from ..verify import verify_run
 
@@ -38,11 +38,8 @@ class EvidenceStore:
     def _write(self, name: str, payload: dict[str, Any]) -> Path:
         self.directory.mkdir(parents=True, exist_ok=True)
         path = self.directory / name
-        safe_write_text(
-            path,
-            json.dumps({"timestamp_utc": utc_now(), **payload}, ensure_ascii=False, indent=2)
-            + "\n",
-        )
+        content = (json.dumps({"timestamp_utc": utc_now(), **payload}, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+        write_bytes_nofollow(path, content, append=False)
         return path
 
     def write_step(self, step: int, order: dict[str, Any], payload: dict[str, Any]) -> Path:

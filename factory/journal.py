@@ -24,7 +24,7 @@ from typing import Any
 
 from .config import validate_against_schema
 from .errors import ConfigError, JournalError
-from .paths import ensure_within
+from .paths import ensure_within, write_bytes_nofollow
 
 try:  # Linux/macOS
     import fcntl
@@ -283,9 +283,8 @@ def _load_state_file(run_dir: Path) -> dict[str, Any] | None:
 
 def _save_state_file(run_dir: Path, state: dict[str, Any]) -> None:
     path = run_dir / "state.json"
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    payload = (json.dumps(state, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    write_bytes_nofollow(path, payload, append=False)
 
 
 def record_event(
@@ -559,9 +558,7 @@ def write_audit_trail(run_dir: Path) -> None:
     events = read_events(run_dir / "blackbox.jsonl")
     content = render_audit_trail(events)
     path = run_dir / "AUDIT_TRAIL.md"
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(content, encoding="utf-8")
-    os.replace(tmp, path)
+    write_bytes_nofollow(path, content.encode("utf-8"), append=False)
 
 
 def append_audit_row(run_dir: Path, event: dict[str, Any]) -> None:
@@ -576,7 +573,5 @@ def append_audit_row(run_dir: Path, event: dict[str, Any]) -> None:
     if not path.exists():
         write_audit_trail(run_dir)
         return
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(_audit_row(event) + "\n")
-        handle.flush()
-        os.fsync(handle.fileno())
+    row = (_audit_row(event) + "\n").encode("utf-8")
+    write_bytes_nofollow(path, row, append=True)

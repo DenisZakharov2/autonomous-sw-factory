@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from ..journal import utc_now
+from ..paths import write_bytes_nofollow
 
 
 @dataclass(frozen=True)
@@ -59,8 +60,8 @@ class UsageLedger:
     def append(self, record: dict[str, Any]) -> dict[str, Any]:
         entry = {"timestamp_utc": utc_now(), **record}
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
+        line = json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n"
+        write_bytes_nofollow(self.path, line.encode("utf-8"), append=True)
         return entry
 
     def records(self) -> list[dict[str, Any]]:

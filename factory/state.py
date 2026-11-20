@@ -9,7 +9,7 @@ from typing import Any
 from .config import load_budget, load_json, load_pipeline, validate_against_schema
 from .errors import RunError
 from .journal import utc_now
-from .paths import validate_task_id
+from .paths import validate_task_id, write_bytes_nofollow
 
 STAGE_STATUSES = {"pending", "in_progress", "review", "accepted", "blocked", "escalated"}
 GATE_STATUSES = {"pending", "approved", "rejected", "needs_human"}
@@ -104,19 +104,10 @@ def save_state(run_dir: Path, state: dict[str, Any]) -> None:
     state["updated_at"] = utc_now()
     validate_against_schema(state, "state.schema.json", "state.json")
     path = state_path(run_dir)
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     payload = (json.dumps(state, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
     # The journal fsyncs its line; the anchor has to be as durable as the
-    # line it points at, or a power cut leaves the two disagreeing.  The file
-    # is written through a descriptor opened for writing: `fsync` on a
-    # read-only one fails on Windows.
-    descriptor = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
-    try:
-        os.write(descriptor, payload)
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-    os.replace(tmp, path)
+    # line it points at, or a power cut leaves the two disagreeing.
+    write_bytes_nofollow(path, payload, append=False)
     _fsync_directory(path.parent)
 
 

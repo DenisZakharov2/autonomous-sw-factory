@@ -20,6 +20,7 @@ import pytest
 
 from factory.cli import _build_executor, build_parser
 from factory.engine import init_run, next_action
+from factory.errors import JournalError
 from factory.runtime.base import RunContext, RuntimeFailure, safe_write_text
 from factory.runtime.loop import (
     _cleanup_placeholders,
@@ -198,11 +199,11 @@ def test_evidence_does_not_follow_a_planted_symlink(run):
     except (OSError, NotImplementedError):
         pytest.skip("symlinks are not available on this platform")
 
-    store.write_step(1, {"stage": "s4_build"}, {"status": "ok"})
+    with pytest.raises(JournalError):
+        store.write_step(1, {"stage": "s4_build"}, {"status": "ok"})
 
     assert outside.read_text() == "original\n"
-    assert planted.is_file() and not planted.is_symlink()
-
+    assert planted.is_symlink()
 
 ACL = pytest.mark.skipif(
     os.name != "posix"
@@ -478,10 +479,10 @@ def test_runtime_never_writes_through_a_symlink(tmp_path):
         link.symlink_to(outside)
     except (OSError, NotImplementedError):
         pytest.skip("symlinks are not available on this platform")
-    safe_write_text(link, "prompt")
+    with pytest.raises(JournalError):
+        safe_write_text(link, "prompt")
     assert outside.read_text() == "safe"
-    assert not link.is_symlink()
-    assert link.read_text() == "prompt"
+    assert link.is_symlink()
 
 
 def test_symlinked_runtime_directory_is_refused(tmp_path):

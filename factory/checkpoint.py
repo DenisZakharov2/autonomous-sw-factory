@@ -27,7 +27,7 @@ from typing import Any
 
 from .errors import ConfigError, RunError
 from .journal import canonical_json, read_events, verify_chain
-from .paths import ensure_within
+from .paths import ensure_within, write_bytes_nofollow
 
 KEY_ENV = "FACTORY_JOURNAL_KEY"
 STORE_ENV = "FACTORY_CHECKPOINT_DIR"
@@ -105,10 +105,9 @@ def _signature(key: bytes, body: dict[str, Any]) -> str:
 
 def _write_atomic(path: Path, data: dict[str, Any], mode: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
-    os.chmod(tmp, mode)
-    os.replace(tmp, path)
+    content = (json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8")
+    write_bytes_nofollow(path, content, append=False)
+    os.chmod(path, mode)
 
 
 def _refuse_key_inside_run(run_dir: Path, key_file: Path | None) -> None:

@@ -28,7 +28,7 @@ def test_the_distribution_version_is_dynamic():
     """Статическая версия в `pyproject.toml` выигрывала у `[tool.setuptools.dynamic]`.
 
     Собранный wheel назывался `autonomous_sw_factory-0.0.0`, хотя пакет внутри
-    отвечал `factory 1.0.14`: установка по `==1.0.14` не находилась.
+    отвечал `factory 1.0.15`: установка по `==1.0.15` не находилась.
     """
     text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     project = re.search(r"(?ms)^\[project\]\s*\n(.*?)(?=^\[)", text)

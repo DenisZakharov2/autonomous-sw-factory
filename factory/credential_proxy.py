@@ -285,14 +285,31 @@ def render_hermes_config(settings: ProxySettings) -> str:
 
 def _allowed_path(path: str, prefix: str) -> bool:
     return not prefix or path == prefix or path.startswith(prefix + "/")
-class _Server(socketserver.ThreadingUnixStreamServer):
-    daemon_threads = True
-    block_on_close = False
 
-    def __init__(self, path: str, settings: ProxySettings) -> None:
-        self.settings = settings
-        self.request_queue_size = 64
-        super().__init__(path, _Handler)
+
+# Windows has no Unix domain sockets in socketserver.  The proxy itself is
+# Ubuntu-only, but `factory doctor` must still import this module there, so the
+# class is defined only where its base exists and fails when actually started.
+_UNIX_STREAM_SERVER = getattr(socketserver, "ThreadingUnixStreamServer", None)
+
+if _UNIX_STREAM_SERVER is not None:
+
+    class _Server(_UNIX_STREAM_SERVER):  # type: ignore[misc, valid-type]
+        daemon_threads = True
+        block_on_close = False
+
+        def __init__(self, path: str, settings: ProxySettings) -> None:
+            self.settings = settings
+            self.request_queue_size = 64
+            super().__init__(path, _Handler)
+
+else:
+
+    class _Server:
+        def __init__(self, path: str, settings: ProxySettings) -> None:
+            raise RuntimeFailure(
+                "credential proxy requires Unix domain sockets: supported platform is Ubuntu"
+            )
 
 
 class _Handler(BaseHTTPRequestHandler):

@@ -4,6 +4,26 @@ All notable changes are recorded here. From `1.0.0` the project follows Semantic
 
 ---
 
+## [1.0.17] — 2026-11-21
+
+Закрывает P0-3 (часть 2) из аудита `docs/audit/handoff-2026-11-20.md`: ключи провайдеров модели теперь не попадают в песочницу исполнителя. `factory run --executor hermes` работает через credential proxy — хост-прокси на loopback в netns исполнителя, allowlist хостов, одноразовый токен, подмена на реальный ключ только на хосте.
+
+### Безопасность
+
+- **Credential proxy (PR-C2).** Исполнитель в песочнице с `--unshare-net` видит только `HTTP_PROXY=http://127.0.0.1:8899` и сгенерированный `config.yaml` с одноразовым токеном (`factory-proxy-key-...`). Реальные `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` и др. читаются на хосте из `~/.hermes/.env`, переменных окружения или `config.yaml` и никогда не записываются в run, prompt, evidence или env песочницы.
+- **Allowlist хостов.** `budget.yaml → credential_proxy.allowlist` (5 хостов: `api.openai.com`, `api.anthropic.com`, `api.mistral.ai`, `generativelanguage.googleapis.com`, `api.tokenlab.amd.com`). Запрос на другой хост — 403 до отправки байт.
+- **TCP→Unix мост (`factory/runtime/proxy_bridge.py`).** Байтовый мост внутри netns исполнителя; `PR_SET_PDEATHSIG` убивает ребёнка при смерти моста. Никакой разборки HTTP, никаких ключей.
+- **SSE стриминг.** Ответы от провайдеров (включая потоковые) прозрачно пробрасываются обратно исполнителю.
+
+### Инструменты
+
+- **`factory doctor` показывает credential proxy.** Порт, allowlist, резолв upstream из текущего `config.yaml`, модель, режим API, транспорт. На Windows (нет Unix sockets) — внятная ошибка «supported platform is Ubuntu» вместо `AttributeError` при импорте.
+- **Тесты.** `tests/test_credential_proxy.py` — 9 тестов: настройки, рендер конфига, start/stop прокси, негативные кейсы (нет секции в budget, хост не в allowlist, нет ключа).
+
+### Несовместимости
+
+- **Windows** — credential proxy не запускается (нет `socketserver.ThreadingUnixStreamServer`). `factory doctor` импортируется и работает; попытка запуска прокси — `RuntimeFailure`. Поддерживаемая платформа — Ubuntu.
+
 ## [1.0.16] — 2026-11-20
 
 Закрывает третий P0 аудита `docs/audit/handoff-2026-11-20.md`: верификатор был театром. `validate_verification_report` проверял форму отчёта, но команды, которые в нём написаны, никто не исполнял — отчёт с выдуманным `PASS` и падающим тестом проходил гейт.

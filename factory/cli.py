@@ -125,6 +125,18 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 f"  ~/{masks['hermes_home']} read-only: "
                 + ", ".join(masks["hermes_read_only"])
             )
+        verify = report.get("host_verify")
+        if verify:
+            state = "available" if verify["available"] else "unavailable (bubblewrap not installed)"
+            print(
+                "host verify: "
+                f"{len(verify['commands'])} allowlisted command(s) "
+                f"timeout={verify['timeout_s']:g}s max={verify['max_commands']} "
+                f"output={verify['output']} required={verify['require_for_pass']} "
+                f"{state}"
+            )
+            for entry in verify["commands"]:
+                print("  " + " ".join(entry))
         if errors:
             print("DOCTOR FAILED:")
             for error in errors:

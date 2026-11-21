@@ -220,7 +220,62 @@ def load_budget() -> dict[str, Any]:
     enforce = data.get("enforce", {})
     if not isinstance(enforce, dict):
         raise ConfigError("budget.yaml: enforce must be a mapping")
+    _validate_verify_config(data)
     return data
+
+
+# A shell in the verification allowlist would take the argv the host built and
+# hand its meaning to the command line inside it: the host stops parsing, the
+# shell starts.  The same for `env`, which runs its arguments.
+VERIFY_DENIED_PROGRAMS = frozenset(
+    {"sh", "bash", "zsh", "dash", "ksh", "csh", "tcsh", "fish", "env", "xargs", "su", "sudo", "doas"}
+)
+VERIFY_OUTPUT_MODES = frozenset({"strict", "ignore"})
+
+
+def _validate_verify_config(data: dict[str, Any]) -> None:
+    """The operator's allowlist is configuration, so it gets the same strictness.
+
+    A malformed entry is not "just ignored": it would silently widen or narrow
+    the boundary the gate depends on.  `None` and an absent key mean the same
+    thing here — host replay is not configured.
+    """
+    commands = data.get("verify_commands", [])
+    if commands is None:
+        commands = []
+    if not isinstance(commands, list):
+        raise ConfigError("budget.yaml: verify_commands must be a list of argv lists")
+    for entry in commands:
+        if not isinstance(entry, list) or not entry:
+            raise ConfigError(
+                "budget.yaml: every verify_commands entry must be a non-empty argv list"
+            )
+        if not all(isinstance(token, str) and token and "\x00" not in token for token in entry):
+            raise ConfigError(
+                "budget.yaml: verify_commands entries must be non-empty strings without NULs"
+            )
+        program = Path(entry[0]).name
+        if program in VERIFY_DENIED_PROGRAMS:
+            raise ConfigError(
+                f"budget.yaml: verify_commands may not run {program!r}; "
+                "a shell inside the allowlist would interpret the argv the host built"
+            )
+    timeout = data.get("verify_timeout_s", 600)
+    if (
+        not isinstance(timeout, (int, float))
+        or isinstance(timeout, bool)
+        or not 0 < timeout <= 7200
+    ):
+        raise ConfigError("budget.yaml: verify_timeout_s must be a number in (0, 7200]")
+    limit = data.get("verify_max_commands", 10)
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 64:
+        raise ConfigError("budget.yaml: verify_max_commands must be an integer in 1..64")
+    require = data.get("verify_require_for_pass", True)
+    if not isinstance(require, bool):
+        raise ConfigError("budget.yaml: verify_require_for_pass must be true or false")
+    mode = data.get("verify_output", "strict")
+    if mode not in VERIFY_OUTPUT_MODES:
+        raise ConfigError("budget.yaml: verify_output must be strict or ignore")
 
 
 def resolve_model(tier: str) -> dict[str, str]:

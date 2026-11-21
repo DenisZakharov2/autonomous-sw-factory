@@ -24,14 +24,14 @@ blackbox_logging: "required"
 ## 3. Процедура (Procedure)
 1. Проверь, что `producer_role != 02-independent-verifier`.
 2. Запусти `factory verify --run-id <run_id> --stage <stage>`: он проверяет схемы, state, хэш-цепочку и эквивалентность `REQ-###` между `spec.md` и `spec-human.md`.
-3. Выполни минимум 3 adversarial-теста на отказ (граничные данные, нарушение `api-contract.md`, выход за `Allowed Files`), записывая команду и фактический вывод каждого.
+3. Выполни минимум 3 adversarial-теста на отказ (граничные данные, нарушение `api-contract.md`, выход за `Allowed Files`), записывая команду и фактический вывод каждого. Исполнимые хостом команды (`python3 -m pytest`, `go test`) бери из allowlist `budget.yaml`; на гейте `s4_build` нужна хотя бы одна.
 4. Оформи отчёт: `artifacts/verification/<stage>/verification.md` для стадии или `tasks/<task_id>/verification/verification.md` для задачи. Отчёт без трёх проверок, без вывода команд или без вердикта `PASS`/`FAIL` невалиден.
 
 ## 4. Выходы (Outputs)
 * Отчёт `verification.md` и запись события `VERIFY` с вердиктом в `runs/<run_id>/blackbox.jsonl`; только после `VERIFY PASS` ставится `GATE_DECISION` или `TASK_DONE`.
 
 ## 5. Критерии готовности (Definition of Done)
-* `factory verify` вернул `0`; в `verification.md` задокументированы минимум 3 проверки с фактическим выводом команд и один вердикт.
+* `factory verify` вернул `0`; в `verification.md` задокументированы минимум 3 проверки с фактическим выводом команд и один вердикт; стадийный гейт хост повторил: код возврата и вывод совпали.
 
 ## 6. Право вето (Veto Power)
 * `blocking` (`VETO-VER-DEFECT`): расхождение `spec.md` и `spec-human.md`, потеря `REQ-###`, самоприсвоение `[ПРОВЕРЕНО]` или падение сборки/тестов. Вердикт `FAIL` возвращает стадию или задачу в rework.

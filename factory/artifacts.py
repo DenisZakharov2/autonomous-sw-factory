@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -17,6 +18,7 @@ PLACEHOLDER_GUARD = re.compile(r"REQ-(?:###|NNN|\{)")
 MIN_SECTION_WORDS = 1
 REPORT_CHECKS_MIN = 3
 CHECK_HEADING_RE = re.compile(r"^###\s+Проверка\s+\d+\b.*$", re.MULTILINE)
+EXIT_CODE_RE = re.compile(r"^\d{1,3}$")
 # The deterministic `factory verify` run is a promise the report made in prose
 # and nothing checked.  A stage report is only a witness if one of its checks
 # actually ran the stage's own deterministic verifier; a task report cannot,
@@ -300,7 +302,7 @@ def _field_value(block: str, name: str) -> tuple[bool, str]:
     fenced block that follows it, so a multi-line command output is accepted
     without forcing it onto one line.
     """
-    pattern = re.compile(rf"^\s*[-*]\s*{name}\s*:\s*(.*)$", re.MULTILINE)
+    pattern = re.compile(rf"^[ \t]*[-*][ \t]*{name}[ \t]*:[ \t]*(.*)$", re.MULTILINE)
     match = pattern.search(block)
     if match is None:
         return False, ""
@@ -312,6 +314,57 @@ def _field_value(block: str, name: str) -> tuple[bool, str]:
     if fence and fence.group(1).strip():
         return True, fence.group(1).strip()
     return True, ""
+
+
+@dataclass(frozen=True)
+class VerificationCheck:
+    """One `### Проверка N` block, as the report wrote it.
+
+    The host cannot trust a report's prose, but it needs the prose in a form it
+    can execute: the argv, the exit code the verifier says it saw, and the
+    output it says was printed.  `None` means the field was missing or empty;
+    the report validator treats that as an error, and the replay never fills a
+    gap with a guess.
+    """
+
+    number: int
+    heading: str
+    command: str | None
+    exit_code: int | None
+    output: str | None
+
+
+def _parse_exit_code(block: str) -> int | None:
+    found, value = _field_value(block, "Код возврата")
+    if not found or not EXIT_CODE_RE.match(value):
+        return None
+    code = int(value)
+    return code if 0 <= code <= 255 else None
+
+
+def verification_checks(path: Path) -> list[VerificationCheck]:
+    """The report's checks, parsed for replay and for validation."""
+    if not path.is_file():
+        return []
+    text = path.read_text(encoding="utf-8")
+    body = _section_body(text, CHECKS_SECTION)
+    matches = list(CHECK_HEADING_RE.finditer(body))
+    checks: list[VerificationCheck] = []
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
+        block = body[match.end() : end]
+        command_found, command = _field_value(block, "Команда")
+        output_found, output = _field_value(block, "Вывод")
+        checks.append(
+            VerificationCheck(
+                number=index + 1,
+                heading=match.group(0).strip(),
+                command=command if command_found and command else None,
+                exit_code=_parse_exit_code(block),
+                output=output if output_found and output else None,
+            )
+        )
+    return checks
 
 
 def verification_verdict(text: str) -> tuple[str | None, list[str]]:
@@ -372,6 +425,14 @@ def validate_verification_report(
                 errors.append(f"{path}: check {index} has no '{field}:' field")
             elif not value:
                 errors.append(f"{path}: check {index} has an empty '{field}:' value")
+        found, value = _field_value(block, "Код возврата")
+        if not found:
+            errors.append(f"{path}: check {index} has no 'Код возврата:' field")
+        elif not EXIT_CODE_RE.match(value) or int(value) > 255:
+            errors.append(
+                f"{path}: check {index} has an invalid 'Код возврата:' value "
+                f"{value!r} (expected an integer 0..255)"
+            )
     if require_deterministic_check and not any(
         VERIFY_COMMAND_RE.search(_field_value(block, "Команда")[1]) for block in blocks
     ):

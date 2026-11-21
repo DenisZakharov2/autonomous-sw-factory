@@ -294,6 +294,7 @@ def sandbox_command(
     executor_user: str | None = None,
     run_id: str = "run",
     seq: int | str = 0,
+    network: bool = True,
 ) -> list[str]:
     """Команда в песочнице; при `executor_user` — ещё и под чужим uid.
 
@@ -302,6 +303,11 @@ def sandbox_command(
     каталог прогона rw): `/home` внутри пространства не существует, поэтому
     мирочитаемые файлы домашней директории недоступны даже при traverse-гранте
     на пути к прогону (см. `runtime/isolation.py`).
+
+    `network=False` additionally unshares the network namespace.  The executor
+    sandbox keeps the network because a model call needs it; the host replay of
+    the verifier's checks does not, and a test that tries to reach a provider
+    fails there instead of leaking a key to it.
     """
     if not enabled:
         if executor_user:
@@ -331,6 +337,8 @@ def sandbox_command(
         "--cap-drop",
         "ALL",
     ]
+    if not network:
+        args.append("--unshare-net")
     if executor_user:
         for system_dir in ("/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc", "/opt"):
             if os.path.isdir(system_dir):

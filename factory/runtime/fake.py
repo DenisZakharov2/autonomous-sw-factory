@@ -11,8 +11,11 @@ exhausts the time budget.
 """
 from __future__ import annotations
 
+import os
 import re
 import shutil
+import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -51,6 +54,55 @@ def _template_fill(spec: dict[str, Any]) -> str:
     text = path.read_text(encoding="utf-8")
     text = PLACEHOLDER_RE.sub("n/a", text)
     return text.rstrip() + "\n"
+
+
+def _product_check_block(run_dir: Path) -> str:
+    """The product's own test run, claimed verbatim, so the host can replay it.
+
+    The fake has no model, but it can run a command as well as one.  A stage
+    report on a run whose product has tests gets a fourth check from the
+    allowlist; the block says exactly what this process saw, which is what a
+    real verifier is expected to do.  The block is only written on POSIX, where
+    a host can have bubblewrap; a host without it skips the replay and says so
+    in evidence, so the fixture keeps its three-prose-check shape there.
+    """
+    product = run_dir / "product"
+    if not product.is_dir():
+        return ""
+    tests = [
+        path
+        for path in product.rglob("*.py")
+        if path.is_file()
+        and (path.name.startswith("test_") or path.name.endswith("_test.py"))
+    ]
+    if not tests:
+        return ""
+    env = dict(os.environ)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env.pop("PYTEST_ADDOPTS", None)
+    completed = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "product"],
+        cwd=run_dir,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+        check=False,
+    )
+    output = (completed.stdout or "") + (completed.stderr or "")
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    claimed = lines[-1] if lines else "OK"
+    return (
+        "\n### Проверка 4: тесты продукта\n\n"
+        "- Команда: `python3 -m pytest -q product`\n"
+        f"- Код возврата: `{completed.returncode}`\n"
+        "- Вывод:\n\n"
+        "```text\n"
+        f"{claimed}\n"
+        "```\n"
+    )
 
 
 def _verification_report(
@@ -94,7 +146,12 @@ def _verification_report(
         "reason": "all three checks returned 0",
     }
     text = PLACEHOLDER_RE.sub(lambda match: values.get(match.group(1), "n/a"), template)
-    return text.replace("PASS | FAIL", verdict).rstrip() + "\n"
+    text = text.replace("PASS | FAIL", verdict)
+    if verdict == "PASS" and not task_id and os.name == "posix":
+        block = _product_check_block(run_dir)
+        if block:
+            text = text.replace("\n## 3. Вердикт", block + "\n## 3. Вердикт", 1)
+    return text.rstrip() + "\n"
 
 
 PATH_TEMPLATE_CACHE: dict[str, str] = {}

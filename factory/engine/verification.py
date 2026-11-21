@@ -201,8 +201,33 @@ def _record_verification_locked(
         )
         if same_verdict and same_report:
             return latest
+    replay: Any | None = None
+    if verdict == "PASS":
+        from ..host_verify import replay_report
+
+        try:
+            stage_spec = find_stage(load_pipeline(), stage_id)
+        except RunError:
+            stage_spec = {}
+        accepts_code = any(
+            str(item) in {"product_src", "product_tests"}
+            for item in stage_spec.get("artifacts") or []
+        )
+        replay = replay_report(
+            path,
+            run_dir,
+            require_executable=task_id is None and accepts_code,
+            registry=registry,
+        )
+        if replay.errors:
+            raise VerificationError(
+                "the verification report's checks do not survive the host's replay:\n- "
+                + "\n- ".join(replay.errors[:6])
+            )
     reason_text = f"; reason: {reason}" if reason else ""
     event_evidence = list(evidence) + [f"{relative}: sha256 {digest[:12]} verdict {verdict}{reason_text}"]
+    if replay is not None:
+        event_evidence.extend(replay.evidence)
     model = _model_for(VERIFIER, "tier-3-frontier")
     return record_event(
         run_dir,

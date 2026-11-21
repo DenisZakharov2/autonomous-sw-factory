@@ -793,7 +793,9 @@ def doctor_report() -> dict[str, Any]:
         HERMES_HOME_PASSTHROUGH,
         HERMES_HOME_READ_ONLY,
         SECRET_HOME_DIRS,
+        sandbox_available,
     )
+    from .host_verify import config as host_verify_config
 
     pipeline = load_pipeline()
     registry = load_artifacts()
@@ -818,6 +820,23 @@ def doctor_report() -> dict[str, Any]:
     warnings = list(_executor_boundary_warnings())
     warnings.extend(_sandbox_boundary_warnings())
     warnings.extend(_run_root_acl_warnings())
+    try:
+        host_verify = host_verify_config()
+    except ConfigError as exc:
+        errors.append(str(exc))
+        host_verify = {"commands": [], "timeout_s": 600, "max_commands": 10,
+                       "require_for_pass": True, "output": "strict"}
+    available = sandbox_available()
+    if not host_verify["commands"]:
+        warnings.append(
+            "host replay is disabled: budget.yaml verify_commands is empty, so a "
+            "verifier's PASS is prose and its commands are never re-run"
+        )
+    elif not available:
+        warnings.append(
+            "host replay is configured but bubblewrap (bwrap) is not installed: a "
+            "verifier's PASS is not re-run on this machine"
+        )
     return {
         "roles": len(roles),
         "templates": len(list((PACKAGE_ROOT / "templates").glob("*.tmpl"))),
@@ -833,6 +852,14 @@ def doctor_report() -> dict[str, Any]:
             "hermes_home": HERMES_HOME_DIR,
             "hermes_passthrough": list(HERMES_HOME_PASSTHROUGH),
             "hermes_read_only": list(HERMES_HOME_READ_ONLY),
+        },
+        "host_verify": {
+            "available": available,
+            "commands": host_verify["commands"],
+            "timeout_s": host_verify["timeout_s"],
+            "max_commands": host_verify["max_commands"],
+            "require_for_pass": host_verify["require_for_pass"],
+            "output": host_verify["output"],
         },
         "errors": errors,
         "warnings": warnings,

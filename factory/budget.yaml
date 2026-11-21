@@ -22,3 +22,36 @@ enforce:
   tokens: true
   minutes: true
   usd: true
+
+# Host replay of the independent verifier's checks (audit P0-2).
+#
+# The verifier's report names a command, the exit code it saw and the output it
+# read.  Those are claims.  At gate closure the host now re-runs every claim
+# whose argv starts with one of the prefixes below, in a fresh bubblewrap with
+# a read-only filesystem and no network, and refuses the PASS if the real exit
+# code or output differs.  A prefix matches a whole argv head: `pytest` admits
+# `pytest -q tests/`, `make check` does not admit `make check-all`.
+#
+# The list is the operator's: it sits in the installed package, outside the run,
+# and the executor sandbox cannot write to the package.  Shells and `env` are
+# refused by `factory doctor` -- inside an allowlist they would re-interpret the
+# argv the host built and turn the fence into a door.  An empty list disables
+# the replay, and `factory doctor` then says that a PASS is prose only.
+verify_commands:
+  - ["python3", "-m", "pytest"]
+  - ["python", "-m", "pytest"]
+  - ["python3", "-m", "unittest"]
+  - ["python", "-m", "unittest"]
+  - ["pytest"]
+  - ["go", "test"]
+  - ["cargo", "test"]
+  - ["npm", "test"]
+  - ["pnpm", "test"]
+  - ["yarn", "test"]
+  - ["make", "check"]
+  - ["make", "test"]
+
+verify_timeout_s: 600       # per command; a hung suite refuses the PASS
+verify_max_commands: 10     # distinct commands in one report, not blocks
+verify_require_for_pass: true
+verify_output: "strict"     # strict | ignore

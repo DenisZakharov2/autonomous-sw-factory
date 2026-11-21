@@ -923,3 +923,97 @@ def test_a_plan_must_give_a_declared_test_file_to_a_task_that_owns_the_req(build
     )
     _write(build_run, "artifacts/plan.md", plan)
     assert validate_plan(build_run) == []
+
+
+# --- the host replays the verifier's stage checks ----------------------------
+
+
+def _submit_stage_report(build_run: Path) -> None:
+    write_task_verification(build_run, "TASK-001")
+    task_accept("run-01", "TASK-001", root=build_run.parent)
+    submit_work(
+        "run-01",
+        stage_id="s4_build",
+        role=VERIFIER,
+        artifacts=["artifacts/verification/s4_build/verification.md"],
+        root=build_run.parent,
+    )
+
+
+def test_a_stage_gate_replays_the_verifiers_checks(build_run):
+    write_stage_verification(build_run, "s4_build")
+    _submit_stage_report(build_run)
+    event = gate_approve(
+        "run-01",
+        gate_id="gate_s4",
+        approver=VERIFIER,
+        evidence=["tests pass"],
+        root=build_run.parent,
+    )
+    assert event["verdict"]["status"] == "PASS"
+    verify = next(
+        item
+        for item in read_events(build_run / "blackbox.jsonl")
+        if item["event_type"] == "VERIFY"
+        and item["stage"] == "s4_build"
+        and not item.get("task_id")
+        and item.get("verdict", {}).get("status") == "PASS"
+    )
+    assert any("host replay" in item for item in verify["verdict"]["evidence"]), verify["verdict"]["evidence"]
+
+
+def test_a_stage_gate_refuses_a_pass_the_host_cannot_reproduce(build_run):
+    _write(
+        build_run,
+        "product/tests/test_broken.py",
+        "def test_broken():\n    assert False\n",
+    )
+    text = verification_report_text("stage s4_build").replace(
+        "## 3. Вердикт",
+        "### Проверка 4: тесты продукта\n\n"
+        "- Команда: `python3 -m pytest -q product`\n"
+        "- Код возврата: `0`\n"
+        "- Вывод:\n\n"
+        "```text\n"
+        "1 passed in 0.01s\n"
+        "```\n\n"
+        "## 3. Вердикт",
+    )
+    _write(build_run, "artifacts/verification/s4_build/verification.md", text)
+    _submit_stage_report(build_run)
+    with pytest.raises(VerificationError) as caught:
+        gate_approve(
+            "run-01",
+            gate_id="gate_s4",
+            approver=VERIFIER,
+            evidence=["tests pass"],
+            root=build_run.parent,
+        )
+    assert "got exit 1" in str(caught.value), caught.value
+    state = load_state(build_run)
+    assert state["gate_status"]["gate_s4"]["status"] != "approved"
+    recorded = [
+        event
+        for event in read_events(build_run / "blackbox.jsonl")
+        if event["event_type"] == "VERIFY"
+        and event["stage"] == "s4_build"
+        and not event.get("task_id")
+    ]
+    assert recorded == []
+
+
+def test_a_stage_gate_refuses_a_pass_with_no_replayable_check(build_run):
+    _write(
+        build_run,
+        "artifacts/verification/s4_build/verification.md",
+        verification_report_text("stage s4_build"),
+    )
+    _submit_stage_report(build_run)
+    with pytest.raises(VerificationError, match="no replayable check"):
+        gate_approve(
+            "run-01",
+            gate_id="gate_s4",
+            approver=VERIFIER,
+            evidence=["tests pass"],
+            root=build_run.parent,
+        )

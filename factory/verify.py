@@ -16,6 +16,7 @@ from .config import (
     SCHEMA_DIR,
     check_schema_cached,
     load_artifacts,
+    load_budget,
     load_json,
     load_models,
     load_pipeline,
@@ -796,6 +797,8 @@ def doctor_report() -> dict[str, Any]:
         sandbox_available,
     )
     from .host_verify import config as host_verify_config
+    from .credential_proxy import CREDENTIAL_PROXY_DEFAULT_KEYS, load_settings
+    from .runtime.base import RuntimeFailure
 
     pipeline = load_pipeline()
     registry = load_artifacts()
@@ -837,6 +840,33 @@ def doctor_report() -> dict[str, Any]:
             "host replay is configured but bubblewrap (bwrap) is not installed: a "
             "verifier's PASS is not re-run on this machine"
         )
+
+    # Credential proxy status
+    credential_proxy_status = None
+    try:
+        budget = load_budget()
+        cred_section = budget.get("credential_proxy")
+        if cred_section is not None:
+            settings = load_settings()
+            credential_proxy_status = {
+                "configured": True,
+                "port": cred_section.get("port"),
+                "allowlist": cred_section.get("allowlist"),
+                "keys": cred_section.get("keys", {}),
+                "upstream_host": settings.upstream_host,
+                "upstream_path": settings.upstream_path,
+                "model": settings.model,
+                "api_mode": settings.api_mode,
+                "transport": settings.transport,
+                "default_keys": CREDENTIAL_PROXY_DEFAULT_KEYS,
+            }
+        else:
+            credential_proxy_status = {"configured": False}
+    except ConfigError as exc:
+        credential_proxy_status = {"configured": True, "error": str(exc)}
+    except RuntimeFailure as exc:
+        credential_proxy_status = {"configured": True, "operator_resolution_failed": str(exc)}
+
     return {
         "roles": len(roles),
         "templates": len(list((PACKAGE_ROOT / "templates").glob("*.tmpl"))),
@@ -861,6 +891,7 @@ def doctor_report() -> dict[str, Any]:
             "require_for_pass": host_verify["require_for_pass"],
             "output": host_verify["output"],
         },
+        "credential_proxy": credential_proxy_status,
         "errors": errors,
         "warnings": warnings,
     }

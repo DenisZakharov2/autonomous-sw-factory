@@ -55,3 +55,33 @@ verify_timeout_s: 600       # per command; a hung suite refuses the PASS
 verify_max_commands: 10     # distinct commands in one report, not blocks
 verify_require_for_pass: true
 verify_output: "strict"     # strict | ignore
+
+# Credential proxy for a live executor (`--executor hermes`).
+#
+# The executor never receives a provider key.  It gets a random per-step token
+# and a plain-HTTP base URL on a loopback port that exists only inside its
+# network namespace; `bwrap --unshare-net` makes that port the only address it
+# can reach.  A byte bridge in the sandbox forwards to this host-side proxy,
+# which checks the host below, swaps the token for the operator's real key and
+# opens the HTTPS connection itself.
+#
+# `keys` says which provider the sandbox may spend: host -> operator env var.
+# The key's value is never written to a run, a prompt, evidence or the sandbox
+# environment.  A host outside the allowlist is refused with 403 before any
+# bytes leave the machine; CONNECT tunnels and chunked request bodies are
+# refused too.  `factory doctor` prints the policy and whether the operator
+# config currently resolves an upstream for it.
+credential_proxy:
+  port: 8899
+  allowlist:
+    - api.openai.com
+    - api.anthropic.com
+    - api.mistral.ai
+    - generativelanguage.googleapis.com
+    - api.tokenlab.amd.com
+  keys:
+    api.openai.com: OPENAI_API_KEY
+    api.anthropic.com: ANTHROPIC_API_KEY
+    api.mistral.ai: MISTRAL_API_KEY
+    generativelanguage.googleapis.com: GEMINI_API_KEY
+    api.tokenlab.amd.com: AMD_API_KEY

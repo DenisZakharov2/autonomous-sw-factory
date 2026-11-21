@@ -137,6 +137,22 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             )
             for entry in verify["commands"]:
                 print("  " + " ".join(entry))
+        cred_proxy = report.get("credential_proxy")
+        if cred_proxy:
+            if not cred_proxy.get("configured"):
+                print("credential proxy: not configured (add credential_proxy to budget.yaml)")
+            elif cred_proxy.get("error"):
+                print(f"credential proxy: configuration error: {cred_proxy['error']}")
+            elif cred_proxy.get("operator_resolution_failed"):
+                print(f"credential proxy: operator resolution failed: {cred_proxy['operator_resolution_failed']}")
+            else:
+                print(
+                    "credential proxy: "
+                    f"port={cred_proxy['port']} allowlist={len(cred_proxy['allowlist'])} host(s) "
+                    f"upstream={cred_proxy['upstream_host']}{cred_proxy['upstream_path']} "
+                    f"model={cred_proxy['model']} mode={cred_proxy['api_mode']} "
+                    f"transport={cred_proxy['transport']}"
+                )
         if errors:
             print("DOCTOR FAILED:")
             for error in errors:

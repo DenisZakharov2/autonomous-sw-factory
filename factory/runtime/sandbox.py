@@ -33,7 +33,7 @@ from __future__ import annotations
 import os
 import shutil
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 from .base import RuntimeFailure
 
@@ -295,6 +295,7 @@ def sandbox_command(
     run_id: str = "run",
     seq: int | str = 0,
     network: bool = True,
+    credential_proxy: Any | None = None,
 ) -> list[str]:
     """Команда в песочнице; при `executor_user` — ещё и под чужим uid.
 
@@ -308,6 +309,14 @@ def sandbox_command(
     sandbox keeps the network because a model call needs it; the host replay of
     the verifier's checks does not, and a test that tries to reach a provider
     fails there instead of leaking a key to it.
+
+    `credential_proxy` (PR-C2) is a started `factory.credential_proxy.CredentialProxy`.
+    Its directory is bound read-only at `CREDENTIAL_PROXY_MOUNT`, its generated
+    Hermes config replaces `~/.hermes/config.yaml`, and the command is wrapped
+    by the bridge.  The caller must pass `network=False`: the bridge is then the
+    only address the executor can reach, and the provider key stays on the host.
+    The separate-user mode is refused until the socket ACL and env-file wiring
+    are designed; failing closed beats a live run that silently has no key.
     """
     if not enabled:
         if executor_user:
@@ -324,6 +333,23 @@ def sandbox_command(
         )
     if not sandbox_available(backend):
         raise RuntimeFailure("sandbox requested but bubblewrap (bwrap) is not installed")
+    if credential_proxy is not None:
+        if executor_user:
+            raise RuntimeFailure(
+                "credential proxy is not wired for --executor-user yet: the Unix "
+                "socket and env file need an executable-user ACL design. Run the "
+                "live executor without --executor-user."
+            )
+        if network:
+            raise RuntimeFailure(
+                "credential proxy requires network=False: otherwise the executor "
+                "can bypass the bridge and reach a provider directly"
+            )
+        if (
+            getattr(credential_proxy, "directory", None) is None
+            or getattr(credential_proxy, "config_path", None) is None
+        ):
+            raise RuntimeFailure("credential proxy has not been started")
 
     run = run_dir.resolve()
     home = Path.home()
@@ -385,6 +411,26 @@ def sandbox_command(
     # staging copy instead, so a rename stays inside the directory it was
     # given and the run root keeps its mode.
     args.extend(["--ro-bind", str(run), str(run)])
+    if credential_proxy is not None:
+        from ..credential_proxy import BRIDGE_MOUNT
+
+        # The bridge script and the host proxy's Unix socket travel together;
+        # the directory is read-only, so the executor cannot replace either.
+        args.extend(
+            ["--ro-bind", str(credential_proxy.directory), BRIDGE_MOUNT]
+        )
+        hermes_dir = home / HERMES_HOME_DIR
+        if not hermes_dir.is_dir():
+            raise RuntimeFailure(
+                f"credential proxy needs the operator Hermes home at {hermes_dir}"
+            )
+        args.extend(
+            [
+                "--ro-bind",
+                str(credential_proxy.config_path),
+                str(hermes_dir / "config.yaml"),
+            ]
+        )
 
     staged_map: dict[Path, Path] = {}
     for destination, source in staged:
@@ -469,7 +515,10 @@ def sandbox_command(
             continue
         args.extend(["--ro-bind", str(protected), str(protected)])
     args.append("--")
-    args.extend(command)
+    if credential_proxy is not None:
+        args.extend(credential_proxy.wrapper(command))
+    else:
+        args.extend(command)
     if executor_user:
         from . import isolation
 

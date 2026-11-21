@@ -25,7 +25,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .base import ExecutionResult, RunContext, safe_write_text
+from .base import ExecutionResult, RunContext, RuntimeFailure, safe_write_text
+from ..credential_proxy import CredentialProxy, start_credential_proxy
 from .sandbox import sandbox_command, sandbox_env
 
 
@@ -91,6 +92,7 @@ class HermesExecutor:
         run_id: str = "run",
         seq: int | str = 0,
         staged: tuple[tuple[str, str], ...] = (),
+        credential_proxy: CredentialProxy | None = None,
     ) -> list[str]:
         # Protect against E2BIG: Linux limits argv to ~128 KiB (MAX_ARG_STRLEN).
         # If prompt exceeds safe limit, truncate with a warning marker.
@@ -126,27 +128,49 @@ class HermesExecutor:
             executor_user=self.executor_user,
             run_id=run_id,
             seq=seq,
+            network=credential_proxy is None,
+            credential_proxy=credential_proxy,
         )
 
     def execute(self, order: dict[str, Any], context: RunContext) -> ExecutionResult:
         transcript = context.path_in_runtime()
         usage_path = context.path_in_executor(f"usage-{context.sequence or context.step}.json")
-        cmd = self.command(
-            context.prompt,
-            context.run_dir,
-            usage_path,
-            extra_read_write=context.extra_read_write,
-            staged=context.extra_staged,
-            stage=context.stage,
-            run_id=context.run_id,
-            seq=context.sequence or context.step,
-        )
+        proxy: CredentialProxy | None = None
+        if self.sandbox:
+            if self.executor_user:
+                raise RuntimeFailure(
+                    "a live Hermes run under --executor-user has no credential "
+                    "path yet: the sandbox masks ~/.hermes and strips provider "
+                    "keys (PR-C1), and the credential proxy does not own the "
+                    "executor user's socket. Run without --executor-user."
+                )
+            proxy = start_credential_proxy(self.model)
+            proxy.start()
+        try:
+            cmd = self.command(
+                context.prompt,
+                context.run_dir,
+                usage_path,
+                extra_read_write=context.extra_read_write,
+                staged=context.extra_staged,
+                stage=context.stage,
+                run_id=context.run_id,
+                seq=context.sequence or context.step,
+                credential_proxy=proxy,
+            )
+        except Exception:
+            if proxy is not None:
+                proxy.stop()
+            raise
+        env = sandbox_env()
+        if proxy is not None:
+            env.update(proxy.environment())
         started = time.monotonic()
         try:
             completed = subprocess.run(
                 cmd,
                 cwd=str(context.run_dir),
-                env=sandbox_env(),
+                env=env,
                 capture_output=True,
                 text=True,
                 timeout=self.timeout,
@@ -183,6 +207,8 @@ class HermesExecutor:
                 summary="hermes is not installed",
             )
         finally:
+            if proxy is not None:
+                proxy.stop()
             if self.executor_user:
                 # pid-файл шага больше не нужен: процесс исполнителя завершён.
                 from . import isolation

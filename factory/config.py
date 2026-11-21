@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,21 @@ from .errors import ConfigError
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 SCHEMA_DIR = PACKAGE_ROOT / "schemas"
+
+# Which operator environment variable holds the key for round two's
+# credential proxy.  A host outside this map is still allowed, but the budget
+# must say where its key lives (credential_proxy.keys); guessing an env name
+# from a hostname ends in a 401 with no clue.
+CREDENTIAL_PROXY_DEFAULT_KEYS = {
+    "api.openai.com": "OPENAI_API_KEY",
+    "api.anthropic.com": "ANTHROPIC_API_KEY",
+    "api.mistral.ai": "MISTRAL_API_KEY",
+    "generativelanguage.googleapis.com": "GEMINI_API_KEY",
+}
+CREDENTIAL_HOST_RE = re.compile(
+    r"^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$"
+)
+CREDENTIAL_ENV_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
 # `jsonschema.validate` re-validates the schema itself on every call, which
 # costs ~60 ms per validation.  A gate runs dozens of validations against the
@@ -221,6 +237,7 @@ def load_budget() -> dict[str, Any]:
     if not isinstance(enforce, dict):
         raise ConfigError("budget.yaml: enforce must be a mapping")
     _validate_verify_config(data)
+    _validate_credential_proxy(data)
     return data
 
 
@@ -276,6 +293,59 @@ def _validate_verify_config(data: dict[str, Any]) -> None:
     mode = data.get("verify_output", "strict")
     if mode not in VERIFY_OUTPUT_MODES:
         raise ConfigError("budget.yaml: verify_output must be strict or ignore")
+
+
+def _validate_credential_proxy(data: dict[str, Any]) -> None:
+    """The allowlist is the only way out of the sandbox, so it is validated here.
+
+    A missing section disables the proxy (a live executor then fails with a
+    clear message); a malformed one must never be silently ignored, because
+    the fallback would be a direct network call with a leaked key.
+    """
+    section = data.get("credential_proxy")
+    if section is None:
+        return
+    if not isinstance(section, dict):
+        raise ConfigError("budget.yaml: credential_proxy must be a mapping")
+    port = section.get("port")
+    if (
+        not isinstance(port, int)
+        or isinstance(port, bool)
+        or not 1024 <= port <= 65535
+    ):
+        raise ConfigError("budget.yaml: credential_proxy.port must be an integer in 1024..65535")
+    allowlist = section.get("allowlist")
+    if not isinstance(allowlist, list) or not allowlist:
+        raise ConfigError("budget.yaml: credential_proxy.allowlist must be a non-empty list of hosts")
+    normalized: list[str] = []
+    for item in allowlist:
+        if not isinstance(item, str) or item != item.strip() or item != item.lower():
+            raise ConfigError(
+                "budget.yaml: credential_proxy.allowlist entries must be lowercase host names"
+            )
+
+        if not CREDENTIAL_HOST_RE.fullmatch(item):
+            raise ConfigError(
+                f"budget.yaml: credential_proxy.allowlist entry {item!r} is not a host name"
+                " (scheme, port, path, wildcard and user info are refused)"
+            )
+        if item in normalized:
+            raise ConfigError(f"budget.yaml: credential_proxy.allowlist has a duplicate {item!r}")
+        normalized.append(item)
+    keys = section.get("keys", {})
+    if keys is None:
+        keys = {}
+    if not isinstance(keys, dict):
+        raise ConfigError("budget.yaml: credential_proxy.keys must be a host -> environment name mapping")
+    for host, variable in keys.items():
+        if not isinstance(host, str) or host.lower() not in normalized:
+            raise ConfigError(
+                f"budget.yaml: credential_proxy.keys.{host} must name a host from credential_proxy.allowlist"
+            )
+        if not isinstance(variable, str) or not CREDENTIAL_ENV_RE.fullmatch(variable):
+            raise ConfigError(
+                f"budget.yaml: credential_proxy.keys.{host} must be an uppercase environment variable name"
+            )
 
 
 def resolve_model(tier: str) -> dict[str, str]:

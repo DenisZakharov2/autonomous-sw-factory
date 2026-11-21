@@ -1,6 +1,7 @@
 """Host replay of a verifier report: unit and sandbox tests."""
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -176,6 +177,27 @@ def test_product_detection_does_not_follow_directory_symlinks(tmp_path):
     except (OSError, NotImplementedError):
         pytest.skip("symlinks are not available on this platform")
     assert not _product_has_files(run)
+
+
+@pytest.mark.skipif(not sandbox_available(), reason="bubblewrap is not installed")
+def test_a_venv_under_tmp_is_rebound_after_the_tmpfs(tmp_path, monkeypatch):
+    """CI installs the factory into /tmp/sdist-venv; the replay must see it."""
+    from factory.host_verify import _sandboxed
+    import sys
+
+    prefix = Path("/tmp") / f"sdist-venv-{os.getpid()}"
+    monkeypatch.setattr(sys, "prefix", str(prefix))
+    monkeypatch.setattr(sys, "executable", str(prefix / "bin" / "python"))
+    command = _sandboxed(["python3", "-m", "pytest"], tmp_path)
+    tmpfs = next(
+        index
+        for index, token in enumerate(command)
+        if token == "/tmp" and command[index - 1] == "--tmpfs"
+    )
+    rebound = command.index(str(prefix))
+    assert tmpfs < rebound
+    assert command[rebound - 1] == "--ro-bind"
+    assert command[rebound + 1] == str(prefix)
 
 
 @pytest.mark.skipif(not sandbox_available(), reason="bubblewrap is not installed")

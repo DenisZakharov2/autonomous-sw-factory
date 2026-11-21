@@ -219,9 +219,38 @@ def _execution_env() -> dict[str, str]:
     return env
 
 
+def _sandboxed(argv: list[str], run_dir: Path) -> list[str]:
+    """The bwrap argv, with the interpreter visible again if `/tmp` hides it.
+
+    The sandbox mounts a fresh tmpfs on `/tmp`, so a factory installed into a
+    virtualenv under `/tmp` would lose both its `python3` and its site-packages
+    at `execve` time.  The reported command runs on the host but the replay
+    must see the same interpreter: rebind the prefix read-only after the
+    tmpfs, as a later mount.
+    """
+    command = sandbox_command(argv, run_dir, enabled=True, network=False)
+    tmpfs_root = Path("/tmp")
+    prefix = Path(sys.prefix).resolve()
+    executable = Path(sys.executable).resolve()
+    candidates = [prefix]
+    if executable != prefix and prefix not in executable.parents:
+        candidates.append(executable)
+    hidden = [
+        path
+        for path in candidates
+        if path == tmpfs_root or tmpfs_root in path.parents
+    ]
+    if not hidden:
+        return command
+    separator = len(command) - len(argv) - 1
+    for path in sorted(hidden, key=lambda item: len(item.parts)):
+        command[separator:separator] = ["--ro-bind", str(path), str(path)]
+    return command
+
+
 def _run(argv: list[str], run_dir: Path, timeout: float) -> tuple[int | None, str, str | None]:
     """`(exit code, combined output, problem)` for one argv inside bwrap."""
-    sandboxed = sandbox_command(argv, run_dir, enabled=True, network=False)
+    sandboxed = _sandboxed(argv, run_dir)
     try:
         completed = subprocess.run(
             sandboxed,

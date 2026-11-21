@@ -32,6 +32,7 @@ from factory.runtime.base import ExecutionResult
 from factory.runtime.fake import FakeExecutor
 from factory.runtime.loop import _collect_writable_paths, run_loop
 from factory.runtime.prompt import build_prompt
+from factory.runtime.sandbox import sandbox_available
 from factory.state import load_state, save_state
 from factory.verify import verification_policy_errors, verify_run
 from conftest import (
@@ -940,6 +941,7 @@ def _submit_stage_report(build_run: Path) -> None:
     )
 
 
+@pytest.mark.skipif(not sandbox_available(), reason="host replay needs bubblewrap")
 def test_a_stage_gate_replays_the_verifiers_checks(build_run):
     write_stage_verification(build_run, "s4_build")
     _submit_stage_report(build_run)
@@ -962,6 +964,7 @@ def test_a_stage_gate_replays_the_verifiers_checks(build_run):
     assert any("host replay" in item for item in verify["verdict"]["evidence"]), verify["verdict"]["evidence"]
 
 
+@pytest.mark.skipif(not sandbox_available(), reason="host replay needs bubblewrap")
 def test_a_stage_gate_refuses_a_pass_the_host_cannot_reproduce(build_run):
     _write(
         build_run,
@@ -1002,6 +1005,7 @@ def test_a_stage_gate_refuses_a_pass_the_host_cannot_reproduce(build_run):
     assert recorded == []
 
 
+@pytest.mark.skipif(not sandbox_available(), reason="host replay needs bubblewrap")
 def test_a_stage_gate_refuses_a_pass_with_no_replayable_check(build_run):
     _write(
         build_run,

@@ -35,6 +35,16 @@ artifacts readable; none writable by the verifier
 no missing or tampered artifact reported
 ```
 
+### Проверка 4: тесты продукта
+
+- Команда: `python3 -m unittest discover -s product/tests`
+- Код возврата: `0`
+- Вывод:
+
+```text
+OK
+```
+
 ## 3. Вердикт
 - Вердикт: PASS
 - Причина: `все три проверки вернули 0, расхождений нет`

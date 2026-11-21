@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -436,18 +437,41 @@ def stage_paths(stage_id: str) -> list[str]:
     return paths
 
 
-def verification_report(subject: str, artifacts: list[str], command: str) -> str:
-    """The verifier's own report: three checks, a command and an output each."""
+def verification_report(subject: str, artifacts: list[str], command: str, *, replay: bool = False) -> str:
+    """The verifier's own report: three checks, a command and an output each.
+
+    `replay` adds the fourth block the host will re-run at the s4_build gate:
+    the product's own unittest suite, with the exit code and the last output
+    line this process actually saw, not a claim about them.
+    """
     listed = ", ".join(f"`{item}`" for item in artifacts) or "`n/a`"
     checks = [
-        ("детерминированная проверка", command, "deterministic checks, state and hash chain: OK"),
-        ("границы записи", f"test -r {artifacts[0] if artifacts else '.'}", "artifacts readable; none writable by the verifier"),
-        ("подмена или недостача", command, "no missing or tampered artifact reported"),
+        ("детерминированная проверка", command, 0, "deterministic checks, state and hash chain: OK"),
+        ("границы записи", f"test -r {artifacts[0] if artifacts else '.'}", 0,
+         "artifacts readable; none writable by the verifier"),
+        ("подмена или недостача", command, 0, "no missing or tampered artifact reported"),
     ]
+    if replay:
+        completed = subprocess.run(
+            [sys.executable, "-m", "unittest", "discover", "-s", "product/tests"],
+            cwd=EXAMPLE,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+            check=False,
+        )
+        output = (completed.stdout or "") + (completed.stderr or "")
+        lines = [line.strip() for line in output.splitlines() if line.strip()]
+        checks.append(
+            ("тесты продукта", "python3 -m unittest discover -s product/tests",
+             completed.returncode, lines[-1] if lines else "OK"),
+        )
     body = "\n\n".join(
-        f"### Проверка {index}: {name}\n\n- Команда: `{cmd}`\n- Код возврата: `0`\n"
+        f"### Проверка {index}: {name}\n\n- Команда: `{cmd}`\n- Код возврата: `{code}`\n"
         f"- Вывод:\n\n```text\n{output}\n```"
-        for index, (name, cmd, output) in enumerate(checks, 1)
+        for index, (name, cmd, code, output) in enumerate(checks, 1)
     )
     return doc("Отчёт независимого верификатора", [
         ("## 1. Проверено", f"- Предмет проверки: `{subject}`\n- Артефакты (только чтение): {listed}"),
@@ -456,11 +480,16 @@ def verification_report(subject: str, artifacts: list[str], command: str) -> str
     ])
 
 
-def write_report(relative: str, subject: str, artifacts: list[str], stage: str) -> str:
+def write_report(
+    relative: str, subject: str, artifacts: list[str], stage: str, *, replay: bool = False
+) -> str:
     write(
         relative,
         verification_report(
-            subject, artifacts, f"factory verify --run-id {RUN_ID} --stage {stage}"
+            subject,
+            artifacts,
+            f"factory verify --run-id {RUN_ID} --stage {stage}",
+            replay=replay,
         ),
     )
     return relative
@@ -479,6 +508,7 @@ def submit_and_gate(stage: str, role: str, gate: str, approver: str, evidence: s
             f"stage {stage}",
             [path.replace(str(EXAMPLE) + "/", "") for path in artifacts],
             stage,
+            replay=stage == "s4_build",
         )
         submit_work(
             RUN_ID, stage_id=stage, role="02-independent-verifier",

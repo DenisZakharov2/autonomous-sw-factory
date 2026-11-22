@@ -122,8 +122,9 @@ jobs:
           code=$?
           set -e
           test "$code" = 2
+          TOKEN=$(python3 -c "from factory.engine import make_approval_token, approval_key_bytes; print(make_approval_token(key=approval_key_bytes(), run_id='ci-nano', subject='gate_s00', approver='human:ci', action='approve'))")
           factory gate approve --run-id ci-nano --gate gate_s00 \
-            --approver human:ci --evidence "ci stand-in"
+            --approver human:ci --evidence "ci stand-in" --approval-token "$TOKEN"
           factory verify --run-id ci-nano --stage s00_intake
       - name: Build reference run
         run: python examples/build_nano_todo.py

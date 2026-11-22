@@ -3,7 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from factory.engine import gate_approve, init_run, next_action
+from factory.engine import (
+    gate_approve,
+    init_run,
+    make_approval_token,
+    next_action,
+)
 from factory.runtime.base import ExecutionResult
 from factory.runtime.fake import FakeExecutor
 from factory.runtime.loop import run_loop
@@ -20,17 +25,26 @@ def run_env(tmp_path, monkeypatch):
     runs = tmp_path / "runs"
     runs.mkdir()
     monkeypatch.setenv("FACTORY_RUNS_ROOT", str(runs))
+    monkeypatch.setenv("FACTORY_APPROVAL_KEY", "a" * 32)
     init_run("run-01", "nano", root=runs)
     return runs
 
 
 def _approve_human(run_id, result, runs):
+    token = make_approval_token(
+        key=b"a" * 32,
+        run_id=run_id,
+        subject=result.order["gate"]["id"],
+        approver="human:test",
+        action="approve",
+    )
     gate_approve(
         run_id,
         gate_id=result.order["gate"]["id"],
         approver="human:test",
         evidence=["test approval"],
         root=runs,
+        approval_token=token,
     )
 
 

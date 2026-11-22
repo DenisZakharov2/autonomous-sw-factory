@@ -18,8 +18,10 @@
 """
 from __future__ import annotations
 
+import ctypes
 import os
 import re
+import signal
 import sys
 from pathlib import Path, PurePosixPath
 
@@ -414,6 +416,53 @@ def _retire_legacy() -> None:
     path.unlink()
 
 
+# Linux syscall numbers for pidfd operations
+# pidfd_open: 434 (x86_64), pidfd_send_signal: 436 (x86_64)
+# We use ctypes to call them directly since they may not be in libc on all systems
+_PIDFD_OPEN_NR = 434
+_PIDFD_SEND_SIGNAL_NR = 436
+
+def _pidfd_open(pid: int, flags: int = 0) -> int:
+    """Open a pidfd for the given PID. Raises OSError on old kernels."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    fd = libc.syscall(_PIDFD_OPEN_NR, pid, flags)
+    if fd < 0:
+        errno = ctypes.get_errno()
+        if errno == 38:  # ENOSYS - syscall not implemented
+            raise HelperError("pidfd_open not available: kernel too old (< 5.1)")
+        raise HelperError(f"pidfd_open failed: {os.strerror(errno)}")
+    return fd
+
+def _pidfd_send_signal(pidfd: int, sig: int, info: int = 0, flags: int = 0) -> None:
+    """Send a signal via pidfd."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    result = libc.syscall(_PIDFD_SEND_SIGNAL_NR, pidfd, sig, info, flags)
+    if result < 0:
+        errno = ctypes.get_errno()
+        raise HelperError(f"pidfd_send_signal failed: {os.strerror(errno)}")
+
+def _uid_from_pidfd(pidfd: int) -> int:
+    """Get the UID of the process referred to by pidfd."""
+    try:
+        # /proc/<pidfd>/fd/ is not directly accessible, but we can read
+        # /proc/self/fd/<pidfd>/status if the pidfd was opened with our process
+        # Actually, pidfd is a file descriptor in our process that refers to the target process.
+        # We can use /proc/self/fd/<pidfd>/status
+        proc_fd_path = Path(f"/proc/self/fd/{pidfd}/status")
+        if not proc_fd_path.exists():
+            raise HelperError(f"cannot read status for pidfd {pidfd}")
+        text = proc_fd_path.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            if line.startswith("Uid:"):
+                # Format: Uid:    real    effective    saved    filesystem
+                parts = line.split()
+                if len(parts) >= 2:
+                    return int(parts[1])
+        raise HelperError(f"Uid not found in status for pidfd {pidfd}")
+    except OSError as exc:
+        raise HelperError(f"cannot read uid from pidfd: {exc}") from exc
+
+
 def _stop(user: str, pid_file: str) -> None:
     uid, _gid = _user_ids(user)
     path = _env_path(pid_file, PID_NAME_RE)
@@ -425,13 +474,16 @@ def _stop(user: str, pid_file: str) -> None:
         raise HelperError(f"pid file is not an integer: {path}") from exc
     if pid <= 1:
         raise HelperError(f"refusing to signal pid {pid}")
-    proc = Path(f"/proc/{pid}")
-    if not proc.exists():
-        path.unlink(missing_ok=True)
-        return
-    if proc.stat().st_uid != uid:
-        raise HelperError(f"pid {pid} is not owned by {user}")
-    os.kill(pid, 9)
+    
+    # Use pidfd to safely verify ownership and send signal
+    pidfd = _pidfd_open(pid)
+    try:
+        target_uid = _uid_from_pidfd(pidfd)
+        if target_uid != uid:
+            raise HelperError(f"pid {pid} is not owned by {user}")
+        _pidfd_send_signal(pidfd, signal.SIGKILL)
+    finally:
+        os.close(pidfd)
     path.unlink(missing_ok=True)
 
 
@@ -440,12 +492,43 @@ def _run_as(user: str, env_file: str, pid_file: str, command: list[str]) -> None
     env_path = _env_path(env_file, ENV_NAME_RE)
     pid_path = _env_path(pid_file, PID_NAME_RE)
     parsed = _parse_env_file(env_path)
+    
+    # Validate command[0] before privilege drop: must be root-owned and not writable by others
+    cmd_path = Path(command[0])
+    if not cmd_path.is_absolute():
+        raise HelperError(f"command must be an absolute path: {command[0]}")
+    if not _root_owned(cmd_path) or not _root_owned_chain(cmd_path.parent):
+        raise HelperError(f"command {command[0]} is not root-owned or parent is writable by others")
+    
     fd = _open_nofollow(pid_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
     try:
         os.write(fd, str(os.getpid()).encode("ascii"))
     finally:
         os.close(fd)
     os.chown(pid_path, 0, gid)
+    
+    # PR_SET_NO_NEW_PRIVS: prevent gaining new privileges after this point
+    if hasattr(os, "prctl"):
+        try:
+            # PR_SET_NO_NEW_PRIVS = 38
+            libc = ctypes.CDLL(None, use_errno=True)
+            if libc.prctl(38, 1, 0, 0, 0) != 0:
+                errno = ctypes.get_errno()
+                raise HelperError(f"prctl(PR_SET_NO_NEW_PRIVS) failed: {os.strerror(errno)}")
+        except (OSError, AttributeError) as exc:
+            raise HelperError(f"prctl(PR_SET_NO_NEW_PRIVS) not available: {exc}") from exc
+    
+    # Drop all capabilities: empty capset
+    try:
+        import subprocess
+        completed = subprocess.run(["capsh", "--drop=all", "--", "true"], capture_output=True, check=False)
+        if completed.returncode != 0:
+            # capsh not available or failed - continue without capset (non-fatal)
+            pass
+    except (OSError, FileNotFoundError):
+        # capsh not available - continue without capset (non-fatal)
+        pass
+    
     os.setgroups([])
     os.setgid(gid)
     os.setuid(uid)

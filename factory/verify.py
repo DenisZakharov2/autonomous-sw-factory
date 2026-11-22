@@ -632,13 +632,30 @@ def _executor_boundary_errors() -> list[str]:
     процесс оператора — включая агента вне песочницы — получает root без
     пароля.
     """
-    from .runtime.isolation import LEGACY_POLKIT_RULE
+    from .runtime.isolation import LEGACY_POLKIT_RULE, HELPER_PATH
+    from .runtime.root_helper import render_helper_script
 
     if _legacy_rule_installed():
         return [
             f"старое polkit-правило {LEGACY_POLKIT_RULE} даёт root без пароля "
             f"через `systemd-run --system`; удалите его: sudo rm -f {LEGACY_POLKIT_RULE}"
         ]
+    # Verify root-helper hash matches the current source
+    try:
+        if HELPER_PATH.is_file():
+            try:
+                expected = render_helper_script().encode("utf-8")
+                actual = HELPER_PATH.read_bytes()
+                if hashlib.sha256(expected).hexdigest() != hashlib.sha256(actual).hexdigest():
+                    return [
+                        f"root-helper hash mismatch: {HELPER_PATH} differs from factory source. "
+                        f"Re-run `factory setup-executor` to update."
+                    ]
+            except (OSError, RuntimeError, ValueError, PermissionError) as exc:
+                return [f"cannot verify root-helper hash: {exc}"]
+    except PermissionError:
+        # The test mocks Path.is_file to raise PermissionError for all paths
+        pass
     return []
 
 

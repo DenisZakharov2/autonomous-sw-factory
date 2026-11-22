@@ -20,6 +20,7 @@ from factory.engine import (
     gate_reject,
     import_plan,
     init_run,
+    make_approval_token,
     next_action,
     submit_work,
     task_accept,
@@ -606,18 +607,27 @@ def test_verification_fail_rework_converges(tmp_path, monkeypatch):
     runs = tmp_path / "runs"
     runs.mkdir()
     monkeypatch.setenv("FACTORY_RUNS_ROOT", str(runs))
+    monkeypatch.setenv("FACTORY_APPROVAL_KEY", "a" * 32)
     init_run("run-01", "nano", root=runs)
     executor = FakeExecutor(scenario="verification-fail")
     result = None
     for _ in range(20):
         result = run_loop("run-01", executor, max_steps=80, root=runs)
         if result.code == 2:
+            token = make_approval_token(
+                key=b"a" * 32,
+                run_id="run-01",
+                subject=result.order["gate"]["id"],
+                approver="human:test",
+                action="approve",
+            )
             gate_approve(
                 "run-01",
                 gate_id=result.order["gate"]["id"],
                 approver="human:test",
                 evidence=["test approval"],
                 root=runs,
+                approval_token=token,
             )
             continue
         break
@@ -741,18 +751,27 @@ def test_an_invalid_report_leaves_evidence_and_retries(tmp_path, monkeypatch):
     runs = tmp_path / "runs"
     runs.mkdir()
     monkeypatch.setenv("FACTORY_RUNS_ROOT", str(runs))
+    monkeypatch.setenv("FACTORY_APPROVAL_KEY", "a" * 32)
     init_run("run-01", "nano", root=runs)
     executor = FakeExecutor(scenario="verification-invalid")
     result = None
     for _ in range(20):
         result = run_loop("run-01", executor, max_steps=80, root=runs)
         if result.code == 2:
+            token = make_approval_token(
+                key=b"a" * 32,
+                run_id="run-01",
+                subject=result.order["gate"]["id"],
+                approver="human:test",
+                action="approve",
+            )
             gate_approve(
                 "run-01",
                 gate_id=result.order["gate"]["id"],
                 approver="human:test",
                 evidence=["test approval"],
                 root=runs,
+                approval_token=token,
             )
             continue
         break

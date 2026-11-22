@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import os
+import secrets
 import time
 from pathlib import Path
 from typing import Any
 
+from ..checkpoint import store_dir as checkpoint_store_dir
 from ..config import PACKAGE_ROOT, load_artifacts, load_budget, load_pipeline
 from ..errors import RunError, VerificationError
 from ..journal import read_events, record_event, run_lock
@@ -48,6 +51,51 @@ MAX_APPROVAL_TTL_S = 24 * 60 * 60
 DEFAULT_APPROVAL_TTL_S = 15 * 60
 MIN_APPROVAL_KEY_BYTES = 32
 
+# JTI (JWT ID) namespace for spent approval tokens
+JTI_STORE_NAME = "approval-jti.json"
+
+
+def _jti_store_path() -> Path:
+    """Path to the JTI store (outside runs/)."""
+    return checkpoint_store_dir() / JTI_STORE_NAME
+
+
+def _load_jti_store() -> set[str]:
+    """Load the set of spent JTIs from the checkpoint store."""
+    path = _jti_store_path()
+    if not path.is_file():
+        return set()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return set(data.get("spent_jtis", []))
+    except (json.JSONDecodeError, OSError):
+        return set()
+
+
+def _save_jti_store(jtis: set[str]) -> None:
+    """Save the set of spent JTIs to the checkpoint store atomically."""
+    path = _jti_store_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {"spent_jtis": sorted(jtis)}
+    content = (json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8")
+    # Use atomic write via temp file
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_bytes(content)
+    tmp.replace(path)
+    path.chmod(0o600)
+
+
+def _is_jti_spent(jti: str) -> bool:
+    """Check if a JTI has already been spent."""
+    return jti in _load_jti_store()
+
+
+def _mark_jti_spent(jti: str) -> None:
+    """Mark a JTI as spent."""
+    jtis = _load_jti_store()
+    jtis.add(jti)
+    _save_jti_store(jtis)
+
 
 def approval_key_bytes() -> bytes | None:
     """HMAC key for human decisions, or None when the gate is unauthenticated.
@@ -78,43 +126,52 @@ def make_approval_token(
     ttl_s: int = DEFAULT_APPROVAL_TTL_S,
     now: int | None = None,
 ) -> str:
-    """Token `exp.hmac` bound to one run, one subject, one approver, one action."""
+    """Token `exp.jti.hmac` bound to one run, one subject, one approver, one action.
+
+    The JTI (JWT ID) is a unique identifier for this token, generated using
+    cryptographically secure random bytes. It enables replay protection by
+    tracking spent tokens in a checkpoint store outside runs/.
+    """
     if action not in APPROVAL_ACTIONS:
         raise RunError(f"unknown approval action {action!r}")
     if not 1 <= int(ttl_s) <= MAX_APPROVAL_TTL_S:
         raise RunError(f"approval ttl must be 1..{MAX_APPROVAL_TTL_S} seconds")
     exp = int(now if now is not None else time.time()) + int(ttl_s)
+    jti = secrets.token_urlsafe(16)
     digest = hmac.new(
         key,
-        f"{run_id}|{subject}|{approver}|{action}|{exp}".encode("utf-8"),
+        f"{run_id}|{subject}|{approver}|{action}|{exp}|{jti}".encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
-    return f"{exp}.{digest}"
+    return f"{exp}.{jti}.{digest}"
 
 
 def _check_human_approval(
     run_id: str, gate_id: str, approver: str, token: str | None, action: str
 ) -> str:
-    """Optional HMAC check for human gates.
+    """Mandatory HMAC check for human gates (fail-closed).
 
-    With `FACTORY_APPROVAL_KEY` set, a human decision must carry a token
-    `exp.HMAC(key, run_id|subject|approver|action|exp)`. The expiry is at most
-    24 hours ahead, so a captured token cannot approve a different action or
-    be replayed next week. Without the key the decision is recorded as
-    unauthenticated: a local single-user setup cannot prove that a human,
-    rather than the calling agent, typed `human:<id>`.
+    A human decision MUST carry a token `exp.jti.hmac` bound to one run,
+    one subject, one approver, one action, and a unique JTI. The expiry
+    is at most 24 hours ahead. The JTI is stored in a checkpoint store
+    outside runs/ to prevent replay across runs and machine restarts.
+    Without FACTORY_APPROVAL_KEY set, human gates are refused entirely.
     """
     if action not in APPROVAL_ACTIONS:
         raise RunError(f"unknown approval action {action!r}")
     key = approval_key_bytes()
     if key is None:
-        return "unauthenticated"
-    if not token or token.count(".") != 1:
+        raise RunError(
+            "FACTORY_APPROVAL_KEY is not set: human gate decisions require "
+            "an approval key. Set FACTORY_APPROVAL_KEY (at least 32 bytes) "
+            "in the environment to enable human gates."
+        )
+    if not token or token.count(".") != 2:
         raise RunError(
             "FACTORY_APPROVAL_KEY is set: a valid --approval-token is required "
-            "for human gate decisions"
+            "for human gate decisions (format: exp.jti.hmac)"
         )
-    exp_text, digest = token.split(".", 1)
+    exp_text, jti, digest = token.split(".", 2)
     try:
         exp = int(exp_text)
     except ValueError as exc:
@@ -124,15 +181,20 @@ def _check_human_approval(
         raise RunError("approval token has expired; mint a new --approval-token")
     if exp > now + MAX_APPROVAL_TTL_S:
         raise RunError("approval token expiry is too far in the future")
+    # Check JTI replay protection
+    if _is_jti_spent(jti):
+        raise RunError(f"approval token replay detected: jti {jti} has already been used")
     expected = hmac.new(
         key,
-        f"{run_id}|{gate_id}|{approver}|{action}|{exp}".encode("utf-8"),
+        f"{run_id}|{gate_id}|{approver}|{action}|{exp}|{jti}".encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
     if not hmac.compare_digest(expected, digest):
         raise RunError(
             "approval token does not match this run, gate, approver and action"
         )
+    # Mark JTI as spent
+    _mark_jti_spent(jti)
     return "hmac"
 
 

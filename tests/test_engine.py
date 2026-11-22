@@ -1,11 +1,13 @@
 """Invariants: gate approvers and task ownership are enforced, not advisory."""
 import json
+import os
 
 import pytest
 
 from factory.engine import (
     gate_reject,
     import_plan,
+    make_approval_token,
     next_action,
     submit_work,
     task_accept,
@@ -71,11 +73,21 @@ def test_gate_reject_rejects_foreign_approver(nano_run):
 
 def test_gate_reject_accepts_declared_human(nano_run):
     run, _, _ = nano_run
+    # Set approval key and generate token for human approver
+    os.environ["FACTORY_APPROVAL_KEY"] = "a" * 32
+    token = make_approval_token(
+        key=b"a" * 32,
+        run_id="run-01",
+        subject="gate_s00",
+        approver="human:auditor",
+        action="reject",
+    )
     event = gate_reject("run-01", gate_id="gate_s00", approver="human:auditor",
-                        evidence=["brief rejected"], root=run.parent)
+                        evidence=["brief rejected"], root=run.parent, approval_token=token)
     assert event["verdict"]["status"] == "FAIL"
     state = load_state(run)
     assert state["gate_status"]["gate_s00"]["decided_by"] == "human:auditor"
+    del os.environ["FACTORY_APPROVAL_KEY"]
 
 
 def test_role_gate_reject_requires_the_declared_role(nano_run):
@@ -268,9 +280,18 @@ def test_gate_reject_from_security_returns_to_build(nano_run):
 
 def test_gate_reject_escalates_after_max_attempts(nano_run):
     run, _, _ = nano_run
+    # Set approval key and generate tokens for human approver
+    os.environ["FACTORY_APPROVAL_KEY"] = "a" * 32
     for attempt in range(3):
+        token = make_approval_token(
+            key=b"a" * 32,
+            run_id="run-01",
+            subject="gate_s00",
+            approver="human:reviewer",
+            action="reject",
+        )
         gate_reject("run-01", gate_id="gate_s00", approver="human:reviewer",
-                    evidence=[f"reject {attempt}"], root=run.parent)
+                    evidence=[f"reject {attempt}"], root=run.parent, approval_token=token)
 
     state = load_state(run)
     assert state["stage_status"]["s00_intake"] == "escalated"
@@ -280,6 +301,7 @@ def test_gate_reject_escalates_after_max_attempts(nano_run):
     assert order["action"] == "blocked"
     assert order["stage"] == "s00_intake"
     assert "escalated" in order["instructions"]
+    del os.environ["FACTORY_APPROVAL_KEY"]
     assert order["next_command"].startswith("factory gate accept-risk")
 
 

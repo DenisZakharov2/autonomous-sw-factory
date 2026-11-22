@@ -1,7 +1,7 @@
 # Handoff после 1.0.13: состояние и следующий шаг
 
 **Дата:** 16 ноября 2026
-**Репозиторий:** `/home/anony/Documents/Личное/Проект фабрика программного обеспечения/autonomous-sw-factory`
+**Репозиторий:** `<factory-repo>`
 **GitHub:** https://github.com/DenisZakharov2/autonomous-sw-factory
 **Версия:** 1.0.13 (релиз [v1.0.13](https://github.com/DenisZakharov2/autonomous-sw-factory/releases/tag/v1.0.13) опубликован 12 ноября)
 **Ветка:** `main`, синхронизирована с `origin/main`
@@ -16,7 +16,7 @@
 
 ```text
 Продолжаем работу над фабрикой программного обеспечения:
-/home/anony/Documents/Личное/Проект фабрика программного обеспечения/autonomous-sw-factory
+<factory-repo>
 
 Сначала прочитай:
   AGENTS.md                        — правила проекта (девять законов, границы ролей)

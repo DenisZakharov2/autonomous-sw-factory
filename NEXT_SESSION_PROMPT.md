@@ -78,7 +78,7 @@ sudo chmod 755 /usr/local/libexec/factory-root-helper
 
 ## Quick verification commands
 ```bash
-cd /home/anony/Documents/Личное/Проект\ фабрика\ программного\ обеспечения/autonomous-sw-factory
+<factory-repo>
 .venv/bin/ruff check factory/ tests/
 .venv/bin/mypy
 .venv/bin/pytest tests/test_root_helper.py tests/test_engine.py tests/test_cli.py tests/test_verify.py -v

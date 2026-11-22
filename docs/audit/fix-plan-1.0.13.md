@@ -2,7 +2,7 @@
 
 **Дата:** 12 ноября 2026
 **Репозиторий:** https://github.com/DenisZakharov2/autonomous-sw-factory
-**Локально:** `/home/anony/Documents/Личное/Проект фабрика программного обеспечения/autonomous-sw-factory`
+**Локально:** `<factory-repo>`
 **HEAD:** `92b5a41` (версия `1.0.12`)
 **Материалы аудита:** `../GPTcode-review-autonomous-sw-factory.md`
 **Подход:** Ponytail. Атомарный коммит + проверка на каждый шаг. Чужие правки

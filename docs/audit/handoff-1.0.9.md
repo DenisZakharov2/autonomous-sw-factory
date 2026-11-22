@@ -505,11 +505,11 @@ billable, 1830 с**, `usd` 0.0, `factory verify` — OK, `VERIFY` — 9.
 - **Отдельный пользователь исполнителя** (`factory setup-executor`): проверен на реальной машине —
   пользователь `factory-executor` (uid 997), polkit-правило `/etc/polkit-1/rules.d/50-factory-transient-units.rules`,
   `/run/factory-executor` (root:factory-executor 0750), ACL `rwX` на `~/.hermes/{cache,logs,installs}`,
-  traverse на `/home/anony` и `~/.hermes`.
+  traverse на `~` и `~/.hermes`.
 - **Подпись журнала** (`factory sign`/`factory verify`): опробована на реальном прогоне
   `enterprise-mini-20261104-191607` — `factory sign` подписал 55 событий, `factory verify`
   → `VERIFY OK`, `checkpoint: signed (55 events)`. Ключ и store в
-  `/home/anony/.hermes/cache/scratch/`.
+  `~/.hermes/cache/scratch/`.
 - **Тег и релиз:** `v1.0.9` на origen указывает на коммит `3021c75`, GitHub Release 1.0.9 создан
   (https://github.com/DenisZakharov2/autonomous-sw-factory/releases/tag/v1.0.9).
 - **Comмит и пуш** сделаны: коммит `3021c75` (документация: версия 1.0.9) в origin main.
@@ -603,7 +603,7 @@ export FACTORY_RUNS_ROOT="$PWD/runs"
 factory eval --cases "$PWD/runs/hermes-cases" --executor hermes \
   --executor-model deepseek-ai/DeepSeek-V4.1-Flash-1017 \
   --executor-tools auto --reasoning high --timeout 900 --yolo \
-  --sandbox-rw /home/anony/.hermes/installs/74e85d3cd01c2ec7 \
+  --sandbox-rw ~/.hermes/installs/<hash> \
   --sandbox-rw ~/.hermes/cache --sandbox-rw ~/.hermes/logs \
   --budget-tokens 3000000 --budget-minutes 120 \
   --update-baseline eval/baseline-hermes.json --json
@@ -752,7 +752,7 @@ export CARGO_TARGET_DIR="$PWD/runs/brownfield-src/proxy-for-ubuntu/app/src-tauri
 factory eval --cases "$PWD/runs/hermes-cases-brownfield" --executor hermes \
   --executor-model deepseek-ai/DeepSeek-V4.1-Flash-1017 \
   --executor-tools auto --reasoning high --timeout 900 --yolo \
-  --sandbox-rw /home/anony/.hermes/installs/74e85d3cd01c2ec7 \
+  --sandbox-rw ~/.hermes/installs/<hash> \
   --sandbox-rw ~/.hermes/cache --sandbox-rw ~/.hermes/logs \
   --sandbox-rw "$CARGO_TARGET_DIR" \
   --budget-tokens 4500000 --budget-minutes 240 --stamp brownfield-real --json
@@ -997,7 +997,7 @@ export CARGO_TARGET_DIR="$PWD/runs/brownfield-src/proxy-for-ubuntu/app/src-tauri
 factory eval --cases "$PWD/runs/hermes-cases-nano-product" --executor hermes \
   --executor-model deepseek-ai/DeepSeek-V4.1-Flash-1017 \
   --executor-tools auto --reasoning high --timeout 900 --yolo \
-  --sandbox-rw /home/anony/.hermes/installs/74e85d3cd01c2ec7 \
+  --sandbox-rw ~/.hermes/installs/<hash> \
   --sandbox-rw ~/.hermes/cache --sandbox-rw ~/.hermes/logs \
   --sandbox-rw "$CARGO_TARGET_DIR" \
   --budget-tokens 2500000 --budget-minutes 120 --stamp nano-product-real --json

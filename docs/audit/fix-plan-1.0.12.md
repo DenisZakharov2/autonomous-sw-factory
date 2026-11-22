@@ -2,10 +2,10 @@
 
 **Дата:** 10 ноября 2026
 **Репозиторий:** https://github.com/DenisZakharov2/autonomous-sw-factory
-**Локально:** `/home/anony/Documents/Личное/Проект фабрика программного обеспечения/autonomous-sw-factory`
+**Локально:** `<factory-repo>`
 **HEAD:** `d40148d` (совпадает с `origin/main`; аудит сделан по этой же ревизии)
 **Материалы аудита:** `Grok/GrokAudit1.md` (35 строк), `Grok/Patch/autonomous-sw-factory-security.patch` (1558 строк),
-`Grok/Patch/autonomous-sw-factory-security.md` (тот же diff + шапка; `/home/anony/Downloads/autonomous-sw-factory-security.md` — байт-в-байт тот же файл)
+`Grok/Patch/autonomous-sw-factory-security.md` (тот же diff + шапка; `<downloads>/autonomous-sw-factory-security.md` — байт-в-байт тот же файл)
 
 **Подход:** Ponytail. Чужие правки не переписываются без нужды: из патча Grok берём то, что корректно, и
 переписываем то, что переоткрывает дыру или ломает функциональность. Каждый шаг — атомарный коммит + проверка.
@@ -71,7 +71,7 @@
 
 | ID | Severity | Дефект | Где |
 | :--- | :--- | :--- | :--- |
-| D-1 | **BLOCKER** | **Helper — Python-скрипт с shebang оператора.** `helper.write_text(f"#!{sys.executable}\n{HELPER_BODY}")`, а `HELPER_BODY` делает `from factory.runtime.root_helper import main`. Root исполняет интерпретатор и код из каталога пользователя. В этом репозитории `sys.executable` → `/home/anony/.../.venv/bin/python` → `/home/anony/.hermes/tools/python-3.14.7+.../bin/python3.14` — каталог пользователя. Оператор (или агент вне песочницы) правит интерпретатор/пакет → **root без пароля возвращается**: ровно тот класс дыры, который аудит закрывает | `factory/runtime/isolation.py:348` + `HELPER_BODY` |
+| D-1 | **BLOCKER** | **Helper — Python-скрипт с shebang оператора.** `helper.write_text(f"#!{sys.executable}\n{HELPER_BODY}")`, а `HELPER_BODY` делает `from factory.runtime.root_helper import main`. Root исполняет интерпретатор и код из каталога пользователя. В этом репозитории `sys.executable` → `<home>/.venv/bin/python` → `<home>/.hermes/tools/python-3.14.7+.../bin/python3.14` — каталог пользователя. Оператор (или агент вне песочницы) правит интерпретатор/пакет → **root без пароля возвращается**: ровно тот класс дыры, который аудит закрывает | `factory/runtime/isolation.py:348` + `HELPER_BODY` |
 | D-2 | **BLOCKER** | **`factory setup-executor` больше не устанавливает helper.** `setup_executor_user()` бросает `ExecutorUserError`, если helper не установлен; подкоманды `install-helper` у helper нет; polkit разрешает только `/usr/local/libexec/factory-root-helper`. На чистой машине «одноразовая настройка» падает и требует ручного `sudo` (команда есть только в тексте ошибки) | `factory/runtime/isolation.py:352-353` |
 | D-3 | **HIGH** | **Имя pid-файла не проходит собственную валидацию helper'а.** `PID_NAME_RE = ^[a-z0-9][a-z0-9-]{0,80}\.pid$`, а `pid_file_path` даёт `_UNIT_SAFE_RE.sub("-", f"{run_id}-{seq}")`, где `seq = context.sequence or context.step` → `s00_intake` → `run-01-s00_intake.pid` → `HelperError: refusing env path name`. Шаг падает при `sequence == 0` (fallback на `step`) | `factory/runtime/isolation.py` (`pid_file_path`) + `factory/runtime/root_helper.py` (`PID_NAME_RE`) |
 | D-4 | **HIGH** | **Тесты границы доверия проверяют старый механизм.** `tests/test_runtime_trust_boundary.py:363` (`_systemd_run_as`) вызывает `systemd-run` напрямую; после патча продукт идёт через `pkexec` + helper. Три теста (uid, чтение 0600-секрета, system-команда) проверяют путь, которого в продукте больше нет, и пропускаются по `systemd_run_available()` — функции, которая в патче стала мёртвой | `tests/test_runtime_trust_boundary.py` |

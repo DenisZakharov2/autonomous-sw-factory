@@ -64,6 +64,7 @@ def _synthetic_result(case_id: str, *, steps: int = 14, ok: bool = True) -> dict
 def test_eval_set_matches_the_committed_baseline(tmp_path, monkeypatch):
     """The committed baseline must describe the current code, not an old run."""
     monkeypatch.delenv("FACTORY_ROOT", raising=False)
+    monkeypatch.setenv("FACTORY_APPROVAL_KEY", "a" * 32)
     report = run_eval_set(
         CASES,
         FakeExecutor(),

@@ -85,12 +85,45 @@ def _submit_intake(run: Path) -> dict:
     )
 
 
-def _approve_intake(run: Path) -> dict:
-    _submit_intake(run)
-    return gate_approve(
-        run.name, gate_id="gate_s00", approver="human:denis",
-        evidence=["brief accepted"], root=run.parent,
+def _approval_token(key: bytes, run_id: str, gate_id: str, approver: str, action: str) -> str:
+    return make_approval_token(
+        key=key, run_id=run_id, subject=gate_id, approver=approver, action=action
     )
+
+
+def _approve_intake(run: Path, key: bytes) -> dict:
+    _submit_intake(run)
+    token = _approval_token(key, run.name, "gate_s00", "human:denis", "approve")
+    return gate_approve(
+        run.name,
+        gate_id="gate_s00",
+        approver="human:denis",
+        evidence=["brief accepted"],
+        root=run.parent,
+        approval_token=token,
+    )
+
+
+def _reject_intake(run: Path, key: bytes, evidence: list[str]) -> dict:
+    token = _approval_token(key, run.name, "gate_s00", "human:denis", "reject")
+    return gate_reject(
+        run.name,
+        gate_id="gate_s00",
+        approver="human:denis",
+        evidence=evidence,
+        root=run.parent,
+        approval_token=token,
+    )
+
+
+@pytest.fixture()
+def approved_intake(nano_run, monkeypatch):
+    """A nano run with intake submitted and approved (human gate with token)."""
+    run, _, _ = nano_run
+    monkeypatch.setenv("FACTORY_APPROVAL_KEY", "a" * 32)
+    key = b"a" * 32
+    _approve_intake(run, key)
+    return run, key
 
 
 def test_submit_requires_at_least_one_artifact(nano_run):
@@ -119,36 +152,48 @@ def test_tamper_after_submit_is_detected(nano_run):
     assert any("tampered after submission/approval" in error for error in errors)
 
 
-def test_tamper_after_approval_is_detected(nano_run):
+def test_tamper_after_approval_is_detected(nano_run, monkeypatch):
     run, _, _ = nano_run
-    _approve_intake(run)
+    monkeypatch.setenv("FACTORY_APPROVAL_KEY", "a" * 32)
+    key = b"a" * 32
+    _approve_intake(run, key)
     _write(run, "artifacts/GLOSSARY.md", GLOSSARY + "\nПодмена.\n")
     errors = verify_run(run, "s00_intake", require_gate=True)
     assert any("tampered after submission/approval" in error for error in errors)
 
 
-def test_stages_cannot_be_closed_out_of_order(nano_run):
+def test_stages_cannot_be_closed_out_of_order(nano_run, monkeypatch):
     run, _, _ = nano_run
+    monkeypatch.setenv("FACTORY_APPROVAL_KEY", "a" * 32)
+    key = b"a" * 32
+    _approve_intake(run, key)
     with pytest.raises(RunError, match="not current"):
+        token = _approval_token(key, "run-01", "gate_s1", "human:denis", "approve")
         gate_approve("run-01", gate_id="gate_s1", approver="human:denis",
-                     evidence=["spec ok"], root=run.parent)
+                     evidence=["spec ok"], root=run.parent, approval_token=token)
     with pytest.raises(RunError, match="not current"):
         gate_approve("run-01", gate_id="gate_s2", approver="02-independent-verifier",
                      evidence=["arch ok"], root=run.parent)
 
 
-def test_gate_requires_review_status(nano_run):
+def test_gate_requires_review_status(nano_run, monkeypatch):
     run, _, _ = nano_run
+    monkeypatch.setenv("FACTORY_APPROVAL_KEY", "a" * 32)
+    key = b"a" * 32
     with pytest.raises(RunError, match="expected one of"):
+        token = _approval_token(key, "run-01", "gate_s00", "human:denis", "approve")
         gate_approve("run-01", gate_id="gate_s00", approver="human:denis",
-                     evidence=["nothing submitted"], root=run.parent)
+                     evidence=["nothing submitted"], root=run.parent, approval_token=token)
 
 
-def test_reject_returns_the_stage_to_produce(nano_run):
+def test_reject_returns_the_stage_to_produce(nano_run, monkeypatch):
     run, _, _ = nano_run
+    monkeypatch.setenv("FACTORY_APPROVAL_KEY", "a" * 32)
+    key = b"a" * 32
     _submit_intake(run)
+    token = _approval_token(key, "run-01", "gate_s00", "human:denis", "reject")
     gate_reject("run-01", gate_id="gate_s00", approver="human:denis",
-                evidence=["rewrite the brief"], root=run.parent)
+                evidence=["rewrite the brief"], root=run.parent, approval_token=token)
     order = next_action("run-01", root=run.parent)
     assert order["action"] == "produce"
     assert order["next_command"].startswith("factory submit")
@@ -164,8 +209,10 @@ def test_verify_command_no_longer_requires_the_pending_gate(nano_run):
     assert verify_run(run, "s00_intake") == []
 
 
-def test_directory_artifact_is_hashed_and_tamper_detected(nano_run):
+def test_directory_artifact_is_hashed_and_tamper_detected(nano_run, monkeypatch):
     run, _, _ = nano_run
+    monkeypatch.setenv("FACTORY_APPROVAL_KEY", "a" * 32)
+    key = b"a" * 32
     _advance_to(run, "s2_architecture")
     specs = {
         "artifacts/architecture.md": "## 1. Компоненты\n\nКомпонент.\n## 2. REQ mapping\n\nREQ-001.\n## 3. Решения\n\nADR.\n",
@@ -181,8 +228,6 @@ def test_directory_artifact_is_hashed_and_tamper_detected(nano_run):
         _write(run, relative, text)
     paths = [path for path in specs if not path.startswith("artifacts/screens/")]
     paths.append("artifacts/screens")
-    # The verifier's report is part of the stage in a role-verified run: it
-    # must exist before the stage can reach `review`.
     write_stage_verification(run, "s2_architecture")
     event = submit_work(
         "run-01", stage_id="s2_architecture", role="12-fullstack-developer",
@@ -190,14 +235,13 @@ def test_directory_artifact_is_hashed_and_tamper_detected(nano_run):
     )
     directory = next(item for item in event["artifacts"] if item["path"].endswith("/"))
     assert directory["path"] == "artifacts/screens/"
-    # The verifier hands its report in before the gate opens: the router only
-    # offers a gate once the report is current, and the gate requires the same.
     submit_work(
         "run-01", stage_id="s2_architecture", role="02-independent-verifier",
         artifacts=["artifacts/verification/s2_architecture/verification.md"], root=run.parent,
     )
+    token = _approval_token(key, "run-01", "gate_s2", "02-independent-verifier", "approve")
     gate_approve("run-01", gate_id="gate_s2", approver="02-independent-verifier",
-                 evidence=["arch ok"], root=run.parent)
+                 evidence=["arch ok"], root=run.parent, approval_token=token)
     _write(run, "artifacts/screens/todo.md", "## 1. Экраны\n\nПодмена.\n")
     errors = verify_run(run, "s2_architecture", require_gate=True)
     assert any("tampered after submission/approval" in error for error in errors)
@@ -217,8 +261,9 @@ def test_root_artifact_can_be_submitted(nano_run, tmp_path, monkeypatch):
     assert [item["path"] for item in event["artifacts"]] == ["skills-lock.json"]
 
 
-def test_task_dispatch_claim_submit_accept(nano_run):
+def test_task_dispatch_claim_submit_accept(nano_run, monkeypatch):
     run, _, _ = nano_run
+    monkeypatch.setenv("FACTORY_APPROVAL_KEY", "a" * 32)
     _advance_to(run, "s4_build")
     _write(run, "artifacts/plan.md", PLAN)
     first = next_action("run-01", root=run.parent)
@@ -238,8 +283,9 @@ def test_task_dispatch_claim_submit_accept(nano_run):
     task_accept("run-01", "TASK-001", root=run.parent)
 
 
-def test_dependent_task_is_not_dispatched_early(nano_run):
+def test_dependent_task_is_not_dispatched_early(nano_run, monkeypatch):
     run, _, _ = nano_run
+    monkeypatch.setenv("FACTORY_APPROVAL_KEY", "a" * 32)
     _advance_to(run, "s4_build")
     _write(run, "artifacts/plan.md", PLAN_DEP)
     order = next_action("run-01", root=run.parent)
@@ -253,8 +299,9 @@ def test_dependent_task_is_not_dispatched_early(nano_run):
     assert order["action"] == "verify"
 
 
-def test_build_gate_requires_accepted_tasks(nano_run):
+def test_build_gate_requires_accepted_tasks(nano_run, monkeypatch):
     run, _, _ = nano_run
+    monkeypatch.setenv("FACTORY_APPROVAL_KEY", "a" * 32)
     _advance_to(run, "s4_build")
     _write(run, "artifacts/plan.md", PLAN)
     from factory.engine import import_plan
@@ -271,16 +318,20 @@ def test_build_gate_requires_accepted_tasks(nano_run):
     assert any("is not accepted" in error for error in errors)
 
 
-def test_accept_risk_unblocks_an_escalated_gate(nano_run):
+def test_accept_risk_unblocks_an_escalated_gate(nano_run, monkeypatch):
     run, _, _ = nano_run
+    monkeypatch.setenv("FACTORY_APPROVAL_KEY", "a" * 32)
+    key = b"a" * 32
     for attempt in range(3):
+        token = _approval_token(key, "run-01", "gate_s00", "human:denis", "reject")
         gate_reject("run-01", gate_id="gate_s00", approver="human:denis",
-                    evidence=[f"reject {attempt}"], root=run.parent)
+                    evidence=[f"reject {attempt}"], root=run.parent, approval_token=token)
     assert load_state(run)["stage_status"]["s00_intake"] == "escalated"
+    token = _approval_token(key, "run-01", "gate_s00", "human:denis", "accept-risk")
     event = accept_risk(
         "run-01", gate_id="gate_s00", approver="human:denis",
         risk="Accept the brief as is", mitigation="Manual review later",
-        root=run.parent,
+        root=run.parent, approval_token=token,
     )
     assert event["event_type"] == "RISK_ACCEPTANCE"
     state = load_state(run)
@@ -288,20 +339,26 @@ def test_accept_risk_unblocks_an_escalated_gate(nano_run):
     assert state["gate_status"]["gate_s00"]["status"] == "approved"
 
 
-def test_stage_reset_unblocks_and_clears_attempts(nano_run):
+def test_stage_reset_unblocks_and_clears_attempts(nano_run, monkeypatch):
     run, _, _ = nano_run
+    monkeypatch.setenv("FACTORY_APPROVAL_KEY", "a" * 32)
+    key = b"a" * 32
     for attempt in range(3):
+        token = _approval_token(key, "run-01", "gate_s00", "human:denis", "reject")
         gate_reject("run-01", gate_id="gate_s00", approver="human:denis",
-                    evidence=[f"reject {attempt}"], root=run.parent)
+                    evidence=[f"reject {attempt}"], root=run.parent, approval_token=token)
+    token = _approval_token(key, "run-01", "s00_intake", "human:denis", "reset")
     stage_reset("run-01", stage_id="s00_intake", approver="human:denis",
-                reason="Retry with a better brief", root=run.parent)
+                reason="Retry with a better brief", root=run.parent, approval_token=token)
     state = load_state(run)
     assert state["stage_status"]["s00_intake"] == "pending"
     assert state["gate_status"]["gate_s00"]["attempts"] == 0
 
 
-def test_blocking_veto_reopens_and_then_escalates(nano_run):
+def test_blocking_veto_reopens_and_then_escalates(nano_run, monkeypatch):
     run, _, _ = nano_run
+    monkeypatch.setenv("FACTORY_APPROVAL_KEY", "a" * 32)
+    _submit_intake(run)
     for index in range(3):
         veto("run-01", stage_id="s00_intake", role="01-smart-interviewer",
              code=f"VETO-00{index}", evidence=["brief is ambiguous"], root=run.parent)
@@ -463,8 +520,10 @@ def test_partial_submit_keeps_the_stage_in_progress(nano_run):
     assert next_action("run-01", root=run.parent)["action"] == "produce"
 
 
-def test_task_reset_unblocks_an_escalated_task(nano_run):
+def test_task_reset_unblocks_an_escalated_task(nano_run, monkeypatch):
     run, _, _ = nano_run
+    monkeypatch.setenv("FACTORY_APPROVAL_KEY", "a" * 32)
+    key = b"a" * 32
     _advance_to(run, "s4_build")
     _write(run, "artifacts/plan.md", PLAN)
     from factory.engine import import_plan
@@ -477,17 +536,20 @@ def test_task_reset_unblocks_an_escalated_task(nano_run):
                     ["product/src/todo.py"], root=run.parent)
         task_reject("run-01", "TASK-001", f"attempt {attempt}", root=run.parent)
     assert load_state(run)["tasks"]["TASK-001"]["status"] == "escalated"
+    token = _approval_token(key, "run-01", "TASK-001", "human:denis", "task-reset")
     task_reset("run-01", task_id="TASK-001", approver="human:denis",
-               reason="retry", root=run.parent)
+               reason="retry", root=run.parent, approval_token=token)
     task = load_state(run)["tasks"]["TASK-001"]
     assert task["status"] == "pending"
     assert task["attempts"] == 0
 
 
-def test_gate_reject_self_rework_returns_produce_with_feedback(nano_run):
+def test_gate_reject_self_rework_returns_produce_with_feedback(nano_run, monkeypatch):
     """После gate_reject при rework_to == stage_id: задачи → pending,
     стадия → in_progress, next_action → produce с feedback верификатора."""
     run, _, _ = nano_run
+    monkeypatch.setenv("FACTORY_APPROVAL_KEY", "a" * 32)
+    key = b"a" * 32
     _advance_to(run, "s4_build")
     _write(run, "artifacts/plan.md", PLAN)
     from factory.engine import import_plan
@@ -506,8 +568,9 @@ def test_gate_reject_self_rework_returns_produce_with_feedback(nano_run):
     write_stage_verification(run, "s4_build", verdict="FAIL",
                              reason="хакерские байты в product/src/todo.py")
 
+    token = _approval_token(key, "run-01", "gate_s4", "02-independent-verifier", "reject")
     gate_reject("run-01", gate_id="gate_s4", approver="02-independent-verifier",
-                evidence=["verifier FAIL"], root=run.parent)
+                evidence=["verifier FAIL"], root=run.parent, approval_token=token)
 
     state = load_state(run)
     assert state["stage_status"]["s4_build"] == "in_progress"

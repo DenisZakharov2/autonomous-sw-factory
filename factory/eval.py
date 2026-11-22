@@ -27,7 +27,7 @@ from typing import Any, Iterator
 
 from .artifacts import artifact_path, pattern_paths
 from .config import load_artifacts, load_json, load_pipeline, validate_against_schema
-from .engine import gate_approve, init_run
+from .engine import approval_key_bytes, gate_approve, init_run, make_approval_token
 from .errors import ConfigError, FactoryError
 from .journal import read_events
 from .metrics import compute_metrics
@@ -386,12 +386,21 @@ def _drive_run(
         if not last.order or not last.order.get("gate"):
             raise FactoryError("human gate stop came without a gate in the work order")
         gate_id = str(last.order["gate"]["id"])
+        key = approval_key_bytes()
+        if key is None:
+            raise FactoryError(
+                "FACTORY_APPROVAL_KEY is not set; eval harness cannot auto-approve human gates"
+            )
+        token = make_approval_token(
+            key=key, run_id=run_id, subject=gate_id, approver=EVAL_APPROVER, action="approve"
+        )
         gate_approve(
             run_id,
             gate_id=gate_id,
             approver=EVAL_APPROVER,
             evidence=[f"eval harness auto-approval for case {run_id}"],
             root=root,
+            approval_token=token,
         )
     if last is None:
         raise FactoryError("eval case produced no loop step (max_steps is not positive)")

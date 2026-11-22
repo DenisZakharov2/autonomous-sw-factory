@@ -32,6 +32,7 @@ from factory.engine import (
     gate_reject,
     import_plan,
     init_run,
+    make_approval_token,
     submit_work,
     task_accept,
     task_claim,
@@ -305,9 +306,17 @@ def test_verify_reports_a_journal_whose_verdict_was_about_older_bytes(build_run:
     assert any("about older bytes" in error for error in errors), errors
 
 
-def test_accept_risk_refuses_a_stage_that_waits_for_its_verdict(architecture_run: Path):
+def _risk_token(key: bytes, run_id: str, gate_id: str, approver: str) -> str:
+    return make_approval_token(
+        key=key, run_id=run_id, subject=gate_id, approver=approver, action="accept-risk"
+    )
+
+
+def test_accept_risk_refuses_a_stage_that_waits_for_its_verdict(architecture_run: Path, monkeypatch):
     """`review` means the verdict is pending, not that a risk was accepted."""
     run = architecture_run
+    monkeypatch.setenv("FACTORY_APPROVAL_KEY", "a" * 32)
+    key = b"a" * 32
     _submit_architecture(run)
     submit_work(
         "run-01", stage_id="s2_architecture", role=VERIFIER,
@@ -315,16 +324,20 @@ def test_accept_risk_refuses_a_stage_that_waits_for_its_verdict(architecture_run
     )
     assert load_state(run)["stage_status"]["s2_architecture"] == "review"
 
+    token = _risk_token(key, "run-01", "gate_s2", "human:denis")
     with pytest.raises(RunError):
         accept_risk(
             "run-01", gate_id="gate_s2", approver="human:denis",
             risk="skip the review", mitigation="manual check later", root=run.parent,
+            approval_token=token,
         )
 
 
-def test_accept_risk_names_the_verdict_it_overrides(architecture_run: Path):
+def test_accept_risk_names_the_verdict_it_overrides(architecture_run: Path, monkeypatch):
     """A human may close an escalated stage, but the journal must say what was overridden."""
     run = architecture_run
+    monkeypatch.setenv("FACTORY_APPROVAL_KEY", "a" * 32)
+    key = b"a" * 32
     # The verifier turns the stage down: the risk acceptance has to stand
     # against a recorded verdict.
     write_stage_verification(run, "s2_architecture", verdict="FAIL", reason="the contract is thin")
@@ -340,10 +353,11 @@ def test_accept_risk_names_the_verdict_it_overrides(architecture_run: Path):
         )
     assert load_state(run)["stage_status"]["s2_architecture"] == "escalated"
 
+    token = _risk_token(key, "run-01", "gate_s2", "human:denis")
     event = accept_risk(
         "run-01", gate_id="gate_s2", approver="human:denis",
         risk="the architecture is good enough", mitigation="review in the next sprint",
-        root=run.parent,
+        root=run.parent, approval_token=token,
     )
     assert event["event_type"] == "RISK_ACCEPTANCE"
     verdicts = [

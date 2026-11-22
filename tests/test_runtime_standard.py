@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from factory.config import load_pipeline
-from factory.engine import gate_approve, gate_reject, init_run, next_action, submit_work
+from factory.engine import gate_approve, gate_reject, init_run, make_approval_token, next_action, submit_work
 from factory.runtime.fake import FakeExecutor
 from factory.runtime.loop import run_loop
 from factory.state import add_task, find_stage, load_state, save_state, stage_gate
@@ -19,21 +19,29 @@ def standard_env(tmp_path, monkeypatch):
     runs = tmp_path / "runs"
     runs.mkdir()
     monkeypatch.setenv("FACTORY_RUNS_ROOT", str(runs))
+    monkeypatch.setenv("FACTORY_APPROVAL_KEY", "a" * 32)
     init_run("run-01", "standard", root=runs, idea="CLI todo без зависимостей")
     return runs
 
 
+def _approval_token(key: bytes, run_id: str, gate_id: str, approver: str, action: str) -> str:
+    return make_approval_token(key=key, run_id=run_id, subject=gate_id, approver=approver, action=action)
+
+
 def _run_standard(run_id, runs, max_segments=20):
     result = None
+    key = b"a" * 32
     for _ in range(max_segments):
         result = run_loop(run_id, FakeExecutor(), max_steps=60, root=runs)
         if result.code == 2:
+            token = _approval_token(key, run_id, result.order["gate"]["id"], "human:test", "approve")
             gate_approve(
                 run_id,
                 gate_id=result.order["gate"]["id"],
                 approver="human:test",
                 evidence=["test approval"],
                 root=runs,
+                approval_token=token,
             )
             continue
         return result

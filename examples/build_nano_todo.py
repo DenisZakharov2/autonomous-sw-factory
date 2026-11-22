@@ -18,8 +18,10 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from factory.engine import (
+    approval_key_bytes,
     gate_approve,
     init_run,
+    make_approval_token,
     submit_work,
     task_accept,
     task_claim,
@@ -514,7 +516,16 @@ def submit_and_gate(stage: str, role: str, gate: str, approver: str, evidence: s
             RUN_ID, stage_id=stage, role="02-independent-verifier",
             artifacts=[relative], root=RUNS,
         )
-    gate_approve(RUN_ID, gate_id=gate, approver=approver, evidence=[evidence], root=RUNS)
+    key = approval_key_bytes()
+    approval_token = None
+    if key is not None:
+        approval_token = make_approval_token(
+            key=key, run_id=RUN_ID, subject=gate, approver=approver, action="approve"
+        )
+    gate_approve(
+        RUN_ID, gate_id=gate, approver=approver, evidence=[evidence],
+        root=RUNS, approval_token=approval_token,
+    )
 
 
 def accept_task(task_id: str) -> None:

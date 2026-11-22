@@ -4,6 +4,20 @@ All notable changes are recorded here. From `1.0.0` the project follows Semantic
 
 ---
 
+## [1.0.18] — 2026-11-22
+
+Закрывает остаток P0-3 (часть 3) и PR-C2/PR-F после релиза `1.0.17`: credential proxy получен сквозной E2E-покрытие, eval-हारнес авто-апрувит гейты JTI-токеном, человеческие гейты требуют токены подтверждения.
+
+### Инструменты
+
+- **Credential proxy E2E-тесты.** `tests/test_credential_proxy_integration.py` — 17 тестов: генерация конфига с одноразовым токеном (не реальный ключ), валидация allowlist/пуска/токена, сквозная цепочка хост → `proxy_bridge` → Unix-сокет → `CredentialProxy` → фейковый HTTPS-апстрим с самоподписанным сертификатом. Проверяется, что апстрим получает `Authorization: Bearer <real-key>`, а не sandbox-токен; чужой хост — 403, путь вне префикса — 403, отсутствие токена — 401.
+- **PR-F: человеческие гейты требуют токен подтверждения.** 4 файла тестов обновлены на `FACTORY_APPROVAL_KEY` + `make_approval_token(...)` + `gate_approve(..., approval_token=token)`: `tests/test_v012_regressions.py` (8 тестов), `tests/test_verdict_freshness.py` (2), `tests/test_quarantine.py` (1), `tests/test_runtime_standard.py` (1). Паттерн уже ثبت в `tests/test_runtime_loop.py`.
+- **Eval harness.** Гейты авто-апрувятся JTI-токеном, фейк-исполнитель пробежал 7 раннов, все гейты `gate_s00/gate_s0/gate_s1/gate_s7/gate_s9` approuvenы через approval token, финал `complete`, exit 0, `factory doctor` → `DOCTOR OK`, артефакты в `runs/hermes-int-1/`.
+
+### Исправлено
+
+- **Root-helper для `factory doctor`.** `factory setup-executor` ставит `/usr/local/libexec/factory-root-helper` (сгенерированный через `render_helper_script()` с shebang системного интерпретатора), polkit-правило `49-factory-root-helper.rules`, пользователя `factory-executor` (uid 997), каталог окружения `/run/factory-executor`. Устаревшее правило `50-factory-transient-units.rules` снято. `factory doctor` → `DOCTOR OK`.
+
 ## [1.0.17] — 2026-11-21
 
 Закрывает P0-3 (часть 2) из аудита `docs/audit/handoff-2026-11-20.md`: ключи провайдеров модели теперь не попадают в песочницу исполнителя. `factory run --executor hermes` работает через credential proxy — хост-прокси на loopback в netns исполнителя, allowlist хостов, одноразовый токен, подмена на реальный ключ только на хосте.

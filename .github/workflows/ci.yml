@@ -86,6 +86,8 @@ jobs:
 
   eval:
     runs-on: ubuntu-latest
+    env:
+      FACTORY_APPROVAL_KEY: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -107,8 +109,6 @@ jobs:
       # Only nano-todo and standard-mini work reliably with fake executor;
       # other cases require real executor or have product tests that need real code.
       - name: Eval set (fake executor, invariants and baseline)
-        env:
-          FACTORY_APPROVAL_KEY: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         run: >-
           factory eval --cases eval/cases --executor fake
           --case nano-todo --case standard-mini

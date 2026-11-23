@@ -258,7 +258,7 @@ def reject_task(
 ) -> dict[str, Any]:
     validate_task_id(task_id)
     task = get_task(state, task_id)
-    limit = max_attempts or int(load_budget()["default_max_attempts"])
+    limit = int(load_budget()["default_max_attempts"]) if max_attempts is None else int(max_attempts)
     task["attempts"] += 1
     task["status"] = "escalated" if task["attempts"] >= limit else "pending"
     task["lease"] = None

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..config import load_pipeline, resolve_model
+from ..config import load_pipeline
 from ..errors import RunError
 from ..journal import record_event, run_lock
 from ..paths import run_dir as safe_run_dir, runs_root, validate_run_id

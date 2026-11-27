@@ -1,6 +1,6 @@
 # Handoff — план работ и развития Autonomous Software Factory
 
-**Версия репозитория:** 1.0.18  
+**Версия репозитория:** 1.0.19 (увеличена с 1.0.18 после рефакторинга engine)  
 **Статус:** актуальный план разработки  
 **Авторы:** пользователь + Hermes Agent (совместно, без подрядчиков)  
 **Режим:** не торопимся, но системно и постоянно
@@ -43,14 +43,15 @@
 
 | Компонент | Состояние | Замечание |
 |-----------|-----------|-----------|
-| `factory/engine/__init__.py` | 1243 строки монолит | Нужно разбить на модули |
-| `factory/cli.py` | 1202 строки монолит | Нужно разбить на `cli/commands/` |
-| `factory/ui/static/index.html` | 2636 строк inline JS + CSS | CSP содержит `unsafe-inline` |
-| `factory/engine/gates.py` | Есть | Требует сверки со стейт-машиной мульти-аппрувера |
-| `factory/verify.py` vs `factory/engine/verification.py` | Дублирование | Неизвестен source of truth |
-| Тесты | 554/556 зелёны | 2 pre-existing провала (baseline mismatch, root-helper) |
-| JTI-токены для гейтов | Внедрены | `FACTORY_APPROVAL_KEY`required, spent JTI store |
-| Credential proxy | Есть | E2E интеграционные тесты созданы |
+| `factory/engine/__init__.py` | Был 1243 строк монолит, теперь меньше | `_archive_existing` и `init_run` перенесены в `lifecycle.py` (v1.0.19) | Дальше: `work_order.py`, `next.py`, `submit.py`, `tasks.py`, `status.py` |
+| `factory/engine/lifecycle.py` | Новый файл | `_archive_existing`, `init_run` | Есть |
+| `factory/cli.py` | 1202 строки монолит | Нужно разбить на `cli/commands/` | Не начато |
+| `factory/ui/static/index.html` | 2636 строк inline JS + CSS | CSP содержит `unsafe-inline` | Не начато |
+| `factory/engine/gates.py` | Есть | Требует сверки со стейт-машиной мульти-аппрувера | Не начато |
+| `factory/verify.py` vs `factory/engine/verification.py` | Дублирование | Неизвестен source of truth | Не начато |
+| Тесты | 554/556 зелёны | 2 pre-existing провала (baseline mismatch, root-helper) | Без изменений |
+| JTI-токены для гейтов | Внедрены | `FACTORY_APPROVAL_KEY`required, spent JTI store | Есть |
+| Credential proxy | Есть | E2E интеграционные тесты созданы | Есть |
 
 ---
 
@@ -62,7 +63,7 @@
 
 | # | Задача | Источник | Критерии готовности |
 |---|--------|----------|---------------------|
-| 1.1 | Разбить `factory/engine/__init__.py` на `lifecycle.py`, `work_order.py`, `next.py`, `submit.py`, `tasks.py`, `status.py` | Аудит раздел 1, `03_engine_split_patch_plan.md` | `__init__.py` < 80 строк, все тесты зелёны, публичный API unchanged |
+| 1.1 | Разбить `factory/engine/__init__.py` на `lifecycle.py`, `work_order.py`, `next.py`, `submit.py`, `tasks.py`, `status.py` | Аудит раздел 1, `03_engine_split_patch_plan.md` | `lifecycle.py` создан (v1.0.19), `_archive_existing` + `init_run` перенесены, `__init__.py` ре-экспортирует. Остальные модули — след. шаг. |
 | 1.2 | Разбить `factory/cli.py` на `factory/cli/commands/` | Аудит раздел 2, CODE_REVIEW P1 | Каждый subcommand в своём файле, snapshot-тест `--help` проходит |
 | 1.3 | Doctor INV-01..08 + проверка консистентности docs ↔ code | Аудит раздел 3, CODE_REVIEW P1, стратегия фаза 1 | `--strict` → ошибки, тест с удалением роли проходит |
 | 1.4 | `factory quickstart` — интерактивный + `--mode --run-id --yes` | DEVELOPMENT_BACKLOG P0-04, стратегия направление A | Валидация run_id с повтором, тест non-interactive |

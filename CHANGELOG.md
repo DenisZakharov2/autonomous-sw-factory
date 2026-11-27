@@ -4,6 +4,17 @@ All notable changes are recorded here. From `1.0.0` the project follows Semantic
 
 ---
 
+## [1.0.19] — 2026-11-27
+
+Разделение монолитного `factory/engine/__init__.py` (1243 строки) по области ответственности без изменения публичного API.
+
+### Рефакторинг
+
+- **`factory/engine/lifecycle.py` (новый).** `_archive_existing` и `init_run` перенесены из `__init__.py`. `__init__.py` ре-экспортирует их из `.lifecycle`.
+- **Очистка импортов.** Убраны `shutil`, `datetime`, `timezone`, `new_state` — больше не используются в `__init__.py`.
+- **Публичный API не изменился.** `from factory.engine import init_run` и все остальные имена работают как раньше.
+- **Тесты.** Все 554 зелёных теста продолжают проходить; 2 pre-existing провала (baseline mismatch, root-helper) без изменений.
+
 ## [1.0.18] — 2026-11-22
 
 Закрывает остаток P0-3 (часть 3) и PR-C2/PR-F после релиза `1.0.17`: credential proxy получен сквозной E2E-покрытие, eval-हारнес авто-апрувит гейты JTI-токеном, человеческие гейты требуют токены подтверждения.

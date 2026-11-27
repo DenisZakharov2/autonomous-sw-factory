@@ -4,6 +4,17 @@ All notable changes are recorded here. From `1.0.0` the project follows Semantic
 
 ---
 
+## [1.0.20] — 2026-11-27
+
+Продолжение разделения `factory/engine/__init__.py` (теперь 720 строк, было 1244).
+
+### Рефакторинг
+
+- **`factory/engine/work_order.py` (новый).** `_check_stage_artifact_owners`, `_task_entries`, `_pending_artifacts`, `_next_role`, `_task_work_order`, `_stage_work_order` перенесены из `__init__.py`. `_declared_artifact_base`, `_root_paths`, `_collect_paths` ре-экспортируются из `.core`.
+- **`factory/engine/__init__.py`.** Удалены локальные определения work_order-функций, оставлены только ре-экспорты.
+- **Публичный API не изменился.** Все импорты из `factory.engine` работают как раньше.
+- **Тесты.** Все зелёные тесты продолжают проходить.
+
 ## [1.0.19] — 2026-11-27
 
 Разделение монолитного `factory/engine/__init__.py` (1243 строки) по области ответственности без изменения публичного API.

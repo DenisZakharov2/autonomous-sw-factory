@@ -4,6 +4,17 @@ All notable changes are recorded here. From `1.0.0` the project follows Semantic
 
 ---
 
+## [1.0.21] — 2026-11-27
+
+Продолжение разделения `factory/engine/__init__.py` (engine split шаг 3).
+
+### Рефакторинг
+
+- **`factory/engine/next.py` (новый).** `_blocked_reason`, `_blocked_work_order`, `_next_action`, `next_action` перенесены из `__init__.py`. `__init__.py` ре-экспортирует их из `.next`.
+- **`factory/engine/__init__.py`.** Удалены локальные определения next-функций, оставлены только ре-экспорты. Размер снижен с 720 до ~590 строк.
+- **Публичный API не изменился.** Все импорты из `factory.engine` работают как раньше.
+- **Тесты.** Все 554 зелёных теста продолжают проходить; 2 pre-existing провала (baseline mismatch, root-helper) без изменений.
+
 ## [1.0.20] — 2026-11-27
 
 Продолжение разделения `factory/engine/__init__.py` (теперь 720 строк, было 1244).

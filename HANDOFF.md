@@ -1,6 +1,6 @@
 # Handoff — план работ и развития Autonomous Software Factory
 
-**Версия репозитория:** 1.0.20 (GitHub Release v1.0.20 опубликован)  
+**Версия репозитория:** 1.0.21 (GitHub Release v1.0.21 опубликован)  
 **Статус:** актуальный план разработки  
 **Авторы:** пользователь + Hermes Agent (совместно, без подрядчиков)  
 **Режим:** не торопимся, но системно и постоянно
@@ -43,9 +43,10 @@
 
 | Компонент | Состояние | Замечание |
 |-----------|-----------|-----------|
-| `factory/engine/__init__.py` | Был 1244 строк монолит, теперь 720 | `_archive_existing`, `init_run` → `lifecycle.py` (v1.0.19); work_order-функции → `work_order.py` (v1.0.20) | Дальше: `next.py`, `submit.py`, `tasks.py`, `status.py` |
+| `factory/engine/__init__.py` | Был 1244 строки монолит, теперь ~590 | `_archive_existing`, `init_run` → `lifecycle.py` (v1.0.19); work_order-функции → `work_order.py` (v1.0.20); next-функции → `next.py` (v1.0.21) | Дальше: `submit.py`, `tasks.py`, `status.py` |
 | `factory/engine/lifecycle.py` | Новый файл (v1.0.19) | `_archive_existing`, `init_run` | Есть |
 | `factory/engine/work_order.py` | Новый файл (v1.0.20) | `_check_stage_artifact_owners`, `_task_entries`, `_pending_artifacts`, `_next_role`, `_task_work_order`, `_stage_work_order` | Есть |
+| `factory/engine/next.py` | Новый файл (v1.0.21) | `_blocked_reason`, `_blocked_work_order`, `_next_action`, `next_action` | Есть |
 | `factory/cli.py` | 1202 строки монолит | Нужно разбить на `cli/commands/` | Не начато |
 | `factory/ui/static/index.html` | 2636 строк inline JS + CSS | CSP содержит `unsafe-inline` | Не начато |
 | `factory/engine/gates.py` | Есть | Требует сверки со стейт-машиной мульти-аппрувера | Не начато |
@@ -64,7 +65,7 @@
 
 | # | Задача | Источник | Критерии готовности |
 |---|--------|----------|---------------------|
-| 1.1 | Разбить `factory/engine/__init__.py` на `lifecycle.py`, `work_order.py`, `next.py`, `submit.py`, `tasks.py`, `status.py` | Аудит раздел 1, `03_engine_split_patch_plan.md` | `lifecycle.py` (v1.0.19) + `work_order.py` (v1.0.20) созданы, `__init__.py` 720 строк. Остальные модули — след. шаг. |
+| 1.1 | Разбить `factory/engine/__init__.py` на `lifecycle.py`, `work_order.py`, `next.py`, `submit.py`, `tasks.py`, `status.py` | Аудит раздел 1, `03_engine_split_patch_plan.md` | `lifecycle.py` (v1.0.19) + `work_order.py` (v1.0.20) + `next.py` (v1.0.21) созданы, `__init__.py` ~590 строк. Остальные модули — след. шаг. |
 | 1.2 | Разбить `factory/cli.py` на `factory/cli/commands/` | Аудит раздел 2, CODE_REVIEW P1 | Каждый subcommand в своём файле, snapshot-тест `--help` проходит |
 | 1.3 | Doctor INV-01..08 + проверка консистентности docs ↔ code | Аудит раздел 3, CODE_REVIEW P1, стратегия фаза 1 | `--strict` → ошибки, тест с удалением роли проходит |
 | 1.4 | `factory quickstart` — интерактивный + `--mode --run-id --yes` | DEVELOPMENT_BACKLOG P0-04, стратегия направление A | Валидация run_id с повтором, тест non-interactive |

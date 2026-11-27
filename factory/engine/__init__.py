@@ -80,6 +80,12 @@ from .work_order import (  # noqa: F401
     _task_entries,
     _task_work_order,
 )
+from .next import (  # noqa: F401
+    _blocked_reason,
+    _blocked_work_order,
+    _next_action,
+    next_action,
+)
 
 # Gate functions (moved to gates.py, re-exported here for the public surface)
 from .gates import (

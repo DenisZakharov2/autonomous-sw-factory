@@ -37,3 +37,6 @@ blackbox.lock
 .idea/
 .vscode/
 *.swp
+
+# Session handoff prompts — keep on server only, never in the repository
+prompt_*.md

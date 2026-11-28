@@ -9,8 +9,7 @@ from ..config import load_artifacts, load_pipeline, validate_against_schema
 from ..errors import RunError
 from ..paths import run_dir as safe_run_dir
 from ..pipeline import effective_roles
-from ..state import current_stage, find_stage, load_state, stage_gate
-from .common import VERIFIER
+from ..state import current_stage, load_state, stage_gate
 from .work_order import _stage_work_order, _task_work_order
 
 

@@ -139,6 +139,7 @@ def _next_action(run_id: str, *, root: str | Path | None = None) -> dict[str, An
 
 def next_action(run_id: str, *, root: str | Path | None = None) -> dict[str, Any]:
     """Return the next work order, validated against its own schema."""
-    order = _next_action(run_id, root=root)
+    from factory.engine import _next_action as _next_action_fn
+    order = _next_action_fn(run_id, root=root)
     validate_against_schema(order, "work-order.schema.json", f"work order ({order['action']})")
     return order
